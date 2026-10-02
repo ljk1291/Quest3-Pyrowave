@@ -233,7 +233,10 @@ class Host:
         except (ValueError, TypeError, Refusal) as exc: raise Refusal('process identity unavailable: '+str(exc))
     def stop_owned_runtime(self, record):
         """Gracefully close, then force only the already verified owned PID."""
-        actual=self.process_identity(record['pid'])
+        try: actual=self.process_identity(record['pid'])
+        except Refusal:
+            if not pid_alive(record['pid']): return True
+            raise
         if not ownership_matches(record,actual,record['nonce']): raise Refusal('runtime ownership changed; no stop issued')
         if os.name != 'nt': raise Refusal('Windows process stop is required')
         script=("$p=Get-Process -Id %d -ErrorAction Stop; $null=$p.CloseMainWindow(); "
@@ -312,6 +315,10 @@ def restore(state_path, host=None):
     """Idempotent deadline-safe fallback with an offline file-copy fallback."""
     state_path=Path(state_path); state=json_read(state_path)
     if state.get('restoration',{}).get('status')=='restored': return state['restoration']
+    lock=state_path.parent/'restoration.lock'
+    try: lock.open('x',encoding='utf-8').write(json.dumps({'pid':os.getpid(),'at_utc':utc_now().isoformat()}))
+    except FileExistsError: raise Refusal('restoration already owns this window')
+    state['restoration']={'status':'restoring','at_utc':utc_now().isoformat()}; atomic_write(state_path,state)
     host=host or Host(state.get('adb','adb')); serial=state['serial']; steps=[]
     client_stopped=False; awake_restored=True
     try:
@@ -409,7 +416,7 @@ def restore(state_path, host=None):
     vd_hashes_match=all(x.get('error') is None and x.get('current_matches') is True for x in vd_checks)
     ok=files_ok and runtime_restored and properties_ok and client_stopped and awake_restored and owned_ok and alvr_restored and steamvr_restored and driver_restored
     state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'pc_configuration_verify_only;_owner_selector_or_dashboard_must_restore_drift','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'owned_runtime':owned_results,'owned_runtime_stopped':owned_ok,'alvr_restored':alvr_restored,'steamvr_restored':steamvr_restored,'driver_restored':driver_restored,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
-    atomic_write(state_path,state); return state['restoration']
+    atomic_write(state_path,state); lock.unlink(missing_ok=True); return state['restoration']
 
 def health_decision(sample, state, now):
     """Pure monitor transition. Third pause ends window; resume needs 15 min and <=40C."""
@@ -428,7 +435,7 @@ def health_decision(sample, state, now):
     return 'paused' if state.get('paused') else 'run'
 
 def worker(state_path, monitor=False):
-    state_path=Path(state_path); host=Host(); state=json_read(state_path); host.keep_awake(True)
+    state_path=Path(state_path); state=json_read(state_path); host=Host(state.get('adb','adb')); host.keep_awake(True)
     role='monitor' if monitor else 'restorer'
     ready = state_path.parent / (role+'.ready')
     try:
