@@ -2,7 +2,7 @@
   "fork": "ljk1291/Quest3-Pyrowave",
   "upstream": "JMS1717/Quest3-Pyrowave",
   "upstream_reference_commit": "f6eae38380ecf0cb706aaa9aabc0fd66ec29cd6a",
-  "protocol_version": "20.13.0-ljk1291.1",
+  "protocol_version": "20.13.0-ljk1291.2",
   "client_package_id": "io.github.ljk1291.quest3pyrowave",
   "stable_signing_certificate_sha256": "4a3fe0a8d47ee67b01710df6ffdc870e91ebc5b8e7feec7c87534944ca2a44aa"
 }

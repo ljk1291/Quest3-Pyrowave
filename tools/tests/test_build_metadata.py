@@ -49,8 +49,10 @@ def write_metadata(root, platform):
 def test_metadata_records_inputs_and_artifacts(tmp_path):
     path = write_metadata(tmp_path, "android")
     metadata = json.loads(path.read_text())
+    fork = json.loads((REPO / "fork.json").read_text())
     assert metadata["client_package_id"] == "io.github.ljk1291.quest3pyrowave"
-    assert metadata["application_version"].startswith("20.13.0-ljk1291.1+")
+    assert metadata["protocol_version"] == fork["protocol_version"]
+    assert metadata["application_version"].startswith(fork["protocol_version"] + "+")
     assert metadata["native_library_sha256"]
     assert metadata["artifact_sha256"]["artifact.bin"]
 

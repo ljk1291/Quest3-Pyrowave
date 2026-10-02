@@ -879,11 +879,11 @@
     },
     {
       "priority": 2,
-      "finding": "Direct eye copy improved CDF97 event rate from 22.49 to 29.99/s and median decode-to-fence from 44.03 to 32.99 ms. Its counters show completed direct copies with no staging copies; repeat/endurance and image checks are still needed."
+      "finding": "The CDF97 direct-copy profile observed 29.99 events/s and 32.99 ms median decode-to-fence, versus staging 22.49/s and 44.03 ms. Completed direct-copy counters verify activation. A concurrent debug refresh-property difference prevents attributing the whole gain solely to direct copying; controlled repetition is required."
     },
     {
       "priority": 3,
-      "finding": "Changing only CDF97 to Haar on the direct-copy profile improved to 50.42 events/s, with 19.59 ms median completion; GPU decode 10.51 ms and conversion 5.12 ms remain material. These overlapping stage measurements must not be added as independent elapsed time."
+      "finding": "Haar on the direct-copy profile observed 50.42 events/s and 19.59 ms median completion; both direct-copy cells had the same refresh override. GPU decode 10.51 ms and conversion 5.12 ms remain material. These overlapping stage measurements must not be added as independent elapsed time."
     },
     {
       "priority": 4,
@@ -907,5 +907,9 @@
     }
   },
   "optical_display_fps": null,
-  "optical_motion_to_photon_ms": null
+  "optical_motion_to_photon_ms": null,
+  "comparison_limitations": [
+    "The CDF97 direct-copy and Haar direct-copy captures report debug.oculus.refreshRate=90, while staging CDF97 and HEVC report it unset. The origin of this property change was not established. All four fresh runtime records nevertheless confirm 90 Hz. Do not attribute the staging/direct difference solely to eye-copy mode; repeat with the debug refresh property held equal before promotion.",
+    "The legacy experiment flag display_scaling also covers a non-empty forced-refresh property; forceDisplayScaling itself remained 0."
+  ]
 }

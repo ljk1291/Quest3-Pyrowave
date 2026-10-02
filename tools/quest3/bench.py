@@ -171,7 +171,14 @@ def selected_output_window(samples, max_gap_s=15, capture_end_elapsed=None):
 def selected_output_stability(samples, requested_hz, window_seconds=ENDURANCE_WINDOW_SECONDS, required_windows=6):
     """Require a native selected-output counter rate in every five-minute window."""
     windows=[]
-    if not samples: return {'status':'pending_or_failed','windows':windows}
+    if (not isinstance(requested_hz,(int,float)) or isinstance(requested_hz,bool)
+            or not math.isfinite(requested_hz) or requested_hz <= 0):
+        return {'status':'pending_or_failed','reason':'selected_output_requested_rate_invalid','windows':windows}
+    # Validate all telemetry before using a timestamp as a window boundary. This
+    # prevents missing/NaN capture elapsed values from raising during arithmetic.
+    whole=selected_output_window(samples)
+    if not whole.get('valid'):
+        return {'status':'pending_or_failed','reason':whole.get('reason','selected_output_unverified'),'windows':windows}
     start=samples[0][0]
     for index in range(required_windows):
         rows=[row for row in samples if start+index*window_seconds <= row[0] <= start+(index+1)*window_seconds]

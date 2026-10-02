@@ -21,6 +21,14 @@ class BenchTests(unittest.TestCase):
         rows[120:]=[(1+i*10, 81100+(i-120)*900, SELECTED_OUTPUT_SOURCE) for i in range(120,181)]
         self.assertEqual(selected_output_stability(rows,90)['status'],'pending_or_failed')
 
+    def test_selected_output_endurance_rejects_missing_or_nan_time_without_crashing(self):
+        for bad in (None,float('nan')):
+            result=selected_output_stability([(bad,0,SELECTED_OUTPUT_SOURCE),(1,90,SELECTED_OUTPUT_SOURCE)],90)
+            self.assertEqual(result['status'],'pending_or_failed')
+            self.assertEqual(result['reason'],'selected_output_counter_invalid')
+        self.assertEqual(selected_output_stability([(0,0,SELECTED_OUTPUT_SOURCE),(1,90,SELECTED_OUTPUT_SOURCE)],float('nan'))['reason'],
+                         'selected_output_requested_rate_invalid')
+
     def test_capture_clock_uses_perf_counter_not_coarse_monotonic(self):
         # Capture timing must go through the QPC-backed abstraction. On Windows,
         # monotonic may otherwise be a 15.625 ms GetTickCount64 clock.
