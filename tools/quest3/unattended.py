@@ -267,10 +267,15 @@ def snapshot(host, serial, directory):
     directory=Path(directory); before=directory/'before'; before.mkdir(parents=True,exist_ok=False)
     from . import preflight
     from .control import session as alvr_session
-    inv,sources=preflight.inventory(); records=preflight.snapshot_files(sources,before/'configurations')
-    if any(r.get('error') or not r.get('exists') for r in records): raise Refusal('incomplete PC/VD settings snapshot')
-    try: session_snapshot=alvr_session()
+    inv,sources=preflight.inventory()
+    try:
+        session_snapshot=alvr_session()
+        alvr_path=session_snapshot.get('drivers_backup',{}).get('alvr_path')
+        if not alvr_path: raise Refusal('ALVR session path unavailable')
+        sources['alvr_session']=Path(alvr_path)/'session.json'
     except Exception as exc: raise Refusal('matched ALVR session snapshot unavailable: '+str(exc)) from exc
+    records=preflight.snapshot_files(sources,before/'configurations')
+    if any(r.get('error') or not r.get('exists') for r in records): raise Refusal('incomplete PC/VD/ALVR settings snapshot')
     # Android getprop has no glob form. Preserve the exact old values of every
     # property this supervisor can restore; an absent value is explicitly saved.
     all_props=host.adb_run(serial,'shell','getprop')
@@ -326,6 +331,14 @@ def restore(state_path, host=None):
     if not steamvr_restored and owned_ok:
         try: steamvr_restored=restore_recorded_steamvr(state); steps.append('steamvr_exact_keys_restored')
         except Exception as exc: steps.append('steamvr_restore_failed:'+str(exc))
+    driver_restored=not any(row.get('kind')=='fork_driver' for row in state.get('changes',[]))
+    if not driver_restored and owned_ok:
+        try:
+            steam=next((row for row in state.get('owned_runtime',[]) if row.get('role')=='steamvr'),None)
+            if not steam: raise Refusal('claimed SteamVR runtime missing')
+            vrpathreg=Path(steam['path']).resolve().parent/'vrpathreg.exe'
+            driver_restored=restore_recorded_driver(state,vrpathreg); steps.append('fork_driver_membership_restored')
+        except Exception as exc: steps.append('fork_driver_restore_failed:'+str(exc))
     awake_state = state_path.parent / 'awake.json'
     if awake_state.is_file():
         try:
@@ -373,6 +386,11 @@ def restore(state_path, host=None):
             steps.append('steamvr_drivers_verify_only')
         elif record.get('label') == 'steamvr_settings':
             steps.append('steamvr_settings_verify_only')
+        elif record.get('label') == 'alvr_session':
+            if not owned_ok: steps.append('alvr_cold_restore_skipped_unowned_runtime')
+            else:
+                try: shutil.copyfile(record['snapshot'],record['source']); steps.append('alvr_session_and_pairing_restored')
+                except OSError as exc: steps.append('alvr_session_restore_failed:'+str(exc)); owned_ok=False
     verification=[]
     try:
         from .preflight import verify_snapshot
@@ -389,8 +407,8 @@ def restore(state_path, host=None):
             property_readback[key]={'expected':wanted,'error':str(exc),'matches':False}; properties_ok=False
     vd_checks=[row for row in verification if str(row.get('label','')).startswith('virtual_desktop')]
     vd_hashes_match=all(x.get('error') is None and x.get('current_matches') is True for x in vd_checks)
-    ok=files_ok and runtime_restored and properties_ok and client_stopped and awake_restored and owned_ok and alvr_restored and steamvr_restored
-    state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'pc_configuration_verify_only;_owner_selector_or_dashboard_must_restore_drift','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'owned_runtime':owned_results,'owned_runtime_stopped':owned_ok,'alvr_restored':alvr_restored,'steamvr_restored':steamvr_restored,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
+    ok=files_ok and runtime_restored and properties_ok and client_stopped and awake_restored and owned_ok and alvr_restored and steamvr_restored and driver_restored
+    state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'pc_configuration_verify_only;_owner_selector_or_dashboard_must_restore_drift','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'owned_runtime':owned_results,'owned_runtime_stopped':owned_ok,'alvr_restored':alvr_restored,'steamvr_restored':steamvr_restored,'driver_restored':driver_restored,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
     atomic_write(state_path,state); return state['restoration']
 
 def health_decision(sample, state, now):
