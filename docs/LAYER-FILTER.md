@@ -13,14 +13,16 @@ shipping behaviour unchanged when unset or `0`.
 The client reads the property before it creates its OpenXR instance. It enables
 only the advertised extensions required by the requested mode. Missing support,
 an invalid value, and every non-Quest platform produce no settings chain. The
-client logs exactly one `[Q3PW_LAYER_FILTER]` startup record with the requested
-mode and active flags. It chains the settings only to the **stream** projection
+client logs one `[Q3PW_LAYER_FILTER]` startup record for an active, unsupported
+or invalid request, with the requested mode and active flags. Off adds no new
+startup log. It chains the settings only to the **stream** projection
 layer; lobby, passthrough, and the local performance quad remain untouched.
 
 The settings node is heap-owned by the projection wrapper and is kept alive for
 the synchronous `xrEndFrame` call. It is then dropped normally. This is
 important: a pointer to a stack-local raw OpenXR structure would be unsafe if
-the wrapper moved before submission.
+the wrapper moved before submission. The returned wrapper also borrows the
+builder, keeping its projection-view array alive through submission.
 
 ## Finite comparison protocol
 
