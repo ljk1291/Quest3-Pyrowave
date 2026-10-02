@@ -328,6 +328,10 @@ def restore(state_path, host=None):
     for record in state.get('owned_runtime',[]):
         try: host.stop_owned_runtime(record); owned_results.append({'role':record.get('role'),'stopped':True})
         except Exception as exc: owned_ok=False; owned_results.append({'role':record.get('role'),'stopped':False,'error':str(exc)})
+    jobs_ok=True; job_results=[]
+    for record in state.get('owned_pc_jobs',[]):
+        try: host.stop_owned_runtime(record); job_results.append({'pid':record['pid'],'stopped':True})
+        except Exception as exc: jobs_ok=False; job_results.append({'pid':record['pid'],'stopped':False,'error':str(exc)})
     alvr_restored=not any(row.get('kind')=='alvr' for row in state.get('changes',[]))
     if not alvr_restored and owned_ok:
         try:
@@ -414,8 +418,8 @@ def restore(state_path, host=None):
             property_readback[key]={'expected':wanted,'error':str(exc),'matches':False}; properties_ok=False
     vd_checks=[row for row in verification if str(row.get('label','')).startswith('virtual_desktop')]
     vd_hashes_match=all(x.get('error') is None and x.get('current_matches') is True for x in vd_checks)
-    ok=files_ok and runtime_restored and properties_ok and client_stopped and awake_restored and owned_ok and alvr_restored and steamvr_restored and driver_restored
-    state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'pc_configuration_verify_only;_owner_selector_or_dashboard_must_restore_drift','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'owned_runtime':owned_results,'owned_runtime_stopped':owned_ok,'alvr_restored':alvr_restored,'steamvr_restored':steamvr_restored,'driver_restored':driver_restored,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
+    ok=files_ok and runtime_restored and properties_ok and client_stopped and awake_restored and owned_ok and alvr_restored and steamvr_restored and driver_restored and jobs_ok
+    state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'pc_configuration_verify_only;_owner_selector_or_dashboard_must_restore_drift','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'owned_runtime':owned_results,'owned_runtime_stopped':owned_ok,'alvr_restored':alvr_restored,'steamvr_restored':steamvr_restored,'driver_restored':driver_restored,'owned_pc_jobs':job_results,'owned_pc_jobs_stopped':jobs_ok,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
     atomic_write(state_path,state); lock.unlink(missing_ok=True); return state['restoration']
 
 def health_decision(sample, state, now):
@@ -622,6 +626,31 @@ def restore_recorded_driver(state, vrpathreg):
     wanted=rows[0]['before_value']
     norm=lambda values:sorted(Path(x).resolve().as_posix().casefold() for x in values)
     return norm(current)==norm(wanted)
+
+def register_owned_pc_job(state_path, pid, path, started_epoch_s, arm_path=ARM, host=None):
+    """Register only this window's offline encoder/decoder/scorer child."""
+    state_path=Path(state_path); status=status_payload(state_path.parent,arm_path,require_allow='frame_bank_pc')
+    if not status['lease']['active']: raise Refusal('PC job lease invalid: '+','.join(status['lease']['blockers']))
+    state=json_read(state_path); host=host or Host(state.get('adb','adb'))
+    record={'role':'pc_job','pid':pid,'path':path,'started_epoch_s':started_epoch_s,'nonce':state['guard_nonce']}
+    actual=host.process_identity(pid)
+    if not ownership_matches(record,actual,state['guard_nonce']): raise Refusal('PC job identity cannot be proved')
+    jobs=state.setdefault('owned_pc_jobs',[])
+    if any(row['pid']==pid for row in jobs): raise Refusal('PC job already registered')
+    jobs.append(record); atomic_write(state_path,state); return record
+
+def unregister_owned_pc_job(state_path, pid, host=None):
+    state_path=Path(state_path); state=json_read(state_path); jobs=state.get('owned_pc_jobs',[])
+    record=next((row for row in jobs if row['pid']==pid),None)
+    if not record: raise Refusal('PC job not registered')
+    host=host or Host(state.get('adb','adb'))
+    try:
+        if ownership_matches(record,host.process_identity(pid),state['guard_nonce']): jobs.remove(record)
+        else: raise Refusal('PC job identity changed')
+    except Refusal:
+        if not pid_alive(pid): jobs.remove(record)
+        else: raise
+    atomic_write(state_path,state); return record
 
 def pid_alive(pid):
     if not isinstance(pid, int) or pid <= 0: return False
