@@ -261,3 +261,11 @@ def test_steamvr_exact_key_rollback_preserves_absent_key(tmp_path):
                       {'kind':'steamvr','key':'steamvr.manualOverride','before_present':False,'before_value':None,'expected_after':True}]}
     assert u.restore_recorded_steamvr(state)
     after=u.json_read(settings)['steamvr']; assert after['supersampleScale']==1.0 and 'manualOverride' not in after and after['newKey'] is True
+
+
+def test_monitor_excludes_only_exact_owned_job():
+    class H:
+        def process_identity(self,pid): return {'pid':pid,'path':'C:/job.exe','started_epoch_s':5}
+    state={'guard_nonce':'n','owned_pc_jobs':[{'pid':7,'path':'C:/job.exe','started_epoch_s':5,'nonce':'n'}]}
+    sample={'conflicts':['7, job.exe, 100','8, owner.exe, 100']}
+    assert u.exclude_owned_compute_jobs(state,H(),sample)['conflicts']==['8, owner.exe, 100']
