@@ -331,16 +331,15 @@ def restore(state_path, host=None):
     # Virtual Desktop files and OpenVR driver registration are never copied back.
     # They are verification-only to preserve the owner's registration/settings.
     for record in state['snapshot']['configuration_snapshots']:
-        if record.get('label') == 'steamvr_settings' and record.get('exists') and record.get('snapshot'):
-            if host.vr_connected():
-                steps.append('steamvr_settings_not_restored_active_vr')
-            else:
-                try: shutil.copyfile(record['snapshot'],record['source']); steps.append('steamvr_settings_restored')
-                except OSError as exc: steps.append('steamvr_settings_restore_failed:'+str(exc))
-        elif record.get('label','').startswith('virtual_desktop'):
+        # The supervisor cannot safely stop the owning dashboard/runtime. All PC
+        # configuration is verify-only: a mismatch makes rollback fail visibly
+        # instead of overwriting a live owner application.
+        if record.get('label','').startswith('virtual_desktop'):
             steps.append('vd_verify_only:'+record['label'])
         elif record.get('label') == 'openvr_paths':
             steps.append('steamvr_drivers_verify_only')
+        elif record.get('label') == 'steamvr_settings':
+            steps.append('steamvr_settings_verify_only')
     verification=[]
     try:
         from .preflight import verify_snapshot
@@ -358,7 +357,7 @@ def restore(state_path, host=None):
     vd_checks=[row for row in verification if str(row.get('label','')).startswith('virtual_desktop')]
     vd_hashes_match=all(x.get('error') is None and x.get('current_matches') is True for x in vd_checks)
     ok=files_ok and runtime_restored and properties_ok and client_stopped and awake_restored
-    state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'only_steamvr_settings_copy_when_inactive;_vd_and_driver_files_verify_only','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
+    state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'pc_configuration_verify_only;_owner_selector_or_dashboard_must_restore_drift','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
     atomic_write(state_path,state); return state['restoration']
 
 def health_decision(sample, state, now):
