@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "sdk": "10.0.26100.0",
+  "fxc_sha256": "31fa10504b1551337de4d06ec2194143885a76a8b5a81177999e2faa34729183",
+  "flags": [
+    "/nologo",
+    "/O3",
+    "/T",
+    "ps_5_0"
+  ],
+  "files": {
+    "alvr/server_openvr/cpp/alvr_server/shader/FrameRender.fx": "769831180f07b72d98fa7995b5729f1da685ecb492ed9afd20b0c3e479e15f67",
+    "alvr/server_openvr/cpp/alvr_server/shader/FrameRenderPSArea.hlsl": "99a2a43b633c4bfa7795d99fe405ae19cd81a20e81968817829035eea9081676",
+    "alvr/server_openvr/cpp/alvr_server/shader/RgbToYuvPlanar.hlsl": "5c9f7af794b68ba47b153418aa50363a4e94a1828def80f96c49bedbdf1efb3c",
+    "alvr/server_openvr/cpp/alvr_server/shader/RgbToYuvPlanarDither.hlsl": "9e9cfc6252b162c5bb30afea19df127c2f579597b216e7ee9b20653c2bef4913",
+    "alvr/server_openvr/cpp/platform/win32/FrameRenderPS.cso": "a4737d33fc2784dac4678b175c17d3566f39066b1ed242fc92187919cb7c52f3",
+    "alvr/server_openvr/cpp/platform/win32/rgbtoyuvplanar.cso": "93de53dae81f6311ce1d567217a10b03d879c474162741483b909c44e44f3554",
+    "alvr/server_openvr/cpp/platform/win32/FrameRenderPSArea.cso": "df1db9b634eb104a7dea5cccaf5eccc56cc27b80c431f524fae2f3f73d7db6d6",
+    "alvr/server_openvr/cpp/platform/win32/rgbtoyuvplanardither.cso": "3626590a3b756c3b33843d8d43ca8509172af2c96433000bb156ce2b69a4ff0c"
+  },
+  "default_shader_policy": "legacy FrameRenderPS.cso and rgbtoyuvplanar.cso preserved byte-for-byte",
+  "variants": [
+    {
+      "source": "FrameRenderPSArea.hlsl",
+      "entry": "PS",
+      "binary": "FrameRenderPSArea.cso"
+    },
+    {
+      "source": "RgbToYuvPlanarDither.hlsl",
+      "entry": "main",
+      "binary": "rgbtoyuvplanardither.cso"
+    }
+  ]
+}
