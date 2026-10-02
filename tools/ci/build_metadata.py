@@ -24,6 +24,11 @@ def sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def source_lock_sha256(path):
+    """Fingerprint lockfile contents independently of Git's checkout EOL policy."""
+    return hashlib.sha256(Path(path).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
 def git_commit():
     value = os.environ.get("GITHUB_SHA")
     if value:
@@ -66,7 +71,7 @@ def create(args):
         "server_version": application_version(fork),
         "protocol_version": fork["protocol_version"],
         "client_package_id": fork["client_package_id"],
-        "sources_lock_sha256": sha256(lock),
+        "sources_lock_sha256": source_lock_sha256(lock),
         "dependency_revisions": json.loads(lock.read_text(encoding="utf-8")),
         "shader_hashes": shaders(args.pyrowave),
         "native_library_sha256": native_files(args.required_native),

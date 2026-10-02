@@ -1,11 +1,19 @@
 import json
 import hashlib
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 TOOL = REPO / "tools/ci/build_metadata.py"
+
+
+def load_metadata_tool():
+    spec = importlib.util.spec_from_file_location("build_metadata", TOOL)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def make_pyrowave(root):
@@ -45,6 +53,15 @@ def test_metadata_records_inputs_and_artifacts(tmp_path):
     assert metadata["application_version"].startswith("20.13.0-ljk1291.1+")
     assert metadata["native_library_sha256"]
     assert metadata["artifact_sha256"]["artifact.bin"]
+
+
+def test_source_lock_fingerprint_is_independent_of_checkout_line_endings(tmp_path):
+    tool = load_metadata_tool()
+    lf = tmp_path / "sources-lf.lock"
+    crlf = tmp_path / "sources-crlf.lock"
+    lf.write_bytes(b'{\n  "pin": "value"\n}\n')
+    crlf.write_bytes(b'{\r\n  "pin": "value"\r\n}\r\n')
+    assert tool.source_lock_sha256(lf) == tool.source_lock_sha256(crlf)
 
 
 def test_matching_pair_requires_identical_build_inputs(tmp_path):

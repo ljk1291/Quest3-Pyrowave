@@ -44,3 +44,9 @@ def test_toolchain_is_read_from_the_lock_by_posix_builds():
     assert "source_lock.py" in script
     assert "--value rust" in script
     assert "--value android_ndk" in (REPO / "tools/build_pyrowave_android.sh").read_text()
+
+
+def test_stable_windows_build_uses_the_reconstructed_locked_pyrowave_tree():
+    script = (REPO / "tools/windows/build_pyrowave_pc.cmd").read_text()
+    assert 'set "PW=%WS%\\research\\pyrowave"' in script
+    assert "XRWIRED_PYROWAVE" not in script

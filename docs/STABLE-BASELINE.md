@@ -16,6 +16,8 @@ Copy `presets/stable-baseline-observations.template.json` into `results/local/`.
 
 Record the active OpenXR runtime, SteamVR driver/add-on state, application resolution scale and motion smoothing. Disable frame synthesis for ALVR target qualification in the runtime UI and record its readback. Requested and negotiated dimensions must both match the recorded target. Document codec padding and projection/FOV differences; equal pixel counts do not establish equal clarity.
 
+VD's overlay may show only a quality name and scale, such as `Godlike, 100%`. That is not evidence of pixel dimensions. Capture fresh runtime/game render-size evidence and encoder/decoder dimensions from the same reference session; distinguish recommended render size from the game's actual submitted image. Leave unavailable dimensions unknown. This inventory is required for target comparisons, but need not delay the first connection and smaller-resolution diagnostic chart.
+
 ## Prepare the profile
 
 Use a verified matching APK/server pair from [BUILD.md](BUILD.md). Substitute actual per-eye dimensions for RW/RH/EW/EH below; do not guess the Godlike preset.
@@ -33,7 +35,7 @@ Start TCP, 4:2:0, Compute, CDF 9/7, SDR, fixed bitrate, no foveation and synchro
 Before gameplay, run the deterministic source:
 
 ```powershell
-python -m tools.quest3.stereo_scene --quality --seconds 180 --out results/local/chart-session-01
+python -m tools.quest3.stereo_scene --quality --pulse --seconds 180 --out results/local/chart-session-01
 ```
 
 Check left/right assignment, orientation, near-black/near-white range, colour patches, labels and changing frames. Record the result in the operator review. Stop for visible corruption, input faults or repeated GPU errors.
@@ -54,7 +56,7 @@ Warm up consistently, alternate comparisons and return to comparable thermal con
 
 ## Capture and acceptance
 
-Install the capture dependencies described by the tool imports into a local environment: `websocket-client` for ALVR events; the stereo chart additionally uses `openvr`, `glfw` and `PyOpenGL`. Start capture after the profile/game settles. Use 310 seconds for a five-minute observed frame window and 1810 seconds for thirty minutes to allow event-boundary overhead:
+Use Python 3.12 and install `tools/quest3/requirements.txt` into a local environment for the capture and stereo-chart tools. Start capture after the profile/game settles. Use 310 seconds for a five-minute observed frame window and 1810 seconds for thirty minutes to allow event-boundary overhead:
 
 ```powershell
 python -m tools.quest3.bench capture --adb adb --seconds 1810 --hz 90 --build-manifest out/android/BUILD-METADATA.json --out results/local/metro-target-final

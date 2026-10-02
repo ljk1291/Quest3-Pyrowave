@@ -1,0 +1,39 @@
+{
+  "record_type": "sanitized_build_validation",
+  "date": "2026-10-02",
+  "reference_run": {
+    "id": 37009583485,
+    "status": "success",
+    "purpose": "untouched reference Android and Windows artifacts retained"
+  },
+  "stable_run": {
+    "id": 37011907723,
+    "repository_commit": "cbf70c27269d2a282abfe4556c73427c247ab4fe",
+    "android_job": "success",
+    "windows_job": "success",
+    "matching_pair_job": "failed",
+    "application_version": "20.13.0-ljk1291.1+cbf70c27269d",
+    "server_version": "20.13.0-ljk1291.1+cbf70c27269d",
+    "protocol_version": "20.13.0-ljk1291.1",
+    "client_package_id": "io.github.ljk1291.quest3pyrowave",
+    "installed_apk_version": "20.13.0-ljk1291.1+cbf70c27269d",
+    "apk_signing_certificate_sha256": "4a3fe0a8d47ee67b01710df6ffdc870e91ebc5b8e7feec7c87534944ca2a44aa"
+  },
+  "pair_diagnostic": {
+    "status": "failed_gate_diagnostic_only",
+    "only_identity_mismatch": "sources_lock_sha256",
+    "raw_git_lock_lf_sha256": "dc4cce99166cfc910b2fddc8610ce0ebebbbed63b0f469589300ebff0de0f071",
+    "derived_crlf_lock_sha256": "0636f6a353534f183950d3ef51f238982bfcd4e2061823b69a6b2077c0971a10",
+    "android_lock_hash_matches_lf": true,
+    "windows_lock_hash_matches_derived_crlf": true,
+    "non_lock_identity_keys_match": true,
+    "dependency_revisions_match": true,
+    "shader_hashes_match": true,
+    "metadata_preserved_unchanged": true,
+    "canonical_lf_hash_fix_ready": true
+  },
+  "hardware_acceptance": {
+    "status": "unknown",
+    "note": "No streaming, gameplay, 90 Hz, Godlike-resolution, endurance, recovery, or operator-acceptance claim is made by this build validation."
+  }
+}

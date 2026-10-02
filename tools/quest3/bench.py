@@ -291,7 +291,7 @@ def active_settings():
     from .control import session
     s=session();v=s['session_settings']['video'];o=s.get('openvr_config',{})
     mode = v['bitrate']['mode']
-    hdr=v.get('encoder_config',{}).get('hdr',{})
+    encoder_config=v.get('encoder_config',{})
     foveated=v.get('foveated_encoding',{}); client_foveated=v.get('clientside_foveation',{})
     return {'server_version':s.get('server_version'), 'codec':v['preferred_codec']['variant'],
         'bitrate_mode':mode['variant'], 'bitrate_config':mode,
@@ -301,8 +301,8 @@ def active_settings():
         'chroma':'444' if v['pyrowave'].get('chroma_444',False) else '420',
         'transport':v['pyrowave']['transport']['variant'], 'stream_protocol':s['session_settings']['connection']['stream_protocol']['variant'],
         'configured_view_resolution':v['transcoding_view_resolution'],
-        'hdr_enabled':hdr.get('enable_hdr'),
-        'hdr_server_override':hdr.get('server_overrides_enable_hdr'),
+        'hdr_enabled':encoder_config.get('enable_hdr'),
+        'hdr_server_override':encoder_config.get('server_overrides_enable_hdr'),
         'enforce_server_frame_pacing':v.get('enforce_server_frame_pacing'),
         'foveated_encoding_enabled':foveated.get('enabled'),
         'clientside_foveation_enabled':client_foveated.get('enabled'),

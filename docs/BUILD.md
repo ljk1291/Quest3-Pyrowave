@@ -43,7 +43,7 @@ Source fetch refuses an existing source directory. Reconstruct into a new direct
 
 ## Supervised installation
 
-First complete the snapshot in [STABLE-BASELINE.md](STABLE-BASELINE.md). Stop existing VR sessions and extract the Windows ZIP into a dedicated directory. Verify `bin/win64` includes the PyroWave DLL. Register this ALVR driver through its dashboard and explicitly trust the headset. Use only one active ALVR driver.
+First complete the snapshot in [STABLE-BASELINE.md](STABLE-BASELINE.md). Stop existing VR sessions and extract the Windows ZIP into a dedicated directory. Verify `bin/win64` includes the PyroWave DLL. On Windows, the dashboard keeps this installation's `session.json` beside its executable. Keep **SteamVR launcher → No action** and **Open/close SteamVR with dashboard → off** while preparing the profile. Close the setup wizard without resetting settings. Register only this ALVR driver through the dashboard's Installation tab and explicitly trust the headset. Do not select “Unregister other drivers at startup”; retain VD's registration. Use only one active ALVR driver.
 
 ```powershell
 adb install -r out/android/Quest3-Pyrowave-stable.apk
@@ -51,6 +51,8 @@ adb shell am start -n io.github.ljk1291.quest3pyrowave/android.app.NativeActivit
 ```
 
 SteamVR is the PC OpenXR runtime for Metro's ALVR session. Record the prior runtime before selecting it; retain VD and its registration. Select Quest 3 Touch Plus controller emulation. A terminal decoder fault requires closing/reopening the Quest app; a terminal encoder fault requires fully restarting SteamVR. Repeated faults stop the test sequence.
+
+With driver launch action set to **No action**, ending the test does not automatically restore a driver-registration backup. Close SteamVR, unregister only this fork's extracted driver, and compare the remaining registrations to the preflight snapshot. Follow the full return-to-VD check in the runbook before marking rollback verified.
 
 ## Checks and reference build
 

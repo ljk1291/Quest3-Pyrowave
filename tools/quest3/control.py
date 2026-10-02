@@ -5,6 +5,7 @@ import urllib.request
 import subprocess
 import time
 import os
+import shlex
 from pathlib import Path
 from .bench import supported
 
@@ -99,11 +100,18 @@ def experiment_properties(adb, disable=False, disable_experiments=False):
             ('debug.q3pw.runtime_display_time','0'),('debug.xrwired.pyro_precision','1'),
             ('debug.xrwired.early_poll','1'),('debug.xrwired.perf_level','sustained_high'),
         ))
-    if changes:
-        for name,value in changes:
-            run=subprocess.run([adb,'shell','setprop',name,value],capture_output=True,text=True,timeout=20)
-            if run.returncode: raise RuntimeError(run.stderr.strip() or run.stdout.strip())
-    return {'changed':bool(changes), 'before':before, 'after':adb_property_snapshot(adb)}
+    writes=[]
+    for name,value in changes:
+        # adb's argument forwarding drops a literal empty final argument. Send one
+        # explicitly quoted remote shell command so `setprop NAME ''` clears it.
+        remote='setprop %s %s' % (shlex.quote(name), shlex.quote(value))
+        run=subprocess.run([adb,'shell',remote],capture_output=True,text=True,timeout=20)
+        error=None if not run.returncode else (run.stderr.strip() or run.stdout.strip())
+        writes.append({'property':name,'value':value,'error':error})
+        if error: break
+    after=adb_property_snapshot(adb)
+    return {'changed':any(item['error'] is None for item in writes), 'before':before,
+            'after':after, 'writes':writes, 'errors':[item for item in writes if item['error']]}
 
 def usb(enabled):
     if enabled:
@@ -138,8 +146,8 @@ def apply(codec, mbps, hz, path, caps, chroma="420", transport="Tcp", wavelet="C
             'session_settings.video.clientside_foveation.enabled':False}
     # These are real ALVR schema fields and server override makes SDR negotiated,
     # rather than merely expressing a client preference.
-    values.update({'session_settings.video.encoder_config.hdr.enable_hdr':False,
-                   'session_settings.video.encoder_config.hdr.server_overrides_enable_hdr':True})
+    values.update({'session_settings.video.encoder_config.enable_hdr':False,
+                   'session_settings.video.encoder_config.server_overrides_enable_hdr':True})
     if (render_resolution is None) != (encoded_resolution is None):
         raise ValueError('Specify both render and encoded resolutions together')
     if render_resolution is not None:
@@ -217,7 +225,9 @@ def main():
     a=parser.parse_args()
     if a.cmd=='restart':restart(a.steamvr,a.streamer);return
     if a.cmd=='usb':usb(a.enable);print('USB mode enabled; restart SteamVR if transport changed' if a.enable else 'USB mode disabled');return
-    if a.cmd=='experiment-properties': print(json.dumps(experiment_properties(a.adb,a.disable_display_scaling,a.disable_experiments)));return
+    if a.cmd=='experiment-properties':
+        result=experiment_properties(a.adb,a.disable_display_scaling,a.disable_experiments)
+        print(json.dumps(result));return 1 if result['errors'] else 0
     if a.cmd=='apply':print(json.dumps(apply(a.codec,a.mbps,a.hz,a.decode_path,json.loads(Path(a.capabilities).read_text()),a.chroma,a.transport,a.wavelet,
         {'width':a.render_width,'height':a.render_height},{'width':a.encoded_width,'height':a.encoded_height})));return
     s=session();v=s['session_settings']['video'];clients=s.get('client_connections',{})

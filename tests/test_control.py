@@ -24,8 +24,9 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(settings['video']['pyrowave']['transport']['variant'], 'Tcp')
         self.assertEqual(settings['connection']['stream_protocol']['variant'], 'Tcp')
         self.assertFalse(settings['video']['pyrowave']['chroma_444'])
-        self.assertFalse(settings['video']['encoder_config']['hdr']['enable_hdr'])
-        self.assertTrue(settings['video']['encoder_config']['hdr']['server_overrides_enable_hdr'])
+        self.assertFalse(settings['video']['encoder_config']['enable_hdr'])
+        self.assertTrue(settings['video']['encoder_config']['server_overrides_enable_hdr'])
+        self.assertNotIn('hdr', settings['video']['encoder_config'])
         self.assertTrue(result['settings_verified'])
         self.assertFalse(result['sustained_performance_verified'])
 
@@ -88,7 +89,21 @@ class ControlTests(unittest.TestCase):
         with patch('tools.quest3.control.adb_property_snapshot', return_value={}), \
              patch('tools.quest3.control.subprocess.run', return_value=Run()) as run:
             result=experiment_properties('adb', disable=True, disable_experiments=True)
-        values=[call.args[0][-2:] for call in run.call_args_list]
+        commands=[call.args[0][-1] for call in run.call_args_list]
         self.assertTrue(result['changed'])
-        self.assertNotIn(['debug.q3pw.direct_flip_y',''], values)
-        self.assertIn(['debug.q3pw.direct_eye_copy',''], values)
+        self.assertFalse(any('direct_flip_y' in command for command in commands))
+        self.assertIn("setprop debug.q3pw.direct_eye_copy ''", commands)
+
+    def test_reset_failure_retains_before_and_after_readbacks(self):
+        class Fail:
+            returncode=1
+            stdout=''
+            stderr='setprop failed'
+        before={'debug.oculus.forceDisplayScaling':{'value':'1','error':None}}
+        after={'debug.oculus.forceDisplayScaling':{'value':'0','error':None}}
+        with patch('tools.quest3.control.adb_property_snapshot', side_effect=[before,after]), \
+             patch('tools.quest3.control.subprocess.run', return_value=Fail()):
+            result=experiment_properties('adb', disable=True)
+        self.assertEqual(result['before'],before)
+        self.assertEqual(result['after'],after)
+        self.assertEqual(result['errors'][0]['error'],'setprop failed')
