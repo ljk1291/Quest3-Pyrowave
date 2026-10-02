@@ -33,7 +33,7 @@ class FrameBankTests(unittest.TestCase):
 
     def test_tiny_y4m_identity_schema_and_default_matrix(self):
         with self.tmp() as temp:
-            source = tiny_source(Path(temp)); plan = fb.build_plan(source, 24.2, projection_evidence="test-projection", display_eye=(4,4), geometries=((4,4),(2,2)))
+            source = tiny_source(Path(temp)); plan = fb.build_plan(source, 24.2, projection_evidence="test-projection", display_eye=(4,4), geometries=((4,4),(2,2)), fixture=True)
             self.assertEqual(fb.inspect_y4m(source).frames,2); self.assertEqual(len(plan["cells"]),24)
             self.assertEqual([x["source_frame"] for x in plan["source"]["frame_identity"]],[0,1]); self.assertIs(fb.validate_plan(plan),plan)
             self.assertTrue(all(x["encoded_chroma"] == "444" for x in plan["cells"]))
@@ -41,7 +41,7 @@ class FrameBankTests(unittest.TestCase):
     def test_cap_math_and_tampering_fail(self):
         self.assertEqual(fb.cap_bytes(500,90),694444); self.assertAlmostEqual(fb.bpp(694444,3072,3232),694444*8/(2*3072*3232))
         with self.tmp() as t:
-            p=fb.build_plan(tiny_source(Path(t)),24,projection_evidence="test",display_eye=(4,4),geometries=((4,4),));p["cells"][0]["cap_bytes"]+=1
+            p=fb.build_plan(tiny_source(Path(t)),24,projection_evidence="test",display_eye=(4,4),geometries=((4,4),), fixture=True);p["cells"][0]["cap_bytes"]+=1
             with self.assertRaisesRegex(ValueError,"cap math"):fb.validate_plan(p)
 
     def test_resize_never_crosses_seam_and_native_420_is_preserved(self):
@@ -51,7 +51,7 @@ class FrameBankTests(unittest.TestCase):
             p=Path(t)/"420jpeg.y4m"; info=fb.Y4MInfo(8,4,90,1,"420","FULL",48,2);fb.write_y4m(p,info,[fb.to_420(planes)] * 2)
             p.write_bytes(p.read_bytes().replace(b"C420 XCOLOR",b"C420jpeg XCOLOR",1))
             native=fb.inspect_y4m(p);self.assertEqual((native.chroma,native.frame_bytes,native.frames,native.fps_num),("420",48,2,90))
-            plan=fb.build_plan(p,24,projection_evidence="test",display_eye=(4,4),geometries=((4,4),))
+            plan=fb.build_plan(p,24,projection_evidence="test",display_eye=(4,4),geometries=((4,4),), fixture=True)
             self.assertEqual(plan["source"]["chroma"],"420");self.assertEqual(plan["cells"][0]["encoded_chroma"],"420")
             cropped=fb.crop_y4m(fb.to_420(planes),fb.Y4MInfo(8,4,90,1,"420","FULL",48,1),{"name":"odd","eye":"left","x":.1,"y":.1,"w":.5,"h":.5})
             self.assertEqual(cropped[0].shape[0] % 2,0);self.assertEqual(cropped[0].shape[1] % 2,0)
@@ -67,12 +67,12 @@ class FrameBankTests(unittest.TestCase):
     def test_plan_rejects_geometry_fps_and_reordered_identity(self):
         with self.tmp() as t:
             src=tiny_source(Path(t));
-            with self.assertRaisesRegex(ValueError,"presentation input"):fb.build_plan(src,24,projection_evidence="test")
-            p=fb.build_plan(src,24,projection_evidence="test",display_eye=(4,4),geometries=((4,4),));p["source"]["frame_identity"][1]["source_frame"]=7
+            with self.assertRaisesRegex(ValueError,"presentation input"):fb.build_plan(src,24,projection_evidence="test", fixture=True)
+            p=fb.build_plan(src,24,projection_evidence="test",display_eye=(4,4),geometries=((4,4),), fixture=True);p["source"]["frame_identity"][1]["source_frame"]=7
             with self.assertRaisesRegex(ValueError,"ordered"):fb.validate_plan(p)
-            self.assertEqual(fb.build_plan(tiny_source(Path(t),fps=72),24,projection_evidence="test",display_eye=(4,4))["source"]["header_fps"],[72,1])
-            with self.assertRaisesRegex(ValueError,"F72:1 or F90:1"):fb.build_plan(tiny_source(Path(t),fps=60),24,projection_evidence="test",display_eye=(4,4))
-            with self.assertRaisesRegex(ValueError,"height_factor"):fb.build_plan(src,24,projection_evidence="test",display_eye=(4,4),hvs_height_factor=1.05)
+            self.assertEqual(fb.build_plan(tiny_source(Path(t),fps=72),24,projection_evidence="test",display_eye=(4,4), fixture=True)["source"]["header_fps"],[72,1])
+            with self.assertRaisesRegex(ValueError,"F72:1 or F90:1"):fb.build_plan(tiny_source(Path(t)/"bad",fps=60),24,projection_evidence="test",display_eye=(4,4), fixture=True)
+            with self.assertRaisesRegex(ValueError,"90 source frames"):fb.build_plan(src,24,projection_evidence="test",crop_evidence="semantic-crops",display_eye=(4,4))
 
     def test_lossless_psnr_infinity_is_valid(self):
         self.assertTrue(fb._valid_metric("psnr_y",math.inf));self.assertFalse(fb._valid_metric("vmaf",math.inf));self.assertFalse(fb._valid_metric("psnr_y",math.nan))
@@ -81,6 +81,23 @@ class FrameBankTests(unittest.TestCase):
         text="HeightFactor = 1.00 || PSNR-HVS-M-H: (Y) inf dB\nHeightFactor = 1.12 || PSNR-HVS-M-H: (Y) 31.2 dB"
         self.assertEqual(fb.parse_hvs_m_h(text,1.0),math.inf);self.assertEqual(fb.parse_hvs_m_h(text,1.12),31.2)
         with self.assertRaisesRegex(ValueError,"requested"):fb.parse_hvs_m_h(text,1.25)
+
+    def test_hvs_density_mapping_never_invents_an_unsupported_factor(self):
+        measured=fb.hvs_factor_for_ppd(24.2,3232)
+        self.assertFalse(measured["supported"]);self.assertAlmostEqual(measured["required_height_factor"],24.2*180/(3232*math.pi))
+        supported=fb.hvs_factor_for_ppd(3232*1.0*math.pi/180,3232)
+        self.assertEqual(supported["supported_height_factor"],1.0)
+
+    def test_decoded_range_mismatch_is_rejected(self):
+        with self.tmp() as t:
+            t=Path(t); ref=tiny_source(t, color_range="FULL"); decoded=t/"decoded.y4m"; decoded.write_bytes(ref.read_bytes().replace(b"XCOLORRANGE=FULL",b"XCOLORRANGE=LIMITED",1))
+            with self.assertRaisesRegex(ValueError,"decoded_identity_or_geometry_mismatch"): fb._assert_same_frames(ref,decoded,fb.inspect_y4m(ref))
+
+    def test_production_plan_requires_90_frames_and_fails_hvs_before_codec(self):
+        with self.tmp() as t:
+            t=Path(t); source=tiny_source(t,frames=90); plan=fb.build_plan(source,24.2,projection_evidence="projection-verified",crop_evidence="metro-crop-review",display_eye=(4,4),geometries=((4,4),),wavelets=("haar",),rates_mbps=(300,)); self.assertFalse(plan["hvs_calibration"]["all_supported"])
+            frozen=t/"plan.json";frozen.write_text(json.dumps(plan))
+            with self.assertRaisesRegex(ValueError,"PSNR-HVS-M-H calibration is unsupported"): fb.run_plan(frozen,source,fb._private_root()/"framebank-production-gate",{},t/"window")
 
     def test_guard_uses_status_allow_and_rejects_revocation(self):
         calls=[]
@@ -105,6 +122,17 @@ class FrameBankTests(unittest.TestCase):
             with self.assertRaises(PermissionError):fb.WindowGuard(Path("window")).run(["fake"],cwd=Path.cwd(),env={},timeout_s=1)
         self.assertTrue(proc.terminated)
 
+    def test_guard_uses_disk_backed_output_and_checks_lease_after_exit(self):
+        class Proc:
+            returncode=0
+            def poll(self): return 0
+            def communicate(self): return "",""
+        proc=Proc()
+        with mock.patch("xrbench.framebank.subprocess.Popen",return_value=proc) as spawned, mock.patch.object(fb.WindowGuard,"status",side_effect=[lease(),lease()]):
+            self.assertEqual(fb.WindowGuard(Path("window")).run(["fake"],cwd=Path.cwd(),env={},timeout_s=1)[0],0)
+        self.assertIsNot(spawned.call_args.kwargs["stdout"],__import__("subprocess").PIPE)
+        self.assertIsNot(spawned.call_args.kwargs["stderr"],__import__("subprocess").PIPE)
+
     def test_missing_tool_and_private_path_fail_closed(self):
         with self.assertRaisesRegex(FileNotFoundError,"psnr_hvs_m_h"):fb.required_tools({"encode":sys.executable,"decode":sys.executable,"ffmpeg":sys.executable})
         with self.assertRaisesRegex(ValueError,"results/local"):fb._private_path(Path(tempfile.gettempdir())/"raw")
@@ -113,7 +141,7 @@ class FrameBankTests(unittest.TestCase):
         # No codec is launched: fake guard child calls copy files so the test proves
         # frame ordering, geometry and command construction without a GPU.
         with self.tmp() as t:
-            t=Path(t); src=tiny_source(t, chroma="420", color_range="LIMITED"); plan=fb.build_plan(src,24,projection_evidence="test",display_eye=(4,4),geometries=((4,4),),wavelets=("haar",),rates_mbps=(300,),crops=({"name":"aligned","eye":"left","x":0,"y":0,"w":.5,"h":.5},)); plan_path=t/"plan.json";plan_path.write_text(json.dumps(plan))
+            t=Path(t); src=tiny_source(t, chroma="420", color_range="LIMITED"); plan=fb.build_plan(src,24,projection_evidence="test",display_eye=(4,4),geometries=((4,4),),wavelets=("haar",),rates_mbps=(300,),crops=({"name":"aligned","eye":"left","x":0,"y":0,"w":.5,"h":.5},), fixture=True); plan_path=t/"plan.json";plan_path.write_text(json.dumps(plan))
             out=fb._private_root()/"framebank-unit-e2e"
             import shutil
             shutil.rmtree(out,ignore_errors=True); calls=[]
@@ -127,7 +155,7 @@ class FrameBankTests(unittest.TestCase):
             tools={"encode":sys.executable,"decode":sys.executable,"ffmpeg":sys.executable,"psnr_hvs_m_h":sys.executable}
             try:
                 with mock.patch.object(fb.WindowGuard,"status",fake_status),mock.patch.object(fb.WindowGuard,"run",fake_child):
-                    result=fb.run_plan(plan_path,src,out,tools,t/"window",score_fn=fake_score)
+                    result=fb.run_plan(plan_path,src,out,tools,t/"window",allow_fixture=True, score_fn=fake_score)
                 self.assertTrue(result["complete"]);self.assertEqual(result["cells"][0]["identity_count"],2)
                 self.assertEqual(plan["source"]["color_range"],"LIMITED");self.assertEqual(plan["cells"][0]["encoded_chroma"],"420")
                 self.assertEqual(calls[0][1:], [str(out/"cell-00-haar-300-4x4"/"reference-c420.y4m"),str(out/"cell-00-haar-300-4x4"/"encoded.wave"),str(fb.cap_bytes(300,90))])
