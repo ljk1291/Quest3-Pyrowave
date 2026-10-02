@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 import sys
+import hashlib
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from xrbench import hvs_scorer as hs
@@ -15,7 +16,11 @@ class HvsScorerTests(unittest.TestCase):
 
     def test_patch_applies_and_reverses_against_exact_base(self):
         fixture=Path(__file__).parent/'fixtures'/'pyrowave-d2997ac-psnr.cpp'
-        self.assertEqual(hs.sha256_file(fixture), hs.BASE_PSNR_SHA256)
+        # A pre-existing Windows worktree can retain CRLF across a rebase even
+        # after the explicit LF attribute lands. Both exact hashes are recorded;
+        # the canonical source bytes must still equal the pinned preimage.
+        self.assertIn(hs.sha256_file(fixture), (hs.BASE_PSNR_SHA256, hs.WORKTREE_BASE_PSNR_SHA256))
+        self.assertEqual(hashlib.sha256(fixture.read_bytes().replace(b'\r\n', b'\n')).hexdigest(), hs.BASE_PSNR_SHA256)
         with tempfile.TemporaryDirectory() as temp:
             source=Path(temp)/'source';source.mkdir();shutil.copyfile(fixture,source/'psnr.cpp')
             manifest=hs.verify_patch(source)
@@ -35,4 +40,3 @@ class HvsScorerTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
-
