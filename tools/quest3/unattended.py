@@ -9,6 +9,7 @@ import argparse, ctypes, hashlib, json, os, re, shlex, shutil, subprocess, sys, 
 from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo
+import math
 
 ROOT = Path(__file__).resolve().parents[2]
 PRIVATE = ROOT / 'results' / 'local' / 'unattended'
@@ -95,6 +96,30 @@ def _night_interval(now, arm):
         else: end += timedelta(days=1)
     return start, end
 
+def effective_window_limit(arm):
+    """Apply only a recorded, exact owner exception; never alter the arm file."""
+    declared = float(arm['max_window_hours'])
+    result = {'hours': declared, 'ceiling_hours': MAX_HOURS, 'exception_id': None}
+    path = ROOT / 'presets' / 'unattended-owner-exceptions.json'
+    if not path.is_file(): return result
+    try:
+        policy = json_read(path)
+        if policy.get('schema') != 1 or not isinstance(policy.get('once_windows'), list):
+            raise ValueError('invalid exception policy')
+        for entry in policy['once_windows']:
+            fields = ('mode', 'timezone', 'not_before_local', 'not_after_local', 'expires_local')
+            if (all(arm.get(key) == entry.get(key) for key in fields)
+                    and arm.get('mode') == 'once'
+                    and arm.get('allow') == entry.get('allow')
+                    and declared == float(entry['arm_max_window_hours'])):
+                approved = float(entry['approved_max_window_hours'])
+                if not math.isfinite(approved) or not declared <= approved <= 8:
+                    raise ValueError('invalid approved limit')
+                return {'hours': approved, 'ceiling_hours': approved, 'exception_id': entry['id']}
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise Refusal('owner duration exception policy invalid') from exc
+    return result
+
 def validate_arm_definition(arm):
     """Validate an owner file without requiring that its future window is active."""
     if arm.get('schema') != 1 or arm.get('mode') not in {'once', 'nightly'}:
@@ -104,7 +129,7 @@ def validate_arm_definition(arm):
     if not isinstance(arm.get('allow'), list) or not all(isinstance(x, str) for x in arm['allow']):
         raise Refusal('invalid allow list')
     try:
-        zone=timezone_for(arm['timezone']); max_hours=float(arm['max_window_hours'])
+        zone=timezone_for(arm['timezone']); limit=effective_window_limit(arm); max_hours=limit['hours']
         expires=local_dt(arm['expires_local'], zone)
         if arm['mode']=='nightly':
             sh,sm=parse_clock(arm['start_local']); eh,em=parse_clock(arm['end_local'])
@@ -114,7 +139,7 @@ def validate_arm_definition(arm):
             start=local_dt(arm['not_before_local'], zone); end=local_dt(arm['not_after_local'], zone)
     except (KeyError, ValueError, TypeError) as exc:
         raise Refusal('invalid arm time fields') from exc
-    if not 0 < max_hours <= MAX_HOURS or end <= start or end-start > timedelta(hours=max_hours):
+    if not 0 < max_hours <= limit['ceiling_hours'] or end <= start or end-start > timedelta(hours=max_hours):
         raise Refusal('window duration invalid')
     if expires <= start: raise Refusal('arm expires before window')
 def arm_window(arm, now=None, require_remaining=True):
@@ -125,9 +150,9 @@ def arm_window(arm, now=None, require_remaining=True):
     if not isinstance(arm.get('allow'), list) or not all(isinstance(x,str) for x in arm['allow']): raise Refusal('invalid allow list')
     try:
         zone=timezone_for(arm['timezone']); expires=local_dt(arm['expires_local'],zone)
-        max_hours=float(arm.get('max_window_hours', 0))
+        limit=effective_window_limit(arm); max_hours=limit['hours']
     except (KeyError, ValueError, TypeError) as exc: raise Refusal('invalid arm time fields') from exc
-    if not 0 < max_hours <= MAX_HOURS: raise Refusal('max window exceeds six hours')
+    if not 0 < max_hours <= limit['ceiling_hours']: raise Refusal('max window exceeds authorized limit')
     if arm['mode']=='nightly':
         try: start,end=_night_interval(now,arm)
         except (KeyError,ValueError) as exc: raise Refusal('invalid nightly window') from exc
@@ -139,7 +164,7 @@ def arm_window(arm, now=None, require_remaining=True):
     if now.astimezone(zone) < start or now.astimezone(zone) >= deadline: raise Refusal('arm is not active now')
     remaining=(deadline-now.astimezone(zone)).total_seconds()
     if require_remaining and remaining < MIN_REMAINING: raise Refusal('less than 45 minutes remain')
-    return {'start':start.astimezone(timezone.utc), 'deadline':deadline.astimezone(timezone.utc), 'remaining_s':remaining, 'zone':str(zone)}
+    return {'start':start.astimezone(timezone.utc), 'deadline':deadline.astimezone(timezone.utc), 'remaining_s':remaining, 'zone':str(zone), 'duration_authorization':limit}
 
 def load_arm(path=ARM, now=None):
     if not Path(path).is_file(): raise Refusal('arm file missing')
@@ -693,7 +718,8 @@ def status_payload(directory, arm_path=ARM, now=None, require_allow=None):
     arm={'present':Path(arm_path).is_file(),'active':False,'reason':None}; arm_value=None
     if arm['present']:
         try:
-            arm_value=json_read(arm_path); arm_window(arm_value,now,require_remaining=False); arm['active']=True
+            arm_value=json_read(arm_path); approved_window=arm_window(arm_value,now,require_remaining=False); arm['active']=True
+            arm['duration_authorization']=approved_window['duration_authorization']
             arm['allowed_actions']=arm_value.get('allow',[])
         except Exception as exc: arm['reason']=str(exc); arm['allowed_actions']=[]
     else: arm['reason']='arm file missing or revoked'; arm['allowed_actions']=[]
