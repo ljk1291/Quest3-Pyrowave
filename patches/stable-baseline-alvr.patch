@@ -813,3 +813,334 @@ diff --git a/alvr/client_openxr/src/performance.rs b/alvr/client_openxr/src/perf
              next_update: Instant::now(),
              header: "Connecting".into(),
          })
+diff --git "a/alvr/client_openxr/src/graphics.rs" "b/alvr/client_openxr/src/graphics.rs"
+index 949db5cfff2c927c979bd63f88ebe37320b97fc9..219818467aa2abb80e46e8a07703d1a836a04203 100644
+--- "a/alvr/client_openxr/src/graphics.rs"
++++ "b/alvr/client_openxr/src/graphics.rs"
+@@ -56,6 +56,27 @@ pub struct ProjectionLayerAlphaConfig {
+     pub premultiplied: bool,
+ }
+ 
++/// Flags from the pure layer-filter policy. This is absent for the lobby and
++/// passthrough layers: only the streamed projection layer may carry it.
++#[derive(Clone, Copy)]
++pub struct ProjectionLayerSettingsConfig {
++    pub flags: u64,
++}
++
++/// Holds the raw `XrCompositionLayerSettingsFB` chain for the synchronous
++/// `xrEndFrame` call. The Box gives the chain node a stable address even if the
++/// wrapper moves before it is submitted; it is released immediately afterwards.
++pub struct ProjectionLayer<'a> {
++    projection: xr::CompositionLayerProjection<'a, xr::OpenGlEs>,
++    _settings: Option<Box<xr::sys::CompositionLayerSettingsFB>>,
++}
++
++impl<'a> ProjectionLayer<'a> {
++    pub fn as_base(&self) -> &xr::CompositionLayerBase<'a, xr::OpenGlEs> {
++        &self.projection
++    }
++}
++
+ // This is needed to work around lifetime limitations. Deref cannot be implemented because there are
+ // nested references, and in a way or the other I would get `cannot return reference to temporary
+ // value`
+@@ -63,6 +84,7 @@ pub struct ProjectionLayerBuilder<'a> {
+     reference_space: &'a xr::Space,
+     layers: [xr::CompositionLayerProjectionView<'a, xr::OpenGlEs>; 2],
+     alpha: Option<ProjectionLayerAlphaConfig>,
++    settings: Option<ProjectionLayerSettingsConfig>,
+ }
+ 
+ impl<'a> ProjectionLayerBuilder<'a> {
+@@ -75,10 +97,16 @@ impl<'a> ProjectionLayerBuilder<'a> {
+             reference_space,
+             layers,
+             alpha,
++            settings: None,
+         }
+     }
+ 
+-    pub fn build(&self) -> xr::CompositionLayerProjection<xr::OpenGlEs> {
++    pub fn with_settings(mut self, settings: Option<ProjectionLayerSettingsConfig>) -> Self {
++        self.settings = settings;
++        self
++    }
++
++    pub fn build(&self) -> ProjectionLayer<'a> {
+         let mut flags = xr::CompositionLayerFlags::EMPTY;
+ 
+         if let Some(alpha) = &self.alpha {
+@@ -89,9 +117,27 @@ impl<'a> ProjectionLayerBuilder<'a> {
+             }
+         }
+ 
+-        xr::CompositionLayerProjection::new()
++        let settings = self.settings.map(|config| {
++            Box::new(xr::sys::CompositionLayerSettingsFB {
++                ty: xr::sys::CompositionLayerSettingsFB::TYPE,
++                next: std::ptr::null(),
++                layer_flags: xr::sys::CompositionLayerSettingsFlagsFB::from_raw(config.flags),
++            })
++        });
++        let mut raw = xr::CompositionLayerProjection::new()
+             .layer_flags(flags)
+             .space(self.reference_space)
+             .views(&self.layers)
++            .into_raw();
++        if let Some(settings) = settings.as_ref() {
++            raw.next = (&**settings as *const xr::sys::CompositionLayerSettingsFB).cast();
++        }
++
++        // `settings` owns the raw chain node through xrEndFrame. The source views
++        // and reference space are still borrowed from this builder as before.
++        ProjectionLayer {
++            projection: unsafe { xr::CompositionLayerProjection::from_raw(raw) },
++            _settings: settings,
++        }
+     }
+ }
+diff --git "a/alvr/client_openxr/src/lib.rs" "b/alvr/client_openxr/src/lib.rs"
+index a1c460bc42a44ce4ef9962765c0f5aea8ebcf161..045573703658f91b5448e231ac8269b5c7fe2fdb 100644
+--- "a/alvr/client_openxr/src/lib.rs"
++++ "b/alvr/client_openxr/src/lib.rs"
+@@ -2,6 +2,7 @@ mod c_api;
+ mod extra_extensions;
+ mod graphics;
+ mod interaction;
++mod layer_filter;
+ mod lobby;
+ mod passthrough;
+ mod performance;
+@@ -172,6 +173,27 @@ pub fn entry_point() {
+ 
+     let available_extensions = xr_entry.enumerate_extensions().unwrap();
+     alvr_common::info!("OpenXR available extensions: {available_extensions:#?}");
++    let layer_filter = if platform == Platform::Quest3 {
++        layer_filter::resolve(
++            &extra_extensions::perf_settings::system_property(layer_filter::PROPERTY),
++            available_extensions.fb_composition_layer_settings,
++            available_extensions.meta_automatic_layer_filter,
++        )
++    } else {
++        layer_filter::resolve("0", false, false)
++    };
++    match layer_filter {
++        layer_filter::Decision::Active { requested, flags, .. } => error!(
++            "[Q3PW_LAYER_FILTER] requested={requested:?} active_flags=0x{flags:x} fb_settings=true meta_auto={}",
++            layer_filter.enables_meta(),
++        ),
++        layer_filter::Decision::Unsupported { requested, missing_fb, missing_meta } => error!(
++            "[Q3PW_LAYER_FILTER] requested={requested:?} active_flags=none missing_fb={missing_fb} missing_meta={missing_meta}"
++        ),
++        layer_filter::Decision::Disabled { requested } => error!(
++            "[Q3PW_LAYER_FILTER] requested={requested:?} active_flags=none"
++        ),
++    }
+     // Kept as its own Vec because `available_extensions` is consumed further down, and the
+     // [REPROJ] probe that needs these names runs after that point.
+     let advertised_extension_names: Vec<String> = available_extensions.other.clone();
+@@ -208,6 +230,10 @@ pub fn entry_point() {
+     exts.ext_local_floor = available_extensions.ext_local_floor;
+     exts.fb_body_tracking = available_extensions.fb_body_tracking;
+     exts.fb_color_space = available_extensions.fb_color_space;
++    // The policy enables these only for an explicitly requested, advertised
++    // Quest3 experiment. A missing extension means no settings chain at all.
++    exts.fb_composition_layer_settings = layer_filter.enables_fb();
++    exts.meta_automatic_layer_filter = layer_filter.enables_meta();
+     exts.fb_display_refresh_rate = available_extensions.fb_display_refresh_rate;
+     exts.fb_eye_tracking_social = available_extensions.fb_eye_tracking_social;
+     exts.fb_face_tracking2 = available_extensions.fb_face_tracking2;
+@@ -588,6 +614,7 @@ pub fn entry_point() {
+                             Arc::clone(&interaction_context),
+                             platform,
+                             config,
++                            layer_filter.flags(),
+                         );
+ 
+                         if !context.uses_passthrough() {
+@@ -805,7 +832,7 @@ pub fn entry_point() {
+             let overlay_layer = performance_overlay.as_ref().and_then(|overlay| overlay.layer());
+             let mut layers: Vec<&xr::CompositionLayerBase<_>> = Vec::with_capacity(3);
+             if let Some(passthrough_layer) = &passthrough_layer { layers.push(passthrough_layer); }
+-            layers.push(&projection);
++            layers.push(projection.as_base());
+             if let Some(overlay_layer) = &overlay_layer { layers.push(overlay_layer); }
+ 
+             graphics_context.make_current();
+diff --git "a/alvr/client_openxr/src/stream.rs" "b/alvr/client_openxr/src/stream.rs"
+index accaaa4d254a0302501645b6de205000202813fc..c7ea7e2f6d94c02bc5c74c4cf752f39e2db9bced 100644
+--- "a/alvr/client_openxr/src/stream.rs"
++++ "b/alvr/client_openxr/src/stream.rs"
+@@ -1,5 +1,5 @@
+ use crate::{
+-    graphics::{self, ProjectionLayerAlphaConfig, ProjectionLayerBuilder},
++    graphics::{self, ProjectionLayerAlphaConfig, ProjectionLayerBuilder, ProjectionLayerSettingsConfig},
+     interaction::{self, InteractionContext, InteractionSourcesConfig},
+ };
+ use alvr_client_core::{
+@@ -108,6 +108,7 @@ pub struct StreamContext {
+     pending_frame_selected_at: Option<Instant>,
+     pre_wait_stats: [u64; 5], // polls, hits, consumed held frames, total hold us, max hold us
+     pre_wait_last_log: Instant,
++    layer_filter_flags: Option<u64>,
+ }
+ 
+ impl StreamContext {
+@@ -118,6 +119,7 @@ impl StreamContext {
+         interaction_ctx: Arc<RwLock<InteractionContext>>,
+         platform: Platform,
+         config: ParsedStreamConfig,
++        layer_filter_flags: Option<u64>,
+     ) -> StreamContext {
+         interaction_ctx
+             .write()
+@@ -263,6 +265,7 @@ impl StreamContext {
+             pending_frame_selected_at: None,
+             pre_wait_stats: [0; 5],
+             pre_wait_last_log: Instant::now(),
++            layer_filter_flags,
+         };
+ 
+         alvr_graphics::log_quest_experiment(format!(
+@@ -677,7 +680,8 @@ impl StreamContext {
+                             | PassthroughMode::HsvChromaKey(_)
+                     ),
+                 }),
+-        );
++        )
++        .with_settings(self.layer_filter_flags.map(|flags| ProjectionLayerSettingsConfig { flags }));
+ 
+         (layer, timestamp)
+     }
+diff --git "a/alvr/client_openxr/src/layer_filter.rs" "b/alvr/client_openxr/src/layer_filter.rs"
+new file mode 100644
+index 0000000000000000000000000000000000000000..dd8ac37722ae4b7010d7dcbeb773b1762fd5fcd6
+--- /dev/null
++++ "b/alvr/client_openxr/src/layer_filter.rs"
+@@ -0,0 +1,125 @@
++//! Pure policy for the Quest-only compositor layer-filter experiment.
++//!
++//! The policy is resolved before creating the OpenXR instance so unsupported
++//! extensions never enter its enabled-extension list. The raw flags are kept
++//! here to make the decision testable without an OpenXR runtime.
++
++pub const PROPERTY: &str = "debug.q3pw.layer_filter";
++
++const NORMAL_SUPER_SAMPLING: u64 = 1 << 0;
++const QUALITY_SUPER_SAMPLING: u64 = 1 << 1;
++const AUTO_LAYER_FILTER: u64 = 1 << 5;
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum Requested {
++    Off,
++    Normal,
++    Quality,
++    Auto,
++    Invalid,
++}
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum Decision {
++    Disabled { requested: Requested },
++    Active { requested: Requested, flags: u64, enable_meta: bool },
++    Unsupported { requested: Requested, missing_fb: bool, missing_meta: bool },
++}
++
++impl Decision {
++    pub fn flags(self) -> Option<u64> {
++        match self {
++            Self::Active { flags, .. } => Some(flags),
++            _ => None,
++        }
++    }
++
++    pub fn enables_fb(self) -> bool {
++        matches!(self, Self::Active { .. })
++    }
++
++    pub fn enables_meta(self) -> bool {
++        matches!(self, Self::Active { enable_meta: true, .. })
++    }
++}
++
++pub fn requested_from_property(value: &str) -> Requested {
++    match value.trim() {
++        "" | "0" => Requested::Off,
++        "1" => Requested::Normal,
++        "2" => Requested::Quality,
++        "3" => Requested::Auto,
++        _ => Requested::Invalid,
++    }
++}
++
++pub fn resolve(value: &str, has_fb_settings: bool, has_meta_auto: bool) -> Decision {
++    let requested = requested_from_property(value);
++    match requested {
++        Requested::Off | Requested::Invalid => Decision::Disabled { requested },
++        Requested::Normal | Requested::Quality if !has_fb_settings => Decision::Unsupported {
++            requested,
++            missing_fb: true,
++            missing_meta: false,
++        },
++        Requested::Normal => Decision::Active {
++            requested,
++            flags: NORMAL_SUPER_SAMPLING,
++            enable_meta: false,
++        },
++        Requested::Quality => Decision::Active {
++            requested,
++            flags: QUALITY_SUPER_SAMPLING,
++            enable_meta: false,
++        },
++        Requested::Auto if !has_fb_settings || !has_meta_auto => Decision::Unsupported {
++            requested,
++            missing_fb: !has_fb_settings,
++            missing_meta: !has_meta_auto,
++        },
++        // XR_META_automatic_layer_filter requires a non-auto flag too. Normal is
++        // deliberate: auto is an opt-in low-cost candidate, not an implicit quality mode.
++        Requested::Auto => Decision::Active {
++            requested,
++            flags: NORMAL_SUPER_SAMPLING | AUTO_LAYER_FILTER,
++            enable_meta: true,
++        },
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn defaults_and_bad_values_never_enable_an_extension() {
++        for value in ["", "0", "-1", "4", "quality"] {
++            let decision = resolve(value, true, true);
++            assert!(!decision.enables_fb(), "{value}");
++            assert_eq!(decision.flags(), None, "{value}");
++        }
++    }
++
++    #[test]
++    fn normal_and_quality_require_only_fb_settings() {
++        assert_eq!(
++            resolve("1", true, false),
++            Decision::Active { requested: Requested::Normal, flags: NORMAL_SUPER_SAMPLING, enable_meta: false }
++        );
++        assert_eq!(
++            resolve("2", true, false),
++            Decision::Active { requested: Requested::Quality, flags: QUALITY_SUPER_SAMPLING, enable_meta: false }
++        );
++        assert!(matches!(resolve("1", false, true), Decision::Unsupported { missing_fb: true, missing_meta: false, .. }));
++    }
++
++    #[test]
++    fn auto_requires_both_extensions_and_never_sets_auto_alone() {
++        assert!(matches!(resolve("3", false, true), Decision::Unsupported { missing_fb: true, .. }));
++        assert!(matches!(resolve("3", true, false), Decision::Unsupported { missing_meta: true, .. }));
++        let active = resolve("3", true, true);
++        assert_eq!(active.flags(), Some(NORMAL_SUPER_SAMPLING | AUTO_LAYER_FILTER));
++        assert!(active.enables_fb());
++        assert!(active.enables_meta());
++    }
++}

@@ -93,6 +93,7 @@ class ControlTests(unittest.TestCase):
         self.assertTrue(result['changed'])
         self.assertFalse(any('direct_flip_y' in command for command in commands))
         self.assertIn("setprop debug.q3pw.direct_eye_copy ''", commands)
+        self.assertIn("setprop debug.q3pw.layer_filter 0", commands)
 
     def test_reset_failure_retains_before_and_after_readbacks(self):
         class Fail:
