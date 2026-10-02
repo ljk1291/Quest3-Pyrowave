@@ -216,7 +216,8 @@ class Host:
                 rows=self.run(executable,'--query-compute-apps=pid,process_name,used_gpu_memory','--format=csv,noheader,nounits',timeout=5)
                 apps=[line.strip() for line in rows.splitlines() if line.strip() and 'No running processes' not in line]
                 # A live Comfy process is allowed only when its local queue reports idle.
-                conflicts.extend(row for row in apps if 'comfy' not in row.lower())
+                idle_comfy={str(row.get('ProcessId')) for row in comfy_pids} if comfy.get('known') and not comfy.get('running') and not comfy.get('pending') else set()
+                conflicts.extend(row for row in apps if row.split(',',1)[0].strip() not in idle_comfy)
             except Refusal as exc: apps=['nvidia-smi-error:'+str(exc)]; conflicts.append('gpu_compute_status_unknown')
         else: conflicts.append('gpu_compute_status_unknown')
         sample={'at_utc':utc_now().isoformat(),'comfy':comfy,'comfy_processes':comfy_pids,'nvidia_compute_apps':apps,'conflicts':conflicts}
@@ -368,8 +369,8 @@ def restore(state_path, host=None):
     for record in state.get('owned_pc_jobs',[]):
         try: host.stop_owned_runtime(record); job_results.append({'pid':record['pid'],'stopped':True})
         except Exception as exc: jobs_ok=False; job_results.append({'pid':record['pid'],'stopped':False,'error':str(exc)})
-    if host.vr_connected() and not state.get('owned_runtime'):
-        owned_ok=False; steps.append('unclaimed_vr_runtime_present')
+    if host.vr_connected():
+        owned_ok=False; steps.append('unclaimed_or_unstopped_vr_runtime_present')
     alvr_restored=not any(row.get('kind')=='alvr' for row in state.get('changes',[]))
     if not alvr_restored and owned_ok:
         try:
@@ -466,6 +467,14 @@ def terminal_fault_decision(state, fault):
     if len(faults) >= 2:
         state['ended']=True; return 'restore'
     return 'recover'
+
+def record_terminal_fault(state_path, fault):
+    """Persist a terminal fault; second fault atomically requests deadline restoration."""
+    state_path=Path(state_path); state=json_read(state_path)
+    if state.get('restoration',{}).get('status') != 'pending': raise Refusal('rollback has begun')
+    action=terminal_fault_decision(state,fault); atomic_write(state_path,state)
+    if action=='restore': (state_path.parent/'stop').write_text('second terminal fault\n',encoding='utf-8')
+    return action
 
 def health_decision(sample, state, now):
     """Pure monitor transition. Third pause ends window; resume needs 15 min and <=40C."""
