@@ -15,6 +15,11 @@ also evaluates one explicit positive factor. The two options are mutually exclus
 License: MIT; `psnr.cpp` is Copyright (c) 2025-2026 Hans-Kristian Arntzen,
 SPDX-License-Identifier: MIT. The companion manifest records source and patch hashes.
 
+The preparation tool first validates the exact recorded LF or Windows CRLF
+preimage hash, then normalizes that one file to LF before applying the patch.
+The resulting canonical source hash is identical on Windows and Linux; Git's
+global line-ending configuration does not affect the scorer provenance.
+
 Prepare a separate clean source copy, then build its scorer target:
 
 ```powershell

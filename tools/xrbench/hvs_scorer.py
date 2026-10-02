@@ -13,7 +13,7 @@ UPSTREAM_BASE_REVISION = "d2997ac172bdc00e29c58e3f2938acb7e94580bf"
 LICENSE = "MIT"
 BASE_PSNR_SHA256 = "663a77a183a1f2f4d96928e89a9e34568c1468b6d882a7b833f4f8b6a162d709"
 WORKTREE_BASE_PSNR_SHA256 = "436b042a5c631c061565b023ca3317ff22a3a714cf965a5f1aeaa2bf2c41599e"
-PATCHED_PSNR_SHA256 = "8a1df7dbfc8a7173cec2143367b39cc74b3a78c6e5446adf6d63728833a69e65"
+PATCHED_PSNR_SHA256 = "bf2ed4c7cd2e962e97e468c2fa6b9f0d6068ee7faa441b0f3f001a93b3f3e184"
 PATCH_NAME = "pyrowave-psnr-hvs-ppd-scorer.patch"
 
 def sha256_file(path: Path) -> str:
@@ -33,10 +33,10 @@ def patch_path() -> Path:
 
 def manifest() -> dict:
     patch=patch_path()
-    return {"schema":1,"kind":"pyrowave_psnr_hvs_ppd_scorer","upstream":{"repository":UPSTREAM_REPOSITORY,"base_revision":UPSTREAM_BASE_REVISION,"license":LICENSE},"patch":{"path":f"patches/{PATCH_NAME}","sha256":sha256_file(patch),"base_psnr_cpp_sha256":BASE_PSNR_SHA256,"accepted_windows_worktree_psnr_cpp_sha256":WORKTREE_BASE_PSNR_SHA256,"patched_psnr_cpp_sha256":PATCHED_PSNR_SHA256},"build":{"target":"pyrowave-psnr-hvs-m","cmake_options":["-DPYROWAVE_UTILS=ON","-DPYROWAVE_DEVEL=OFF"],"runtime_defaults_changed":False}}
+    return {"schema":1,"kind":"pyrowave_psnr_hvs_ppd_scorer","upstream":{"repository":UPSTREAM_REPOSITORY,"base_revision":UPSTREAM_BASE_REVISION,"license":LICENSE},"patch":{"path":f"patches/{PATCH_NAME}","sha256":sha256_file(patch),"base_psnr_cpp_sha256":BASE_PSNR_SHA256,"accepted_windows_worktree_psnr_cpp_sha256":WORKTREE_BASE_PSNR_SHA256,"preimage_normalization":"LF after exact preimage hash validation","patched_psnr_cpp_sha256":PATCHED_PSNR_SHA256},"build":{"target":"pyrowave-psnr-hvs-m","cmake_options":["-DPYROWAVE_UTILS=ON","-DPYROWAVE_DEVEL=OFF"],"runtime_defaults_changed":False}}
 
 def _git_apply(source:Path, reverse:bool=False, check:bool=True) -> subprocess.CompletedProcess:
-    args=["git","-C",str(source),"apply"]
+    args=["git","-c","core.autocrlf=false","-C",str(source),"apply"]
     if check: args.append("--check")
     if reverse: args.append("--reverse")
     args.append(str(patch_path()))
@@ -50,7 +50,9 @@ def verify_patch(source:Path) -> dict:
         # Patch validation needs only its declared preimage. Do not copy the
         # Granite tree just to test a one-file scorer patch.
         staged=Path(temporary)/"source"; staged.mkdir()
-        shutil.copyfile(psnr, staged/"psnr.cpp")
+        # Canonical LF bytes make the adapter output hash independent of the
+        # caller's Git configuration and an existing Windows CRLF checkout.
+        (staged/"psnr.cpp").write_bytes(psnr.read_bytes().replace(b'\r\n', b'\n'))
         forward=_git_apply(staged,check=True)
         if forward.returncode: raise ValueError("scorer patch does not apply cleanly")
         applied=_git_apply(staged,check=False)
@@ -65,6 +67,7 @@ def prepare_source(source:Path, output:Path) -> dict:
     if output.exists(): raise FileExistsError("output scorer source already exists")
     verify_patch(source)
     shutil.copytree(source,output,ignore=shutil.ignore_patterns(".git","build*"))
+    (output/"psnr.cpp").write_bytes((output/"psnr.cpp").read_bytes().replace(b'\r\n', b'\n'))
     applied=_git_apply(output,check=False)
     if applied.returncode or sha256_file(output/"psnr.cpp")!=PATCHED_PSNR_SHA256: raise RuntimeError("failed to prepare scorer source")
     record=manifest(); (output/"PYROWAVE-HVS-PPD-SCORER.json").write_text(json.dumps(record,indent=2)+"\n",encoding="utf-8")

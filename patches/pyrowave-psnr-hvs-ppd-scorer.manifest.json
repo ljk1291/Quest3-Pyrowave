@@ -8,10 +8,11 @@
   },
   "patch": {
     "path": "patches/pyrowave-psnr-hvs-ppd-scorer.patch",
-    "sha256": "5763f6d9b7af4ce444648b72781aba3e9a3b46bab20a6119a50bb1b0d6396062",
+    "sha256": "b241cb920779a645dc784fed4b983add75359a56f71694151b6085e105f08586",
     "base_psnr_cpp_sha256": "663a77a183a1f2f4d96928e89a9e34568c1468b6d882a7b833f4f8b6a162d709",
     "accepted_windows_worktree_psnr_cpp_sha256": "436b042a5c631c061565b023ca3317ff22a3a714cf965a5f1aeaa2bf2c41599e",
-    "patched_psnr_cpp_sha256": "8a1df7dbfc8a7173cec2143367b39cc74b3a78c6e5446adf6d63728833a69e65"
+    "preimage_normalization": "LF after exact preimage hash validation",
+    "patched_psnr_cpp_sha256": "bf2ed4c7cd2e962e97e468c2fa6b9f0d6068ee7faa441b0f3f001a93b3f3e184"
   },
   "build": {
     "target": "pyrowave-psnr-hvs-m",

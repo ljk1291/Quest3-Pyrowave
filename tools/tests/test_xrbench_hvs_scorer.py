@@ -38,5 +38,15 @@ class HvsScorerTests(unittest.TestCase):
             self.assertEqual(hs.main(['prepare-source','--source',str(source),'--out',str(output)]),0)
             self.assertTrue((output/'PYROWAVE-HVS-PPD-SCORER.json').is_file())
 
+    def test_lf_and_crlf_preimages_produce_the_same_canonical_adapter(self):
+        fixture=Path(__file__).parent/'fixtures'/'pyrowave-d2997ac-psnr.cpp'
+        canonical=fixture.read_bytes().replace(b'\r\n',b'\n')
+        with tempfile.TemporaryDirectory() as temp:
+            for label,raw in (('lf',canonical),('crlf',canonical.replace(b'\n',b'\r\n'))):
+                source=Path(temp)/label;source.mkdir();(source/'psnr.cpp').write_bytes(raw)
+                output=Path(temp)/(label+'-prepared'); hs.prepare_source(source,output)
+                self.assertEqual(hs.sha256_file(output/'psnr.cpp'),hs.PATCHED_PSNR_SHA256)
+                self.assertNotIn(b'\r\n',(output/'psnr.cpp').read_bytes())
+
 
 if __name__ == '__main__': unittest.main()
