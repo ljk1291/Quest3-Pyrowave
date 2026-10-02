@@ -88,7 +88,7 @@ jobs:
           test -x "$HOME/.cargo/bin/cbindgen"
           test -x "$HOME/.cargo/bin/cargo-apk"
       - name: Save pinned Android tools before application compilation
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.android_tools_cache.outputs.cache-hit != 'true' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && steps.android_tools_cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: |
@@ -144,7 +144,7 @@ jobs:
           name: Quest3-Pyrowave-Android
           path: out/
       - name: Save reusable Android compilation after success or test failure
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo_client_cache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && steps.cargo_client_cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: |
@@ -229,7 +229,7 @@ jobs:
           name: Quest3-Pyrowave-Windows
           path: out/
       - name: Save reusable Windows compilation after success or test failure
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo_streamer_cache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && steps.cargo_streamer_cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: |

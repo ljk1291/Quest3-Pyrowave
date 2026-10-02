@@ -259,9 +259,27 @@ index dfefe0008969564b5b88f363c733f0dfb0640de3..11766bb96546c5c9c5ca2b7fcee66e03
  const MAX_SAMPLES: usize = 1024;
  
 diff --git a/alvr/client_openxr/src/stream.rs b/alvr/client_openxr/src/stream.rs
-index eb04019edefff6ebbc77744948a173d41687de19..5e35f43ce60d37c0a99a93a1efbe685c5a259509 100644
+index eb04019edefff6ebbc77744948a173d41687de19..3147b2279f22b8251ca769f75c633b5d16c71a50 100644
 --- a/alvr/client_openxr/src/stream.rs
 +++ b/alvr/client_openxr/src/stream.rs
+@@ -3,7 +3,7 @@ use crate::{
+     interaction::{self, InteractionContext, InteractionSourcesConfig},
+ };
+ use alvr_client_core::{
+-    video_decoder::{self, VideoDecoderConfig, VideoDecoderSource},
++    video_decoder::{self, SelectedFrame, VideoDecoderConfig, VideoDecoderSource},
+     ClientCoreContext,
+ };
+ use alvr_common::{
+@@ -91,7 +91,7 @@ pub struct StreamContext {
+     /// A decoded frame selected before xrWaitFrame. Legacy decoders may block while
+     /// selecting; the opt-in Quest3 PyroWave pre-wait poll only takes a ready frame.
+     /// Its existing native-buffer lease remains protected until the eye copy is ready.
+-    pending_frame: Option<(Duration, *mut std::ffi::c_void)>,
++    pending_frame: Option<SelectedFrame>,
+     frame_wait_budget: Duration,
+     frame_wait_stats: [u64; 4], // waits, ready hits, total microseconds, max microseconds
+     frame_wait_last_log: Instant,
 @@ -511,8 +511,10 @@ impl StreamContext {
              }
          }
