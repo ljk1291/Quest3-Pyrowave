@@ -49,3 +49,19 @@ def test_restore_exception_publishes_failure(monkeypatch,tmp_path):
     monkeypatch.setattr(u,'managed_properties',lambda:())
     result=u.restore(state,H())
     assert result['status']=='restore_failed' and u.json_read(state)['restoration']['status']=='restore_failed'
+
+
+def test_two_job_records_preserved_under_lock(monkeypatch,tmp_path):
+    state=tmp_path/'state.json'; u.atomic_write(state,{'guard_nonce':'n','restoration':{'status':'pending'},'owned_runtime':[{}],'owned_pc_jobs':[]})
+    monkeypatch.setattr(u,'status_payload',lambda *a,**k:{'lease':{'active':True,'blockers':[]}})
+    class H:
+        def process_identity(self,pid): return {'pid':pid,'path':f'C:/j{pid}.exe','started_epoch_s':float(pid)}
+    threads=[threading.Thread(target=lambda i=i:u.register_owned_pc_job(state,i,f'C:/j{i}.exe',float(i),host=H())) for i in (1,2)]
+    [x.start() for x in threads]; [x.join() for x in threads]
+    assert {x['pid'] for x in u.json_read(state)['owned_pc_jobs']}=={1,2}
+
+def test_late_fault_preserves_final_bytes(tmp_path):
+    state=tmp_path/'state.json'; final={'restoration':{'status':'restored'},'terminal_faults':[]} ; u.atomic_write(state,final); before=state.read_bytes()
+    import pytest
+    with pytest.raises(u.Refusal): u.record_terminal_fault(state,'decoder')
+    assert state.read_bytes()==before
