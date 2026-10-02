@@ -98,6 +98,11 @@ def state_lock(state_path, timeout_s=5):
             else: fcntl.flock(stream.fileno(),fcntl.LOCK_UN)
         finally: stream.close()
 
+def locked_state_mutation(func):
+    def wrapped(state_path, *args, **kwargs):
+        with state_lock(state_path): return func(state_path, *args, **kwargs)
+    return wrapped
+
 def json_read(path): return json.loads(Path(path).read_text(encoding='utf-8'))
 def arm_digest(arm): return hashlib.sha256(json.dumps(arm,sort_keys=True,separators=(',',':')).encode()).hexdigest()
 def atomic_write(path, value):
@@ -378,6 +383,7 @@ def check_preconditions(arm, host, directory, now=None, alvr_session_path=None):
         except Exception as exc: report['failures'].append('snapshot_incomplete:'+str(exc)); report['passed']=False
     atomic_write(Path(directory)/'check.json',report); return report
 
+@locked_state_mutation
 def restore(state_path, host=None):
     """Idempotent deadline-safe fallback with an offline file-copy fallback."""
     state_path=Path(state_path); state=json_read(state_path)
@@ -498,6 +504,7 @@ def terminal_fault_decision(state, fault):
         state['ended']=True; return 'restore'
     return 'recover'
 
+@locked_state_mutation
 def record_terminal_fault(state_path, fault):
     """Persist a terminal fault; second fault atomically requests deadline restoration."""
     state_path=Path(state_path); state=json_read(state_path)
@@ -587,6 +594,7 @@ def ownership_matches(record, actual, nonce):
                 abs(float(record['started_epoch_s']) - float(actual['started_epoch_s'])) < .001)
     except (KeyError, TypeError, ValueError, OSError): return False
 
+@locked_state_mutation
 def record_owned_runtime(state_path, record, host=None):
     """Persist a verified ownership record before any ALVR/SteamVR mutation."""
     state_path=Path(state_path); state=json_read(state_path); host=host or Host(state.get('adb','adb'))
@@ -623,6 +631,7 @@ def mutable_state(state_path, arm_path=ARM):
     if not state.get('owned_runtime'): raise Refusal('claimed runtime ownership required before mutation')
     return state
 
+@locked_state_mutation
 def record_change(state_path, kind, key, before_present, before_value, expected_after, arm_path=ARM):
     """Append an immutable exact-key record before applying one owned change."""
     state=mutable_state(state_path,arm_path); changes=state.setdefault('changes',[])
@@ -631,6 +640,7 @@ def record_change(state_path, kind, key, before_present, before_value, expected_
          'expected_after':expected_after,'recorded_utc':utc_now().isoformat()}
     changes.append(row); atomic_write(state_path,state); return row
 
+@locked_state_mutation
 def apply_alvr_changes(state_path, values, arm_path=ARM, api=None):
     """Read/record exact ALVR paths before setting them, then require readback."""
     state=mutable_state(state_path,arm_path)
@@ -661,6 +671,7 @@ def _path_present(value, dotted):
     try: _path_get(value,dotted); return True
     except (KeyError, TypeError): return False
 
+@locked_state_mutation
 def apply_steamvr_changes(state_path, settings_path, values, arm_path=ARM):
     """Record presence/value, then change exact SteamVR JSON keys while owned runtime is live."""
     state=mutable_state(state_path,arm_path); path=Path(settings_path); current=json_read(path)
@@ -692,6 +703,7 @@ def driver_membership(vrpaths, fork_driver):
     needle=Path(fork_driver).resolve().as_posix().casefold()
     return any(Path(item).resolve().as_posix().casefold()==needle for item in values), values
 
+@locked_state_mutation
 def record_driver_change(state_path, vrpaths, fork_driver, expected_present, arm_path=ARM):
     present, all_before=driver_membership(vrpaths,fork_driver)
     row=record_change(state_path,'fork_driver',str(Path(fork_driver).resolve()),present,all_before,bool(expected_present),arm_path)
@@ -712,6 +724,7 @@ def restore_recorded_driver(state, vrpathreg):
     norm=lambda values:sorted(Path(x).resolve().as_posix().casefold() for x in values)
     return norm(current)==norm(wanted)
 
+@locked_state_mutation
 def register_owned_pc_job(state_path, pid, path, started_epoch_s, arm_path=ARM, host=None):
     """Register only this window's offline encoder/decoder/scorer child."""
     state_path=Path(state_path); status=status_payload(state_path.parent,arm_path,require_allow='frame_bank_pc')
@@ -724,6 +737,7 @@ def register_owned_pc_job(state_path, pid, path, started_epoch_s, arm_path=ARM, 
     if any(row['pid']==pid for row in jobs): raise Refusal('PC job already registered')
     jobs.append(record); atomic_write(state_path,state); return record
 
+@locked_state_mutation
 def unregister_owned_pc_job(state_path, pid, host=None):
     state_path=Path(state_path); state=json_read(state_path); jobs=state.get('owned_pc_jobs',[])
     record=next((row for row in jobs if row['pid']==pid),None)
