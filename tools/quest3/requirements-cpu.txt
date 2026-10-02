@@ -1,0 +1,4 @@
+# CPU-only image dependencies for deterministic stereo-chart tests.
+# Keep these pins aligned with requirements.txt; OpenVR/GLFW/PyOpenGL are not needed in CI.
+numpy==2.3.5
+opencv-python-headless==4.13.0.90
