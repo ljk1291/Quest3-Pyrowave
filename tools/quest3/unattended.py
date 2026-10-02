@@ -316,6 +316,12 @@ def restore(state_path, host=None):
     for record in state.get('owned_runtime',[]):
         try: host.stop_owned_runtime(record); owned_results.append({'role':record.get('role'),'stopped':True})
         except Exception as exc: owned_ok=False; owned_results.append({'role':record.get('role'),'stopped':False,'error':str(exc)})
+    alvr_restored=not any(row.get('kind')=='alvr' for row in state.get('changes',[]))
+    if not alvr_restored and owned_ok:
+        try:
+            from .control import session as _session, set_values as _set_values
+            alvr_restored=restore_recorded_alvr(state,(_session,_set_values)); steps.append('alvr_api_restored')
+        except Exception as exc: steps.append('alvr_api_restore_failed:'+str(exc))
     awake_state = state_path.parent / 'awake.json'
     if awake_state.is_file():
         try:
@@ -379,8 +385,8 @@ def restore(state_path, host=None):
             property_readback[key]={'expected':wanted,'error':str(exc),'matches':False}; properties_ok=False
     vd_checks=[row for row in verification if str(row.get('label','')).startswith('virtual_desktop')]
     vd_hashes_match=all(x.get('error') is None and x.get('current_matches') is True for x in vd_checks)
-    ok=files_ok and runtime_restored and properties_ok and client_stopped and awake_restored and owned_ok
-    state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'pc_configuration_verify_only;_owner_selector_or_dashboard_must_restore_drift','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'owned_runtime':owned_results,'owned_runtime_stopped':owned_ok,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
+    ok=files_ok and runtime_restored and properties_ok and client_stopped and awake_restored and owned_ok and alvr_restored
+    state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'pc_configuration_verify_only;_owner_selector_or_dashboard_must_restore_drift','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'owned_runtime':owned_results,'owned_runtime_stopped':owned_ok,'alvr_restored':alvr_restored,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
     atomic_write(state_path,state); return state['restoration']
 
 def health_decision(sample, state, now):
@@ -473,6 +479,65 @@ def record_owned_runtime(state_path, record, host=None):
     if any(item.get('role') == record.get('role') for item in owned): raise Refusal('runtime role already recorded')
     owned.append({key:record[key] for key in ('role','pid','path','started_epoch_s','nonce')})
     atomic_write(state_path,state); return owned[-1]
+
+def _path_get(value, dotted):
+    node=value
+    for part in dotted.split('.'):
+        node=node[part]
+    return node
+
+def _path_set(value, dotted, expected):
+    parts=dotted.split('.'); node=value
+    for part in parts[:-1]: node=node.setdefault(part,{})
+    node[parts[-1]]=expected
+
+def _path_delete(value, dotted):
+    parts=dotted.split('.'); node=value
+    for part in parts[:-1]: node=node.get(part,{})
+    node.pop(parts[-1],None)
+
+def mutable_state(state_path, arm_path=ARM):
+    """Fail closed before recording or applying a new setting mutation."""
+    state_path=Path(state_path); status=status_payload(state_path.parent,arm_path)
+    if not status['lease']['active']: raise Refusal('lease is not active: '+','.join(status['lease']['blockers']))
+    state=json_read(state_path)
+    if state.get('restoring') or state.get('restoration',{}).get('status') != 'pending': raise Refusal('rollback has begun')
+    if not state.get('owned_runtime'): raise Refusal('claimed runtime ownership required before mutation')
+    return state
+
+def record_change(state_path, kind, key, before_present, before_value, expected_after, arm_path=ARM):
+    """Append an immutable exact-key record before applying one owned change."""
+    state=mutable_state(state_path,arm_path); changes=state.setdefault('changes',[])
+    if any(row['kind']==kind and row['key']==key for row in changes): raise Refusal('change already recorded')
+    row={'kind':kind,'key':key,'before_present':bool(before_present),'before_value':before_value,
+         'expected_after':expected_after,'recorded_utc':utc_now().isoformat()}
+    changes.append(row); atomic_write(state_path,state); return row
+
+def apply_alvr_changes(state_path, values, arm_path=ARM, api=None):
+    """Read/record exact ALVR paths before setting them, then require readback."""
+    state=mutable_state(state_path,arm_path)
+    if api is None:
+        from .control import session, set_values
+        api=(session,set_values)
+    session,set_values=api; before=session()
+    rows=[]
+    for key, expected in values.items():
+        try: old=_path_get(before,key); present=True
+        except (KeyError, TypeError): old=None; present=False
+        rows.append(record_change(state_path,'alvr',key,present,old,expected,arm_path))
+    set_values(values); after=session()
+    if any(_path_get(after,key) != expected for key,expected in values.items()): raise Refusal('ALVR setting readback differs')
+    return rows
+
+def restore_recorded_alvr(state, api):
+    """Restore only exact prior ALVR paths through the live owning API."""
+    session,set_values=api; values={}
+    for row in state.get('changes',[]):
+        if row['kind']=='alvr' and row['before_present']: values[row['key']]=row['before_value']
+    if values:
+        set_values(values); after=session()
+        if any(_path_get(after,key) != value for key,value in values.items()): raise Refusal('ALVR rollback readback differs')
+    return bool(values)
 
 def pid_alive(pid):
     if not isinstance(pid, int) or pid <= 0: return False

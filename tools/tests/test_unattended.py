@@ -234,3 +234,21 @@ def test_restore_does_not_stop_unproved_owned_runtime(monkeypatch,tmp_path):
     monkeypatch.setattr('tools.quest3.preflight.verify_snapshot',lambda records: [])
     result=u.restore(path,host)
     assert result['status']=='restore_failed' and result['owned_runtime_stopped'] is False
+
+
+def test_alvr_recorded_paths_restore_exact_values():
+    current={'session_settings':{'video':{'preferred_fps':90,'bitrate':{'mode':{'ConstantMbps':400}}}}}
+    writes=[]
+    def session(): return current
+    def set_values(values):
+        writes.append(values)
+        for key,value in values.items(): u._path_set(current,key,value)
+    state={'changes':[{'kind':'alvr','key':'session_settings.video.preferred_fps','before_present':True,'before_value':72,'expected_after':90},
+                      {'kind':'alvr','key':'session_settings.video.bitrate.mode.ConstantMbps','before_present':True,'before_value':200,'expected_after':400}]}
+    assert u.restore_recorded_alvr(state,(session,set_values))
+    assert writes == [{'session_settings.video.preferred_fps':72,'session_settings.video.bitrate.mode.ConstantMbps':200}]
+
+def test_alvr_record_change_requires_lease_and_owned_runtime(monkeypatch,tmp_path):
+    path=tmp_path/'state.json'; u.atomic_write(path,{'restoration':{'status':'pending'},'owned_runtime':[]})
+    monkeypatch.setattr(u,'status_payload',lambda *args,**kwargs:{'lease':{'active':True,'blockers':[]}})
+    with pytest.raises(u.Refusal): u.record_change(path,'alvr','x',True,1,2)
