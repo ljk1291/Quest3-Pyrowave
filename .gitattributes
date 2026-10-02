@@ -1,2 +1,11 @@
+* text=auto
+*.patch text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.cmd text eol=crlf
+*.cso binary
+*.spv binary
+captures/** -text
 # Preserve the exact pinned source bytes used by the scorer-patch fixture.
 tools/tests/fixtures/pyrowave-d2997ac-psnr.cpp text eol=lf
