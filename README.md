@@ -19,6 +19,12 @@ latency, display FPS or acceptance telemetry. Borrowed command buffers retire Gr
 a later decode call, so the logs can lag one context. This off-by-default probe still requires
 hardware validation before it is used to guide an optimization.
 
+Save only the fresh diagnostic log window, then parse it with
+`python -m tools.quest3.pass_profile --log profile.log --out profile.json`.
+The offline parser rejects missing activation, invalid phase timings and native
+timestamp warnings. See the [decoder test plan and backlog](docs/DECODER-OPTIMIZATION-PLAN.md)
+for the controlled bitrate results and the next experiments.
+
 ## Baseline changes
 
 - Authoritative source pins, fork identity, matching build metadata, artifact checksums, shader verification and APK certificate fingerprints.
