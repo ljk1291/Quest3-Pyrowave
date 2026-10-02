@@ -50,3 +50,14 @@ proxies. Image frames are a separate run with exact source/decoded identity;
 manual in-headset judgement remains required for line shimmer. No result may
 attribute an artifact to the codec or the layer filter without the matching
 controls.
+
+## Integration verification, 2026-10-03
+
+The cumulative ALVR patch was regenerated with the merged WO-5 PC filters from
+the pinned ALVR plus instrumentation/Quest patch base. A separate clean apply
+reproduced all 30 changed files: the three WO-4 client files and every WO-5 file
+byte-for-byte. Reverse application, the subsequent fork-identity patch, and the
+Windows shader manifest checks passed. The legacy default shader binaries remain
+unchanged. CI runs the three pure Rust filter-policy tests without an OpenXR
+runtime before compiling the client. These source checks do not establish a
+Quest quality or performance improvement.

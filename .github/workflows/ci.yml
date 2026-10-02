@@ -22,6 +22,8 @@ jobs:
       - name: Install CPU chart-test dependencies
         run: python3 -m pip install --disable-pip-version-check -r tools/quest3/requirements-cpu.txt
       - run: python3 -m unittest discover -s tests -v
+      - name: Geometry-control contract tests
+        run: python3 -m unittest tools.tests.test_resolution -v
       - run: g++ -std=c++17 -Wall -Werror tools/pyroclient/decode_path_test.cpp -o /tmp/decode-path && /tmp/decode-path
       - run: g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/pass_profile_test.cpp -o /tmp/pass-profile && /tmp/pass-profile
       - name: GPU failure-policy state-machine test
@@ -71,6 +73,10 @@ jobs:
           echo "XRWIRED_ANDROID_SDK=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "XRWIRED_NDK=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target aarch64-linux-android
+      - name: Compositor filter policy checks (no OpenXR runtime)
+        run: |
+          rustup run "$RUST_TOOLCHAIN" rustc --edition=2021 --test "$XRWIRED_INPUTS/research/ALVR-20.13.0/alvr/client_openxr/src/layer_filter.rs" -o /tmp/layer-filter-policy
+          /tmp/layer-filter-policy
       - name: Restore pinned Android build tools
         id: android_tools_cache
         uses: actions/cache/restore@v4
@@ -172,6 +178,9 @@ jobs:
       - name: Reconstruct pinned sources
         shell: bash
         run: sh tools/ci/fetch_sources.sh "$XRWIRED_INPUTS/research"
+      - name: Experimental composition shader hashes and software WARP pixels
+        shell: cmd
+        run: call tools\windows\check_quality_shaders.cmd || exit /b 1
       - name: Stamp the installable client/server identity
         shell: bash
         run: python3 tools/ci/stamp_alvr_version.py "$XRWIRED_INPUTS/research/ALVR-20.13.0"
@@ -226,6 +235,8 @@ jobs:
         run: |
           New-Item -ItemType Directory out | Out-Null
           python tools/ci/package_licenses.py "$env:XRWIRED_INPUTS/research" "$env:XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_streamer_windows/LICENSES"
+          Copy-Item tools/windows/quality-shaders.json out/WINDOWS-COMPOSITION-SHADERS.json
+          Copy-Item tools/windows/quality-shaders.json "$env:XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_streamer_windows/WINDOWS-COMPOSITION-SHADERS.json"
           Compress-Archive "$env:XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_streamer_windows/*" out/Quest3-Pyrowave-Windows.zip
           python tools/ci/build_metadata.py write --platform windows --output out --pyrowave "$env:XRWIRED_INPUTS/research/pyrowave" --required-native "$env:XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_streamer_windows/bin/win64/driver_alvr_server.dll" "$env:XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_streamer_windows/bin/win64/libpyrowave-shared-0.dll"
           (Get-FileHash out/Quest3-Pyrowave-Windows.zip).Hash.ToLower() + '  Quest3-Pyrowave-Windows.zip' | Set-Content out/SHA256SUMS.txt

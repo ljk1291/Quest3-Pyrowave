@@ -574,13 +574,10 @@ index 688a94ff996571329b2422458d9e57bbc05686d2..40f2054d33b915b23d060af5f1a87ee6
              header: "Connecting".into(),
          })
 diff --git a/alvr/client_openxr/src/stream.rs b/alvr/client_openxr/src/stream.rs
-index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e2db9bced 100644
+index eb04019edefff6ebbc77744948a173d41687de19..accaaa4d254a0302501645b6de205000202813fc 100644
 --- a/alvr/client_openxr/src/stream.rs
 +++ b/alvr/client_openxr/src/stream.rs
-@@ -1,9 +1,9 @@
- use crate::{
--    graphics::{self, ProjectionLayerAlphaConfig, ProjectionLayerBuilder},
-+    graphics::{self, ProjectionLayerAlphaConfig, ProjectionLayerBuilder, ProjectionLayerSettingsConfig},
+@@ -3,7 +3,7 @@ use crate::{
      interaction::{self, InteractionContext, InteractionSourcesConfig},
  };
  use alvr_client_core::{
@@ -624,20 +621,7 @@ index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e
      frame_wait_budget: Duration,
      frame_wait_stats: [u64; 4], // waits, ready hits, total microseconds, max microseconds
      frame_wait_last_log: Instant,
-@@ -99,6 +108,7 @@ pub struct StreamContext {
-     pending_frame_selected_at: Option<Instant>,
-     pre_wait_stats: [u64; 5], // polls, hits, consumed held frames, total hold us, max hold us
-     pre_wait_last_log: Instant,
-+    layer_filter_flags: Option<u64>,
- }
- 
- impl StreamContext {
-@@ -109,10 +119,20 @@ impl StreamContext {
-         interaction_ctx: Arc<RwLock<InteractionContext>>,
-         platform: Platform,
-         config: ParsedStreamConfig,
-+        layer_filter_flags: Option<u64>,
-     ) -> StreamContext {
+@@ -113,6 +122,15 @@ impl StreamContext {
          interaction_ctx
              .write()
              .select_sources(&config.interaction_sources);
@@ -653,7 +637,7 @@ index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e
  
          let xr_exts = xr_session.instance().exts();
  
-@@ -190,7 +210,7 @@ impl StreamContext {
+@@ -190,7 +208,7 @@ impl StreamContext {
              format,
              config.foveated_encoding_config.clone(),
              platform != Platform::Lynx && !((platform.is_pico()) && config.enable_hdr),
@@ -662,15 +646,7 @@ index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e
              config.encoding_gamma,
              config.upscaling.clone(),
          );
-@@ -245,6 +265,7 @@ impl StreamContext {
-             pending_frame_selected_at: None,
-             pre_wait_stats: [0; 5],
-             pre_wait_last_log: Instant::now(),
-+            layer_filter_flags,
-         };
- 
-         alvr_graphics::log_quest_experiment(format!(
-@@ -511,8 +532,10 @@ impl StreamContext {
+@@ -511,8 +529,10 @@ impl StreamContext {
              }
          }
  
@@ -683,7 +659,7 @@ index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e
                  let view_params = self.core_context.report_compositor_start(timestamp);
  
                  // Avoid passing invalid timestamp to runtime
-@@ -521,9 +544,9 @@ impl StreamContext {
+@@ -521,9 +541,9 @@ impl StreamContext {
  
                  self.last_good_view_params = view_params;
  
@@ -695,7 +671,7 @@ index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e
              };
  
          // Match the inverse warp to the centre the server actually foveated this frame with.
-@@ -587,6 +610,13 @@ impl StreamContext {
+@@ -587,6 +607,13 @@ impl StreamContext {
  
              self.swapchains[0].release_image().unwrap();
              self.swapchains[1].release_image().unwrap();
@@ -709,17 +685,7 @@ index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e
              if latest_only {
                  video_decoder::telemetry::record_eye_copy(acquire_wait_ms, eye_render_ms,
                      release_start.elapsed().as_secs_f32() * 1000.0,
-@@ -650,7 +680,8 @@ impl StreamContext {
-                             | PassthroughMode::HsvChromaKey(_)
-                     ),
-                 }),
--        );
-+        )
-+        .with_settings(self.layer_filter_flags.map(|flags| ProjectionLayerSettingsConfig { flags }));
- 
-         (layer, timestamp)
-     }
-@@ -805,3 +836,25 @@ fn stream_input_loop(
+@@ -805,3 +832,25 @@ fn stream_input_loop(
          thread::sleep(deadline.saturating_duration_since(Instant::now()));
      }
  }
@@ -784,6 +750,176 @@ index 57060522d6aa0e566e0200b6838ca3cb0e2b152c..39b311dfda24ec23a99bd66357b3c4cd
          };
          let packet = ClientControlPacket::HeadsetTelemetry(t.clone());
          let bytes = bincode::serialize(&packet).unwrap();
+diff --git a/alvr/server_openvr/cpp/alvr_server/alvr_server.cpp b/alvr/server_openvr/cpp/alvr_server/alvr_server.cpp
+index 184e7552545889824b525400a74813ff2ce239cc..37a853654ce6978edb8e81ab67b7788362ec604c 100644
+--- a/alvr/server_openvr/cpp/alvr_server/alvr_server.cpp
++++ b/alvr/server_openvr/cpp/alvr_server/alvr_server.cpp
+@@ -249,6 +249,10 @@ const unsigned char* FRAME_RENDER_VS_CSO_PTR;
+ unsigned int FRAME_RENDER_VS_CSO_LEN;
+ const unsigned char* FRAME_RENDER_PS_CSO_PTR;
+ unsigned int FRAME_RENDER_PS_CSO_LEN;
++const unsigned char* RGBTOYUVPLANAR_DITHER_CSO_PTR;
++unsigned int RGBTOYUVPLANAR_DITHER_CSO_LEN;
++const unsigned char* FRAME_RENDER_PS_AREA_CSO_PTR;
++unsigned int FRAME_RENDER_PS_AREA_CSO_LEN;
+ const unsigned char* QUAD_SHADER_CSO_PTR;
+ unsigned int QUAD_SHADER_CSO_LEN;
+ const unsigned char* COMPRESS_AXIS_ALIGNED_CSO_PTR;
+diff --git a/alvr/server_openvr/cpp/alvr_server/bindings.h b/alvr/server_openvr/cpp/alvr_server/bindings.h
+index d51e5ca46085d6ad08a25b413530006438d2956e..7e72d91449ceb66987f808f284ce1fc7eeb9e417 100644
+--- a/alvr/server_openvr/cpp/alvr_server/bindings.h
++++ b/alvr/server_openvr/cpp/alvr_server/bindings.h
+@@ -88,6 +88,10 @@ extern "C" const unsigned char* FRAME_RENDER_VS_CSO_PTR;
+ extern "C" unsigned int FRAME_RENDER_VS_CSO_LEN;
+ extern "C" const unsigned char* FRAME_RENDER_PS_CSO_PTR;
+ extern "C" unsigned int FRAME_RENDER_PS_CSO_LEN;
++extern "C" const unsigned char* RGBTOYUVPLANAR_DITHER_CSO_PTR;
++extern "C" unsigned int RGBTOYUVPLANAR_DITHER_CSO_LEN;
++extern "C" const unsigned char* FRAME_RENDER_PS_AREA_CSO_PTR;
++extern "C" unsigned int FRAME_RENDER_PS_AREA_CSO_LEN;
+ extern "C" const unsigned char* QUAD_SHADER_CSO_PTR;
+ extern "C" unsigned int QUAD_SHADER_CSO_LEN;
+ extern "C" const unsigned char* COMPRESS_AXIS_ALIGNED_CSO_PTR;
+diff --git a/alvr/server_openvr/cpp/alvr_server/shader/FrameRender.fx b/alvr/server_openvr/cpp/alvr_server/shader/FrameRender.fx
+index b7422f52ec54b1119b867a865af59fdf6d89f8ad..d951164d4d2d301d2585a9bf5d14cde812ced019 100644
+--- a/alvr/server_openvr/cpp/alvr_server/shader/FrameRender.fx
++++ b/alvr/server_openvr/cpp/alvr_server/shader/FrameRender.fx
+@@ -3,6 +3,10 @@ cbuffer FrameRenderParams {
+ 	float _padding0;
+ 	float _padding1;
+ 	float _padding2;
++#ifdef Q3PW_AREA_FILTER
++	float4 boundsLeft; // normalized minU,minV,maxU,maxV; never mix cropped eyes
++	float4 boundsRight;
++#endif
+ };
+ 
+ Texture2D txLeft : register(t0);
+@@ -71,18 +75,66 @@ PS_INPUT VS(VS_INPUT input)
+ 
+ 	return output;
+ }
++#ifdef Q3PW_AREA_FILTER
++// Exact separable area-box overlap with source texel cells. This is an
++// axis-aligned footprint derived from local UV derivatives, not anisotropic
++// sampling without mipmaps. Four source texels/axis is the supported cap.
++// Magnification and equal-size samples use the existing sampler.
++float4 AreaSample(Texture2D sourceImage, float2 uv, float4 bounds) {
++	uint width = 0, height = 0;
++	sourceImage.GetDimensions(width, height);
++	float2 extent = float2(width, height);
++	float2 footprint = abs(ddx(uv) * extent) + abs(ddy(uv) * extent);
++	float2 safeUV = clamp(uv, bounds.xy + 0.5 / extent, bounds.zw - 0.5 / extent);
++	if (max(footprint.x, footprint.y) <= 1.001) {
++		return sourceImage.SampleLevel(samLinear, safeUV, 0);
++	}
++	footprint = clamp(footprint, 1.0, 4.0);
++	float2 centre = uv * extent;
++	float2 lo = centre - 0.5 * footprint;
++	float2 hi = centre + 0.5 * footprint;
++	int2 first = int2(floor(lo));
++	// Select only texels whose centres lie inside the submitted eye bounds.
++	int2 minPixel = int2(ceil(bounds.xy * extent - 0.5));
++	int2 maxPixel = int2(floor(bounds.zw * extent - 0.5));
++	minPixel = clamp(minPixel, int2(0,0), int2(width-1, height-1));
++	maxPixel = clamp(maxPixel, minPixel, int2(width-1, height-1));
++	float4 sum = 0.0;
++	float total = 0.0;
++	[unroll] for (int y = 0; y < 5; ++y) {
++		int py = first.y + y;
++		float wy = max(0.0, min(hi.y, py + 1.0) - max(lo.y, float(py)));
++		[unroll] for (int x = 0; x < 5; ++x) {
++			int px = first.x + x;
++			float wx = max(0.0, min(hi.x, px + 1.0) - max(lo.x, float(px)));
++			float weight = wx * wy;
++			int2 at = clamp(int2(px,py), minPixel, maxPixel);
++			sum += sourceImage.Load(int3(at, 0)) * weight;
++			total += weight;
++		}
++	}
++	return sum / max(total, 1e-8);
++}
++#endif
+ float4 PS(PS_INPUT input) : SV_Target
+ {
+ 	float4 color = float4(1.0, 0.0, 0.0, 1.0);
+ 	uint correctionType = (input.View >> 1) & 0xF;
+ 	uint shouldClamp = (input.View >> 5);
+ 
++#ifdef Q3PW_AREA_FILTER
++	// The opt-in variant is separate bytecode. Default keeps the original shader.
++	color = ((input.View & 1) == 1)
++		? AreaSample(txRight, input.Tex, boundsRight)
++		: AreaSample(txLeft, input.Tex, boundsLeft);
++#else
+ 	if ((input.View & 1) == 1) {
+ 		color = txRight.Sample(samLinear, input.Tex);
+ 	}
+ 	else {
+ 		color = txLeft.Sample(samLinear, input.Tex);
+ 	}
++#endif
+ 	
+ 	if (shouldClamp == (uint)1) {
+ 		color = clamp(color, 0.0, 1.0);
+@@ -101,4 +153,4 @@ float4 PS(PS_INPUT input) : SV_Target
+ 	}
+ 
+ 	return color;
+-};
+\ No newline at end of file
++};
+diff --git a/alvr/server_openvr/cpp/alvr_server/shader/FrameRenderPSArea.hlsl b/alvr/server_openvr/cpp/alvr_server/shader/FrameRenderPSArea.hlsl
+new file mode 100644
+index 0000000000000000000000000000000000000000..bc17bbcbf6a9b16689565bb596f3e436d7054a20
+--- /dev/null
++++ b/alvr/server_openvr/cpp/alvr_server/shader/FrameRenderPSArea.hlsl
+@@ -0,0 +1,2 @@
++#define Q3PW_AREA_FILTER 1
++#include "FrameRender.fx"
+diff --git a/alvr/server_openvr/cpp/alvr_server/shader/RgbToYuvPlanar.hlsl b/alvr/server_openvr/cpp/alvr_server/shader/RgbToYuvPlanar.hlsl
+index 8c0ef17aa3a56477f458f9595a8b6f38f96bc684..52bf0077cdaacc457f9669e4efc43accd8ff4c39 100644
+--- a/alvr/server_openvr/cpp/alvr_server/shader/RgbToYuvPlanar.hlsl
++++ b/alvr/server_openvr/cpp/alvr_server/shader/RgbToYuvPlanar.hlsl
+@@ -47,7 +47,18 @@ float3 LinearToSrgb(float3 c) {
+ 	return lerp(lo, hi, step(0.0031308, c));
+ }
+ 
++#ifdef Q3PW_ORDERED_DITHER
++// Stable spatial Bayer pattern with zero mean and amplitude < 0.5 R8 code.
++// This intentionally changes quantization only in the opt-in shader variant.
++float OrderedDither(float2 position) {
++	static const uint bayer[16] = {0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5};
++	uint2 p = uint2(position) & 3;
++	return ((bayer[p.y * 4 + p.x] + 0.5) / 16.0 - 0.5) / 255.0;
++}
++PS_OUTPUT main(float2 uv : TEXCOORD0, float4 position : SV_Position) {
++#else
+ PS_OUTPUT main(float2 uv : TEXCOORD0) {
++#endif
+ 	float3 rgb = sourceTexture.Sample(pointSampler, uv).rgb;
+ 	if (srgbEncode != 0) {
+ 		rgb = LinearToSrgb(rgb);
+@@ -57,5 +68,11 @@ PS_OUTPUT main(float2 uv : TEXCOORD0) {
+ 	output.plane_Y = dot(rgb, yCoeff.rgb) + offset.x;
+ 	output.plane_Cb = dot(rgb, uCoeff.rgb) + offset.y;
+ 	output.plane_Cr = dot(rgb, vCoeff.rgb) + offset.z;
++#ifdef Q3PW_ORDERED_DITHER
++	float d = OrderedDither(position.xy);
++	output.plane_Y = saturate(output.plane_Y + d);
++	output.plane_Cb = saturate(output.plane_Cb + d);
++	output.plane_Cr = saturate(output.plane_Cr + d);
++#endif
+ 	return output;
+ }
+diff --git a/alvr/server_openvr/cpp/alvr_server/shader/RgbToYuvPlanarDither.hlsl b/alvr/server_openvr/cpp/alvr_server/shader/RgbToYuvPlanarDither.hlsl
+new file mode 100644
+index 0000000000000000000000000000000000000000..318754e6f6bf2a83e18f9322272ac1daa01f5452
+--- /dev/null
++++ b/alvr/server_openvr/cpp/alvr_server/shader/RgbToYuvPlanarDither.hlsl
+@@ -0,0 +1,2 @@
++#define Q3PW_ORDERED_DITHER 1
++#include "RgbToYuvPlanar.hlsl"
 diff --git a/alvr/server_openvr/cpp/platform/win32/CEncoder.cpp b/alvr/server_openvr/cpp/platform/win32/CEncoder.cpp
 index 2f68f660a49913b593f84749fa254d44475a4d0c..e55d914e30748c021eda7a460bf33f901d323868 100644
 --- a/alvr/server_openvr/cpp/platform/win32/CEncoder.cpp
@@ -972,6 +1108,199 @@ index 32509edd41ea9a4798f4e74af878eaf7504d6eaa..2bb63017cb162e291065d9b156fe0826
      uint64_t m_presentationTime;
      uint64_t m_targetTimestampNs;
  
+diff --git a/alvr/server_openvr/cpp/platform/win32/FrameRender.cpp b/alvr/server_openvr/cpp/platform/win32/FrameRender.cpp
+index 668f121298a60a2ee538fe3873168a261b88d616..b6362b24bcdb69aba5e685f76ef0302039f6e908 100644
+--- a/alvr/server_openvr/cpp/platform/win32/FrameRender.cpp
++++ b/alvr/server_openvr/cpp/platform/win32/FrameRender.cpp
+@@ -6,6 +6,8 @@
+ 
+ #include <cstdlib>
+ #include <cstring>
++#include <cmath>
++#include <algorithm>
+ 
+ extern uint64_t g_DriverTestMode;
+ 
+@@ -222,9 +224,30 @@ bool FrameRender::Startup() {
+         return false;
+     }
+ 
+-    std::vector<uint8_t> pshader(
+-        FRAME_RENDER_PS_CSO_PTR, FRAME_RENDER_PS_CSO_PTR + FRAME_RENDER_PS_CSO_LEN
+-    );
++    const char* filter = std::getenv("ALVR_Q3PW_DOWNSCALE");
++    const char* dither = std::getenv("ALVR_Q3PW_DITHER");
++    if (filter && *filter && std::strcmp(filter, "off") && std::strcmp(filter, "area")) {
++        Error("[Q3PW_QUALITY] unsupported ALVR_Q3PW_DOWNSCALE; use off or area\n");
++        return false;
++    }
++    if (dither && *dither && std::strcmp(dither, "0") && std::strcmp(dither, "1")) {
++        Error("[Q3PW_QUALITY] unsupported ALVR_Q3PW_DITHER; use 0 or 1\n");
++        return false;
++    }
++    m_areaDownscale = filter && !std::strcmp(filter, "area");
++    m_orderedDither = dither && !std::strcmp(dither, "1");
++    if ((m_areaDownscale || m_orderedDither)
++        && (!PyroWaveEnabled() || Settings::Instance().m_enableHdr || Settings::Instance().m_enableFoveatedEncoding)) {
++        Error("[Q3PW_QUALITY] experiments require unfoveated SDR PyroWave\n");
++        return false;
++    }
++    if (m_areaDownscale || m_orderedDither) {
++        Warn("[Q3PW_QUALITY] downscale=%s dither=%s; experimental, default-off\n",
++            m_areaDownscale ? "area_box_max4" : "off", m_orderedDither ? "ordered4" : "off");
++    }
++    const auto* ps = m_areaDownscale ? FRAME_RENDER_PS_AREA_CSO_PTR : FRAME_RENDER_PS_CSO_PTR;
++    const auto psLen = m_areaDownscale ? FRAME_RENDER_PS_AREA_CSO_LEN : FRAME_RENDER_PS_CSO_LEN;
++    std::vector<uint8_t> pshader(ps, ps + psLen);
+     hr = m_pD3DRender->GetDevice()->CreatePixelShader(
+         (const DWORD*)&pshader[0], pshader.size(), NULL, &m_pPixelShader
+     );
+@@ -268,7 +291,12 @@ bool FrameRender::Startup() {
+     };
+     FrameRenderBuffer frameRenderStruct
+         = { (float)(1.0 / Settings::Instance().m_encodingGamma), 0.0f, 0.0f, 0.0f };
+-    m_pFrameRenderCBuffer = CreateBuffer(m_pD3DRender->GetDevice(), frameRenderStruct);
++    if (m_areaDownscale) {
++        const QualityFrameParams params = {frameRenderStruct.encodingGamma, {0,0,0}, {0,0,1,1}, {0,0,1,1}};
++        m_pFrameRenderCBuffer = CreateBuffer(m_pD3DRender->GetDevice(), params, D3D11_USAGE_DEFAULT);
++    } else {
++        m_pFrameRenderCBuffer = CreateBuffer(m_pD3DRender->GetDevice(), frameRenderStruct);
++    }
+ 
+     //
+     // Create vertex buffer
+@@ -632,9 +660,9 @@ bool FrameRender::Startup() {
+              fullRange ? "full" : "limited",
+              paramStruct.srgbEncode);
+ 
+-        std::vector<uint8_t> planarShaderCSO(
+-            RGBTOYUVPLANAR_CSO_PTR, RGBTOYUVPLANAR_CSO_PTR + RGBTOYUVPLANAR_CSO_LEN
+-        );
++        const auto* planarPS = m_orderedDither ? RGBTOYUVPLANAR_DITHER_CSO_PTR : RGBTOYUVPLANAR_CSO_PTR;
++        const auto planarLen = m_orderedDither ? RGBTOYUVPLANAR_DITHER_CSO_LEN : RGBTOYUVPLANAR_CSO_LEN;
++        std::vector<uint8_t> planarShaderCSO(planarPS, planarPS + planarLen);
+         ComPtr<ID3D11Buffer> planarParamBuffer
+             = CreateBuffer(m_pD3DRender->GetDevice(), paramStruct);
+ 
+@@ -989,6 +1017,28 @@ bool FrameRender::RenderFrame(
+ 
+         m_pD3DRender->GetContext()->PSSetSamplers(0, 1, m_pSamplerLinear.GetAddressOf());
+ 
++        if (m_areaDownscale) {
++            QualityFrameParams params = {};
++            params.encodingGamma = (float)(1.0 / Settings::Instance().m_encodingGamma);
++            for (int eye = 0; eye < 2; ++eye) {
++                D3D11_TEXTURE2D_DESC desc;
++                textures[eye]->GetDesc(&desc);
++                const float u0 = (std::min)(bound[eye].uMin, bound[eye].uMax);
++                const float u1 = (std::max)(bound[eye].uMin, bound[eye].uMax);
++                const float v0 = (std::min)(bound[eye].vMin, bound[eye].vMax);
++                const float v1 = (std::max)(bound[eye].vMin, bound[eye].vMax);
++                if (!std::isfinite(u0) || !std::isfinite(u1) || !std::isfinite(v0) || !std::isfinite(v1)
++                    || u0 < 0 || u1 > 1 || v0 < 0 || v1 > 1 || u0 >= u1 || v0 >= v1
++                    || desc.Width * (u1-u0) > m_viewportL.Width * 4.0f
++                    || desc.Height * (v1-v0) > m_viewportL.Height * 4.0f) {
++                    Error("[Q3PW_QUALITY] area filter requires valid eye crop and at most 4x minification\n");
++                    return false;
++                }
++                float* dst = eye ? params.boundsRight : params.boundsLeft;
++                dst[0] = u0; dst[1] = v0; dst[2] = u1; dst[3] = v1;
++            }
++            UpdateBuffer(m_pD3DRender->GetContext(), m_pFrameRenderCBuffer.Get(), &params);
++        }
+         //
+         // Draw
+         //
+diff --git a/alvr/server_openvr/cpp/platform/win32/FrameRender.h b/alvr/server_openvr/cpp/platform/win32/FrameRender.h
+index 8a395c833f2aeb94a5eb2f997f238cfbcf9884c2..7500aa0b7b8f8778acc360101e0923a443bab00b 100644
+--- a/alvr/server_openvr/cpp/platform/win32/FrameRender.h
++++ b/alvr/server_openvr/cpp/platform/win32/FrameRender.h
+@@ -88,6 +88,14 @@ private:
+     ComPtr<ID3D11Buffer> m_pVertexBuffer;
+     ComPtr<ID3D11Buffer> m_pIndexBuffer;
+     ComPtr<ID3D11Buffer> m_pFrameRenderCBuffer;
++    bool m_areaDownscale = false;
++    bool m_orderedDither = false;
++    struct QualityFrameParams {
++        float encodingGamma;
++        float padding[3];
++        float boundsLeft[4];
++        float boundsRight[4];
++    };
+ 
+     ComPtr<ID3D11SamplerState> m_pSamplerLinear;
+ 
+diff --git a/alvr/server_openvr/cpp/platform/win32/FrameRenderPSArea.cso b/alvr/server_openvr/cpp/platform/win32/FrameRenderPSArea.cso
+new file mode 100644
+index 0000000000000000000000000000000000000000..0ee308e85c45fd6e96f011668c7d65d9f08685f8
+GIT binary patch
+literal 15552
+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
+L>URyjub2M-;dcGb
+
+literal 0
+HcmV?d00001
+
 diff --git a/alvr/server_openvr/cpp/platform/win32/OvrDirectModeComponent.cpp b/alvr/server_openvr/cpp/platform/win32/OvrDirectModeComponent.cpp
 index d1a18787cf61087043cd1ad091bfcad4b26035a1..9467f7d57692e957dc618060429a9e263d3f817c 100644
 --- a/alvr/server_openvr/cpp/platform/win32/OvrDirectModeComponent.cpp
@@ -1118,6 +1447,56 @@ index 230c7517ac3165b6b9f75cd0fe6c1d0c6e8cca52..4f6b02b0eae9df3f7488046f88262428
  
      pyrowave_device m_pyroDevice = nullptr;
      pyrowave_encoder m_pyroEncoder = nullptr;
+diff --git a/alvr/server_openvr/cpp/platform/win32/rgbtoyuvplanardither.cso b/alvr/server_openvr/cpp/platform/win32/rgbtoyuvplanardither.cso
+new file mode 100644
+index 0000000000000000000000000000000000000000..1b9ebb0b5746f66ee035702be87611112ac3077e
+GIT binary patch
+literal 2540
+zcmbtU&1+Lx6hBFAZR4oL89_ziIS77%Ho-5{+SGhlp&ub1Qa`|XZC=`xHZQ!SIs+on
+zg)WrA#Vki~tASYwx>3Q^EN1IkH-ZcQ1*yN^d+($#G1bBxIJx)!&hPy0x%Zxz<n;N(
+z!rtPu#}mWlg?sP6tbFX742j6+0g+ye$Kd;VL~g-9z%#(J$yEANScJTP;eh2VTzXel
+z<c`Q|#Ing~l-Lfq0Y3oW2mc99`y0-@PNOF6DI79x4I417z%aObQsV^|T}<<<cDYi|
+znM>70%aNMB?95tu>-YMyW69;^8<|D3VmcYqF_&u6q*g!t13Uv)Ggts@5YFk4zt&oG
+z%mXLqN4%@x8SCK9fH$-bUKzYNc)TA><raTnT9=MbfG2^IM_Y^c47@SKf5dwZ-uOCr
+zcBxde>QY*?&H6EEHbZ#vP)nVawA+5@{*kb)Qc0G*;f6QVoVl4)W!5fQQoLz9MQDlq
+z3@v@_b{($j(7IkVi^XzfZm2bjwq`MzD9<`}%`VlA1KESd*m!Q-$jzHY%P|u6Qnie}
+zF``39qS)(V?!sgSnvit+<P<mXO?$WplTjaIRm3@N#U!7aPE1W@lajl1J!99(^|D=o
+zY;y{_*L*Jfk9(-8ZfJ{#>q%8tan?j5&N*>xlQ*3?Tz#{d8%s^k<3pzQ6^JbKOXxU0
+z%JW!v8fyreYAY7ei9hPMtg!Ztu2D*x^|h_O{r)#~#P!Sy<FBX9wzjQAHg>ExcdYq;
+z7PQM~_4J>H3o&+uCH*$&uBUgPQLEm(P!O3Jl%Ck2w=Np8fpgYJw~)8Z@M1a-;=IRs
+zJP+?DCGy~{NF!0$E{^+;A(HlW)3-eht>J_rz2s0U9rj}QKaLQiCNajsagm$<9ge93
+zlB4+R4D!fF-?rrv3&%wYg?H!F0m;rTxiPeIryg^MBlkztnH!Fa{Byy4r4C4tyE%~C
+z7zL(vXJ1Z^s*}qzv93LSt?cXIId>nKIHOL!o=NX$EnVR5*;UW|UgA_}jI6p_>i}z2
+zJ>>`Q`=qbM?7oJ<0nM^nr@j?ltpBdQvHyPQy9Vj5K89BOw9kw9dgScJJH)gWzuz8;
+zZ2Hy5LUG(TcslM1;LIm?TL4ooV-X+MoJ%;0awCr(wc?;|Y~cYd;3Ig~f$p)!Fl&On
+zi5cJ+UhnFjjNNH8&ghxHcTcRDaqdIYyVZN_anaQ{_n;jL+@sb&t<D;hk5Fq5t!q~o
+ojnH>A&fzI?`O*Ae;Gloqo?tb-@L%9G=F``*ZZXYa{r|_l0_>m`>;M1&
+
+literal 0
+HcmV?d00001
+
+diff --git a/alvr/server_openvr/src/graphics.rs b/alvr/server_openvr/src/graphics.rs
+index 791aa5ebd2dd52b3489402bbd3859186c5d27c04..8d333f64fbadb8622a4278c740972327e0125d2c 100644
+--- a/alvr/server_openvr/src/graphics.rs
++++ b/alvr/server_openvr/src/graphics.rs
+@@ -1,4 +1,6 @@
+ static FRAME_RENDER_VS_CSO: &[u8] = include_bytes!("../cpp/platform/win32/FrameRenderVS.cso");
++static FRAME_RENDER_PS_AREA_CSO: &[u8] = include_bytes!("../cpp/platform/win32/FrameRenderPSArea.cso");
++static RGBTOYUVPLANAR_DITHER_CSO: &[u8] = include_bytes!("../cpp/platform/win32/rgbtoyuvplanardither.cso");
+ static FRAME_RENDER_PS_CSO: &[u8] = include_bytes!("../cpp/platform/win32/FrameRenderPS.cso");
+ static QUAD_SHADER_CSO: &[u8] = include_bytes!("../cpp/platform/win32/QuadVertexShader.cso");
+ static COMPRESS_AXIS_ALIGNED_CSO: &[u8] =
+@@ -20,6 +22,10 @@ pub fn initialize_shaders() {
+         crate::FRAME_RENDER_VS_CSO_LEN = FRAME_RENDER_VS_CSO.len() as _;
+         crate::FRAME_RENDER_PS_CSO_PTR = FRAME_RENDER_PS_CSO.as_ptr();
+         crate::FRAME_RENDER_PS_CSO_LEN = FRAME_RENDER_PS_CSO.len() as _;
++        crate::FRAME_RENDER_PS_AREA_CSO_PTR = FRAME_RENDER_PS_AREA_CSO.as_ptr();
++        crate::FRAME_RENDER_PS_AREA_CSO_LEN = FRAME_RENDER_PS_AREA_CSO.len() as _;
++        crate::RGBTOYUVPLANAR_DITHER_CSO_PTR = RGBTOYUVPLANAR_DITHER_CSO.as_ptr();
++        crate::RGBTOYUVPLANAR_DITHER_CSO_LEN = RGBTOYUVPLANAR_DITHER_CSO.len() as _;
+         crate::QUAD_SHADER_CSO_PTR = QUAD_SHADER_CSO.as_ptr();
+         crate::QUAD_SHADER_CSO_LEN = QUAD_SHADER_CSO.len() as _;
+         crate::COMPRESS_AXIS_ALIGNED_CSO_PTR = COMPRESS_AXIS_ALIGNED_CSO.as_ptr();
 diff --git a/alvr/server_openvr/src/lib.rs b/alvr/server_openvr/src/lib.rs
 index 861f726c74e38cec9058513ab412ceb08ae2e8bf..b54c2e722b9df8499013802466c7afa42c061925 100644
 --- a/alvr/server_openvr/src/lib.rs
