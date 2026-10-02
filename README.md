@@ -12,6 +12,13 @@ unqualified. See the [controlled results](results/optimal-ahb-screen-2026-10-02.
 and [optimization plan](docs/DECODER-OPTIMIZATION-PLAN.md); this is an experimental
 Haar/direct-copy profile, not a new default.
 
+The [supervised colour-fix check](results/colour-quality-check-2026-10-02.json)
+verified the signed matching pair and disabled colour remap. The owner reports
+normal chart colours, but remaining compression-like texture and line aliasing.
+Metro startup hit a terminal PC encoder fence timeout; gameplay, exact image
+correctness and stable 90 Hz remain unqualified. Saved settings and VD state
+were restored; no optimization is promoted.
+
 The [research reconciliation and prioritized shortlist](docs/DECODER-RESEARCH-2026-10-02.md)
 compares WiVRn, PyroWave/PyroFling, FFmpeg, IGL, libplacebo, Nova/Polaris,
 NX Warp and Nightfall against those measurements. It prioritizes per-pass

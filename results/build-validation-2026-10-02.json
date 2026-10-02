@@ -284,10 +284,14 @@
     "android_job": "success",
     "windows_job": "success",
     "matching_pair_job": "success",
-    "validation_scope": "GitHub Actions job conclusions; signed workflow with existing stable-key policy",
-    "artifact_download_and_local_checksum_verification": false,
-    "installed": false,
+    "validation_scope": "Cloud builds/tests; local archive/artifact/native-library checksum and matching-pair validation; installed version and fresh colour/allocation activation logs",
+    "artifact_download_and_local_checksum_verification": true,
+    "installed": true,
     "headset_validated": false,
-    "note": "PyroWave-specific bypass of legacy RGB range compression. Keep distinct from the headset-tested f2e9df5704cc pair; verify downloaded metadata, hashes and certificate before installation."
+    "note": "Signed d1 pair installed and activation verified. Quality/range and gameplay acceptance remain incomplete/failed; terminal PC encoder fence timeout during Metro launch. Do not transfer f2 rate measurements to this build.",
+    "headset_activation_verified": true,
+    "subjective_chart_colours": "normal; compression/mura remains",
+    "session_07_evidence": "colour-quality-check-2026-10-02.json",
+    "godlike90_accepted": false
   }
 }

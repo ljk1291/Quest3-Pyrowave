@@ -11,6 +11,17 @@ licences, activation requirements, effort/risks and isolated correctness gates.
 The next-work order below takes priority over unfinished historical experiments:
 
 - [x] Reconcile the references with current code and earlier rejected experiments.
+- [x] Install the verified signed colour-fix pair and confirm fresh colour-policy
+  and recommended-allocation activation. Chart colours now look normal to the
+  owner; this is not a precise range or overall image-quality pass.
+- [ ] Before further hardware comparisons, finish an unobscured neutral-patch
+  check and immutable source/decoded-frame image controls. Persistent texture
+  and line aliasing remain unexplained; compositor PNGs are qualitative.
+- [ ] Investigate the terminal PC encoder timeout during Metro startup and
+  preserve control/shutdown access after encoder failure. Keep the one-second
+  safety bound and pending-resource retirement. Generalize the verified offline
+  rollback fallback; require sampled idle competing workloads throughout future
+  timing windows. A later active ComfyUI job does not establish timeout causation.
 - [ ] **P0:** add per-component/level dequant/iDWT profiling on the faster
   recommended-AHB configuration; verify actual payload/shader activation and
   measure profiler overhead separately. The older 3.75/5.00-ms split is not a
@@ -30,7 +41,9 @@ The next-work order below takes priority over unfinished historical experiments:
 - [ ] **P5:** consider a new bounded output-lease/scheduling design only if
   profiling attributes a remaining bottleneck to completion/selection/handoff.
 
-No baseline, dependency pin or installed build changes in this research step.
+No baseline or dependency pin was changed by the source-review step. The
+subsequent Session 07 installed the colour-fix candidate separately; no
+optimization or stable profile was promoted.
 Every hardware experiment still needs explicit session scope/readiness, finite
 limits and exact settings restoration. Source review and a standalone win
 cannot promote a stable 90-Hz profile.
@@ -56,8 +69,15 @@ The session negotiated full range, but a legacy downstream full-RGBA to
 limited-range remap remains a candidate for the dull-colour symptom. A
 codec-specific bypass is implemented in source and is not part of this tested build.
 Its signed `d1c3b3d4edb3` pair passed cloud builds/tests and matching-pair
-verification; it remains uninstalled and unvalidated on the headset.
-Validate it first with grayscale/range checks, then replay the same Metro
+verification. The subsequent matching-pair Session 07 verified local artifacts,
+installation and fresh activation: the owner reports normal chart colours but
+persistent mura-like texture and SteamVR line aliasing. The neutral patches
+were partly covered by the dashboard in the retained capture. Metro startup
+hit a terminal PC encoder fence timeout, before a gameplay checkpoint or image
+capture qualified. Exact settings restoration required recovery after the
+failed API; all saved values and VD configuration hashes were verified restored.
+See [the follow-up result](../results/colour-quality-check-2026-10-02.json).
+Finish unobscured grayscale/range and same-input controls, then replay the same Metro
 checkpoint with allocation off/on at fixed 500-Mbps Haar settings. Compare Haar
 with CDF 9/7 at the same profile; use HEVC and a Virtual Desktop reference only
 as separately recorded controls. Preserve external and internal geometry and

@@ -29,19 +29,43 @@ remap is a candidate for the dull-colour symptom. A codec-specific bypass is
 implemented in source, with hardware-codec policy regression tests and a
 `Q3PW_COLOUR` activation log. The signed `d1c3b3d4edb3` pair passed
 [cloud build/test and matching-pair validation](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37053223424).
-It remains uninstalled and unvalidated on the headset; the fix is not in the
-tested pair and does not diagnose the compression artifacts.
-The session restored all recorded settings and verified the original VDXR
-registration/manifest with zero restoration errors. The next sequence is
-grayscale/range validation of the patch, then a fixed-checkpoint allocation
-off/on replay, Haar/CDF 9/7 comparison at fixed 500 Mbps, and HEVC/VD controls
-only where needed. See [the sanitized Metro observation](../results/metro-quality-feedback-2026-10-02.json).
+The fix is not in that initial `f2` observation or its rate measurements.
+The initial session restored all recorded settings and the original VDXR
+registration/manifest. See [the initial Metro observation](../results/metro-quality-feedback-2026-10-02.json).
+
+The subsequent supervised **Session 07** installed the matching signed
+`d1c3b3d4edb3` pair after local archive, artifact and native-library checksum
+verification. At the same 3072×3232/90-Hz/500-Mbps Haar configuration, fresh
+logs confirmed the colour remap disabled and all three recommended AHB
+allocations active. The owner reported normal chart colours, but persistent
+mura-like texture/compression, including the Lone Echo library thumbnail and
+aliasing on SteamVR environment lines. The screenshot is qualitative; the
+dashboard obscures the lower neutral patches, so precise range and source/decode
+pixel equivalence remain unvalidated.
+
+Metro created the expected stereo swapchain and projection views, but the PC
+encoder's fence timed out after 1000 ms during startup. Device-removal status
+was `S_OK`; the stream stopped and ALVR's API became unavailable. No gameplay
+checkpoint, gameplay screenshot, rate capture or decoder profile qualified.
+ComfyUI was idle at preflight and active at the later diagnostic; its state at
+the actual timeout is unverified, so causation is unresolved.
+
+Automatic rollback restored some values but could not use the failed API.
+Path/start-time verified runtime closure and offline exact-key recovery restored
+all saved settings, driver membership, pairing state and 24 Quest properties.
+Both VD configuration hashes and the VDXR registration/manifest match before;
+all test processes are closed. The signed candidate APK remains installed.
+See [the colour/quality follow-up](../results/colour-quality-check-2026-10-02.json).
+No optimization or stable profile is promoted. Finish unobscured range and
+same-input image controls, investigate safe terminal-encoder/control recovery,
+and require idle competing workloads throughout the next performance window.
 
 The [source-pinned research reconciliation](DECODER-RESEARCH-2026-10-02.md)
 extends the backlog without changing implementation or baseline settings.
 It separates existing capabilities from unproven activation, preserves rejected
 experiments, and prioritizes detailed profiling, final-luma fusion and planar
-Vulkan-to-RGB presentation feasibility. No new hardware result is claimed.
+Vulkan-to-RGB presentation feasibility. The source review itself supplies no
+hardware result; Session 07 above is a separate subsequent test.
 
 The latest owner-authorized AFK Session 05 found a repeatable AHardwareBuffer
 allocation improvement on the verified `f2e9df5704cc` pair. At the same

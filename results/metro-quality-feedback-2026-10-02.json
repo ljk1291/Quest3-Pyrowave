@@ -14,8 +14,14 @@
     "chroma": "4:2:0",
     "hdr": false,
     "refresh_hz": 90,
-    "render_and_encoded_resolution_per_eye": [3072, 3232],
-    "encoder_stereo_resolution": [6144, 3232],
+    "render_and_encoded_resolution_per_eye": [
+      3072,
+      3232
+    ],
+    "encoder_stereo_resolution": [
+      6144,
+      3232
+    ],
     "direct_eye_copy": true,
     "fragment_min_usage": true,
     "optimal_ahb_usage": true,
@@ -44,7 +50,7 @@
     "not_an_acceptance_result": true
   },
   "investigation_status": {
-    "known_colour_path_candidate": "A legacy full-RGBA to limited-range remap remains enabled downstream even when this PyroWave session negotiates full range. A codec-specific bypass at d1c3b3d4edb3 passed signed CI build/test and matching-pair validation in run 37053223424. It is not in this tested build and remains uninstalled and unvalidated on the headset.",
+    "known_colour_path_candidate": "The initial f2 pair applied a legacy full-RGBA to limited-range remap. The signed d1c3b3d4edb3 follow-up bypass was subsequently installed with fresh activation proof: owner reports normal chart colours but persistent mura-like texture and SteamVR line aliasing. Metro follow-up stopped with a terminal PC encoder timeout. See colour-quality-check-2026-10-02.json; initial f2 observations and measurements are unchanged.",
     "compression_cause": "unknown; do not attribute the observation to Haar, 4:2:0, bitrate, allocation usage, or the colour-path candidate without controlled replay."
   },
   "restoration": {
@@ -58,5 +64,6 @@
     "Compare Haar and CDF 9/7 at the same 500 Mbps profile.",
     "Use HEVC and a Virtual Desktop reference only as separately documented controls when needed.",
     "Record external and internal game geometry, and require exact source/decode frame identity before numerical quality claims."
-  ]
+  ],
+  "follow_up_evidence": "colour-quality-check-2026-10-02.json"
 }

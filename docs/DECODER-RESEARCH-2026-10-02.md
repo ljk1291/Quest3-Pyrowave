@@ -1,15 +1,20 @@
 # Decoder research reconciliation — 2026-10-02
 
 This review extends the [optimization plan](DECODER-OPTIMIZATION-PLAN.md).
-It changes neither the baseline nor dependency pins. No new hardware test,
-third-party program execution, or optimization promotion was performed.
+The source-review step changed neither the baseline nor dependency pins and
+performed no hardware test, third-party program execution or promotion.
+The subsequent [colour-check result](../results/colour-quality-check-2026-10-02.json)
+is separate: signed `d1` activation verified, subjective chart colours normal,
+texture/aliasing unresolved, and Metro stopped by a PC encoder fence timeout.
+Quality controls and safe failure recovery precede new hardware comparisons.
 The ordered recommendation is **profile the faster allocation, test final-luma
 fusion, then establish direct YUV sampling into Vulkan RGB targets**. Later
 work depends on those measurements; source architecture supplies no speedup estimate.
 
 ## Measured control and unresolved quality
 
-The headset-tested pair remains `f2e9df5704cc679513848bf6ffb63ef1695479f9`:
+The pair supplying the measured allocation/rate comparison is
+`f2e9df5704cc679513848bf6ffb63ef1695479f9`:
 ALVR `7eda092dbf0002281410a4222683ec228700cffb`, PyroWave
 `d2997ac172bdc00e29c58e3f2938acb7e94580bf`, Granite
 `842d9d5686ba8c799a7d34a78a68f98d6aeb5a68`, with the repository overlays.
@@ -37,9 +42,13 @@ gameplay control, so allocation regression is unknown. Post-exit captures are
 not Metro evidence. Commit `d1c3b3d4edb354be8176ccaf5604918fe9ee4a52` removes
 PyroWave's extra RGB-to-limited-range presentation remap. Its
 [signed build](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37053223424)
-passed CI, including matching-pair verification, but is not installed or
-headset-validated. Establish a new pair-local colour-correct control before
-quality-sensitive optimization comparisons; never relabel the old rate data.
+passed CI and local matching-pair/checksum verification, and was subsequently
+installed with fresh activation proof. Chart colours look normal to the owner;
+texture/aliasing persists and precise neutral-range/pixel correctness is not
+validated. Metro startup failed with a terminal PC encoder fence timeout and
+unavailable control API; exact rollback was completed through offline recovery.
+Establish a complete pair-local image-quality control before quality-sensitive
+optimization comparisons; never relabel the old rate data.
 
 ## Immutable research sources
 

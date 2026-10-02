@@ -1,0 +1,209 @@
+{
+  "schema_version": 1,
+  "scope": "finite supervised colour/image-quality check; Metro launch attempt, not an optimization or rate benchmark",
+  "build": {
+    "repository_commit": "d1c3b3d4edb354be8176ccaf5604918fe9ee4a52",
+    "application_version": "20.13.0-ljk1291.2+d1c3b3d4edb3",
+    "protocol_version": "20.13.0-ljk1291.2",
+    "sources_lock_sha256": "b4a61b3ae0bdff818de18c8f97a1a2a1ba80ace7bf636de48093d22ad5aba23b",
+    "dependency_revisions": {
+      "alvr": {
+        "commit": "7eda092dbf0002281410a4222683ec228700cffb",
+        "url": "https://github.com/alvr-org/ALVR"
+      },
+      "android_ndk": "27.2.12479018",
+      "cargo_apk": {
+        "commit": "0fd3126dad5aa1c5f0f26cdae3410f2e5af62c60",
+        "url": "https://github.com/zarik5/cargo-apk"
+      },
+      "granite": {
+        "commit": "842d9d5686ba8c799a7d34a78a68f98d6aeb5a68",
+        "url": "https://github.com/Themaister/Granite"
+      },
+      "integration": {
+        "commit": "54cc8519bddceff57e159e6f39914e373b512809",
+        "url": "https://github.com/Terminal-ennui/galaxy-xr-alvr-pyrowave-444"
+      },
+      "openxr_loader": {
+        "android_aar": "openxr_loader_for_android-1.0.34.aar",
+        "release": "release-1.0.34",
+        "sha256": "c8b50603ad3b81756c6bd203ab9c9d19341326e14f6cbae87ee894137ee5e256"
+      },
+      "pyrowave": {
+        "commit": "d2997ac172bdc00e29c58e3f2938acb7e94580bf",
+        "url": "https://github.com/Themaister/pyrowave"
+      },
+      "reproducibility": "Pinned inputs and build recipe; signed APKs and ZIP metadata are not claimed byte-identical.",
+      "rust": "1.97.1"
+    },
+    "shader_hashes": {
+      "shaders/constants.h": "3bc9555f8399bad2bd6960536125588fd7dbc7936a7147755fc497241f04e062",
+      "shaders/dwt.comp": "f58c3f95d68a90f4621fc1999bcf9a95e1a263b80d20355b0ac20002828a90b1",
+      "shaders/dwt_common.h": "591f529143fce7efad00c0f5a5e6d9be0a714fb2d5098ac5e89242c0041ada26",
+      "shaders/dwt_quant_scale.h": "4a5e60c22785075341afa29211275857a4f3922999e0f5799131c5f4acf2c4be",
+      "shaders/dwt_swizzle.h": "0283e54d268f25375866274dd3728384c75d9783cab12787d8914588b80f0f30",
+      "shaders/idwt.comp": "e3bb1b44e1e0cb0c2137c44dc50c42f0de4b625f8505f26e96b89ea210c2c3af",
+      "shaders/idwt_haar_fused.comp": "a85ffbeb0966e22855d8c76690a7283fb6a2a5967ae5028feac81663c99be629",
+      "shaders/slangmosh.hpp": "4f84897f9d7fbb07cbc5ccba6d98bc83b85f697ca170578ba959118c84032995",
+      "shaders/slangmosh.json": "d5ea9829b89ee2ac5d16c12b34561971cfeaef5e97eec5ac47ec9a4baa3d06d5",
+      "shaders/wavelet_dequant.comp": "e588ddfdd7c3d1873b758a9d8511b80a946fccf384a7aab0b3368d4212aa1a44"
+    },
+    "native_library_sha256": {
+      "libpyroclient.so": "bd33b0fa2ac6eb600c16806f645b4704afa4144a501fed08835efa39bc6c246d",
+      "libpyrowave-shared.so": "9c5ba02ba372745f23289a5ebd9555a6b2a21a9672a3ad545143c26889c09848"
+    },
+    "signing_certificate_sha256": "4a3fe0a8d47ee67b01710df6ffdc870e91ebc5b8e7feec7c87534944ca2a44aa"
+  },
+  "build_verification": {
+    "matching_pair": true,
+    "artifact_checksums": true,
+    "installed_client_version": true,
+    "signing_kind": "stable",
+    "apk_sha256": "690cdfddc5bc780c7047ba76ba943157f72b6e52fd9591db948c32e0cb07c1af",
+    "android_actions_archive_sha256": "1d9a9ed7185d052fc2eef5e2737daa2373e86890078665e9cb5146a8e1a70182",
+    "windows_actions_archive_sha256": "7cb4f066a8d8ae819e2833e7960b376691130b6d39435efca21a062aa7d0ffe6"
+  },
+  "profile": {
+    "codec": "PyroWave",
+    "target_mbps": 500,
+    "bitrate_mode": "ConstantMbps",
+    "transport": "TCP",
+    "chroma": "4:2:0",
+    "wavelet": "Haar",
+    "decode_path": "Compute",
+    "hdr": false,
+    "requested_hz": 90,
+    "negotiated_hz": 90,
+    "requested_render_per_eye": [
+      3072,
+      3232
+    ],
+    "negotiated_render_per_eye": [
+      3072,
+      3232
+    ],
+    "requested_encoded_per_eye": [
+      3072,
+      3232
+    ],
+    "negotiated_encoded_per_eye": [
+      3072,
+      3232
+    ],
+    "encoded_stereo": [
+      6144,
+      3232
+    ],
+    "steamvr_manual_scale": 1.0,
+    "direct_eye_copy": true,
+    "async_eye_copy": false,
+    "fragment_conversion": true,
+    "fragment_min_usage": true,
+    "optimal_ahb_usage": true,
+    "actual_ahb_usage_all_three_slots": "0x10000300",
+    "allocation_fallback": false,
+    "decoder_workers": 1,
+    "pass_profile": false,
+    "performance_overlay_hidden": true,
+    "client_log_report_level": "Info (temporary; restored to Error)"
+  },
+  "activation": {
+    "configuration_verified": true,
+    "fresh_pid_and_initialization_marker_verified": true,
+    "fresh_colour_policy_verified": true,
+    "full_range": true,
+    "legacy_range_remap": false,
+    "note": "Retained live native initialization logs after pairing; colour policy collected from fresh server log. Initial bounded logcat tail lost the marker; discarded attempts are not activation evidence."
+  },
+  "chart": {
+    "duration_seconds": 75.0,
+    "source_per_eye": [
+      3072,
+      3232
+    ],
+    "changing_counter": true,
+    "owner_colour_observation": "Colours look normal",
+    "owner_texture_observation": "Still what looks like mura effect or compression artifacts",
+    "neutral_patch_gate": "incomplete: retained screenshot has SteamVR dashboard over the lower chart; owner did not explicitly confirm all neutral patches",
+    "source_decode_pixel_equivalence": null
+  },
+  "steamvr_observations": {
+    "owner_reported_visible_compression": true,
+    "specific_asset": "Lone Echo thumbnail; owner corrected initial reference to Revive logo",
+    "owner_reported_environment_line_aliasing": true,
+    "captured_screenshot_content_visually_confirmed": "SteamVR library; Lone Echo thumbnail",
+    "quality_cause": "unresolved: source thumbnail, rendering/sampling, codec quantization/chroma and allocation effects are not isolated"
+  },
+  "metro": {
+    "launched": true,
+    "fresh_steamvr_openxr_log": true,
+    "projection_views_per_eye": [
+      3072,
+      3232
+    ],
+    "stereo_swapchain": [
+      6144,
+      3232
+    ],
+    "global_vdxr_registration_preserved": true,
+    "owner_report": "Game is open but the streamer disconnected",
+    "verified_gameplay_checkpoint": false,
+    "gameplay_image_capture": false,
+    "gameplay_quality_gate": "incomplete due stream stop"
+  },
+  "failure": {
+    "encoder_fence_timeout_ms": 1000,
+    "log_time_local": "2026-10-02 22:49:46.323 Europe/Berlin",
+    "device_removal_hresult": "0x00000000 (S_OK)",
+    "terminal_encoder_stream_stop": true,
+    "alvr_control_api_unavailable_afterwards": true,
+    "android_gpu_timeout_observed": false,
+    "headset_connection_reset_by_peer": true,
+    "preceded_finite_test_cutoff": true,
+    "cutoff_time_local": "2026-10-02 22:53:21.386 Europe/Berlin",
+    "comfyui_jobs_at_preflight": 0,
+    "comfyui_jobs_at_later_diagnostic": 1,
+    "later_diagnostic_delay_seconds": 145.055,
+    "workload_present_at_timeout": "unverified; later ComfyUI job cannot establish cause",
+    "root_cause": "unresolved; inspect PC queue/workload and terminal-control recovery before another performance comparison"
+  },
+  "measurements": {
+    "fresh_submissions_per_second": null,
+    "gpu_execution_ms": null,
+    "completion_latency_ms": null,
+    "optical_fps": null,
+    "pixel_quality_score": null,
+    "note": "No rate or GPU profiling capture ran in this quality session. Earlier ~82\u201383 fresh submissions/s belongs to the f2 pair and remains an unqualified 90-Hz candidate."
+  },
+  "acceptance": {
+    "pass": false,
+    "failure_reasons": [
+      "Owner still sees mura-like texture/compression and environment-line aliasing",
+      "Neutral range/source-decode image equivalence not validated",
+      "Metro stream stopped with terminal PC encoder timeout",
+      "No sustained fresh-frame, endurance or gameplay quality qualification"
+    ],
+    "optimization_promoted": false
+  },
+  "restoration": {
+    "complete": true,
+    "errors_remaining": 0,
+    "initial_api_rollback_errors_recovered": 2,
+    "recovery_method": "Path/start-time verified closure of test-owned runtime, then offline exact-key restoration",
+    "saved_alvr_keys_restored": true,
+    "test_pairing_state_restored": true,
+    "steamvr_scale_restored": 1.5,
+    "external_driver_inventory_restored": true,
+    "headset_properties_restored_count": 24,
+    "vdxr_registration_and_manifest_match_before": true,
+    "virtual_desktop_settings_hashes_match_before": true,
+    "test_processes_closed": true,
+    "signed_candidate_apk_remains_installed": true
+  },
+  "evidence_limits": [
+    "Private PNG captures are qualitative compositor images; capture resampling/warping prevents exact source-pixel scoring.",
+    "Normal-looking chart colours support the correction but do not establish precise range/chroma/transfer correctness.",
+    "Source thumbnail quality and game internal render dimensions remain unverified.",
+    "No cause is assigned to bitrate, Haar, 4:2:0, allocation usage or ComfyUI from this run."
+  ]
+}
