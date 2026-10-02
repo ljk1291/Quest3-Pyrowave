@@ -17,6 +17,16 @@ image** (the Adreno 740 allows it; a convert+copy fallback exists), a ring of th
 and a release to `VK_QUEUE_FAMILY_FOREIGN_EXT` before the buffer is handed out. The three silent
 failure modes recorded in the harness README are all handled.
 
+## Terminal GPU failures
+
+`vkQueueSubmit` followed by a one-second fence timeout, or device loss, is terminal for a
+decoder instance. The streaming caller stops and reports the failure; it never clears the codec,
+resets the command buffer/fence, or submits another frame. The native destructor deliberately
+retains a terminal instance instead of issuing an unbounded `vkDeviceWaitIdle` or freeing output
+buffers that GPU work might still reference. The client process refuses another PyroWave decoder
+after this condition; restart the Android app before reconnecting. This is a safety path, not a
+recovery that has been hardware-qualified.
+
 ## Measured on the Galaxy XR (3328x1472 4:2:0 encoder frame)
 
 | | ms |

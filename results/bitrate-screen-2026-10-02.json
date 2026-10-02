@@ -1,0 +1,1757 @@
+{
+  "schema_version": 1,
+  "kind": "sanitized_bitrate_screen",
+  "date": "2026-10-02",
+  "source_root": "results\\local\\session-03",
+  "cells": [
+    {
+      "status": "measured",
+      "capture": {
+        "requested_hz": 90.0,
+        "frames": 3708,
+        "duration_requested_s": 70.0,
+        "elapsed_s": 76.06108949996997,
+        "submission_window_s": 69.98564389999956,
+        "selected_submission_event_rate_fps": 52.96800591413896,
+        "client_fps": {
+          "p01": 44.99607,
+          "p50": 45.00059,
+          "p95": 90.00695125,
+          "p99": 90.01364272,
+          "max": 90.61799,
+          "n": 3708
+        },
+        "rate_screen_passed": false,
+        "target_timestamp_reuse_events": 16
+      },
+      "settings": {
+        "start": {
+          "server_version": "20.13.0-ljk1291.2+d4735d88985a",
+          "codec": "PyroWave",
+          "bitrate_mode": "ConstantMbps",
+          "target_mbps": 300.0,
+          "requested_hz": 90.0,
+          "negotiated_hz": 90.0,
+          "decode_path": "Compute",
+          "wavelet": "Haar",
+          "chroma": "420",
+          "transport": "Tcp",
+          "render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "hdr_enabled": false,
+          "foveated_encoding_enabled": false,
+          "clientside_foveation_enabled": false
+        },
+        "end": {
+          "server_version": "20.13.0-ljk1291.2+d4735d88985a",
+          "codec": "PyroWave",
+          "bitrate_mode": "ConstantMbps",
+          "target_mbps": 300.0,
+          "requested_hz": 90.0,
+          "negotiated_hz": 90.0,
+          "decode_path": "Compute",
+          "wavelet": "Haar",
+          "chroma": "420",
+          "transport": "Tcp",
+          "render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "hdr_enabled": false,
+          "foveated_encoding_enabled": false,
+          "clientside_foveation_enabled": false
+        },
+        "unchanged": true
+      },
+      "experiment_options": {
+        "start": {
+          "verified": true,
+          "enabled": {
+            "direct_eye_copy": true,
+            "async_eye_copy": false,
+            "copy_wait": false,
+            "raw_srgb_copy": false,
+            "image_cache": false,
+            "frame_wait": false,
+            "pre_wait_poll": false,
+            "repeat_render": false,
+            "decode_workers": false,
+            "decode_handoff": false,
+            "display_scaling": false,
+            "haar_fused": false,
+            "dequant_batch": false,
+            "convert_compute": false,
+            "fragment_min_usage": false,
+            "optimal_ahb_usage": false,
+            "loop_probe": false,
+            "runtime_display_time": false
+          },
+          "effective_decode_workers": 1,
+          "effective_direct_flip_y": true,
+          "effective_pyro_precision": "1",
+          "effective_early_poll": true,
+          "effective_perf_level": "sustained_high"
+        },
+        "end": {
+          "verified": true,
+          "enabled": {
+            "direct_eye_copy": true,
+            "async_eye_copy": false,
+            "copy_wait": false,
+            "raw_srgb_copy": false,
+            "image_cache": false,
+            "frame_wait": false,
+            "pre_wait_poll": false,
+            "repeat_render": false,
+            "decode_workers": false,
+            "decode_handoff": false,
+            "display_scaling": false,
+            "haar_fused": false,
+            "dequant_batch": false,
+            "convert_compute": false,
+            "fragment_min_usage": false,
+            "optimal_ahb_usage": false,
+            "loop_probe": false,
+            "runtime_display_time": false
+          },
+          "effective_decode_workers": 1,
+          "effective_direct_flip_y": true,
+          "effective_pyro_precision": "1",
+          "effective_early_poll": true,
+          "effective_perf_level": "sustained_high"
+        },
+        "unchanged": true
+      },
+      "build": {
+        "verified": true,
+        "expected": null,
+        "actual": {
+          "application_version": "20.13.0-ljk1291.2+d4735d88985a",
+          "server_version": "20.13.0-ljk1291.2+d4735d88985a",
+          "protocol_version": "20.13.0-ljk1291.2",
+          "repository_commit": "d4735d88985a75f3605d00d88aca543327a0f090",
+          "client_package_id": "io.github.ljk1291.quest3pyrowave"
+        }
+      },
+      "runtime": {
+        "fresh_runtime_evidence": true,
+        "runtime_coverage": {
+          "status": "covered",
+          "polls": [
+            {
+              "elapsed_s": 1.1187778000021353,
+              "records": 1
+            },
+            {
+              "elapsed_s": 7.222725999890827,
+              "records": 7
+            },
+            {
+              "elapsed_s": 13.321871199994348,
+              "records": 6
+            },
+            {
+              "elapsed_s": 19.30905309994705,
+              "records": 6
+            },
+            {
+              "elapsed_s": 25.35171829990577,
+              "records": 7
+            },
+            {
+              "elapsed_s": 31.434379899990745,
+              "records": 6
+            },
+            {
+              "elapsed_s": 37.44907159998547,
+              "records": 6
+            },
+            {
+              "elapsed_s": 43.528189299977385,
+              "records": 6
+            },
+            {
+              "elapsed_s": 49.611673099920154,
+              "records": 6
+            },
+            {
+              "elapsed_s": 55.72156159998849,
+              "records": 7
+            },
+            {
+              "elapsed_s": 61.804190999944694,
+              "records": 6
+            },
+            {
+              "elapsed_s": 67.97534989996348,
+              "records": 6
+            }
+          ],
+          "max_gap_s": 6.171158900018781
+        }
+      },
+      "selected_output": {
+        "strict_window_valid": true,
+        "reason": null,
+        "source": "selected_nonnull_post_render_release_v1",
+        "rate_fps": 52.945345054813814,
+        "interval_s": 69.03345320001245,
+        "counter_delta": 3655,
+        "max_gap_s": 1.5018985000206158
+      },
+      "video_bitrate": {
+        "requested_mbps": 300.0,
+        "observed_mbps": {
+          "p01": 274.26175329999995,
+          "p50": 301.53852,
+          "p95": 319.301377,
+          "p99": 324.9640662,
+          "max": 350.71158,
+          "n": 3708
+        }
+      },
+      "native_timing_ms": {
+        "gpu_decode_ms": {
+          "p01": 8.17148333,
+          "p50": 9.2209115,
+          "p95": 9.83853665,
+          "p99": 9.97367683,
+          "max": 10.327499,
+          "n": 3738
+        },
+        "decode_to_fence_ms": {
+          "p01": 16.90789092,
+          "p50": 18.425912500000003,
+          "p95": 20.2729859,
+          "p99": 20.818606860000003,
+          "max": 22.284481,
+          "n": 3738
+        },
+        "native_convert_ms": {
+          "p01": 4.074212500000001,
+          "p50": 5.1215364999999995,
+          "p95": 5.746015405,
+          "p99": 6.25959771,
+          "max": 7.7654166,
+          "n": 3738
+        },
+        "native_record_ms": {
+          "p01": 0.49229772,
+          "p50": 0.63164,
+          "p95": 0.7703363999999999,
+          "p99": 0.8711323000000007,
+          "max": 1.429948,
+          "n": 3738
+        },
+        "native_wait_ms": {
+          "p01": 16.22984251,
+          "p50": 17.7688035,
+          "p95": 19.6214548,
+          "p99": 20.17495312,
+          "max": 21.620523,
+          "n": 3738
+        },
+        "eye_acquire_wait_ms": {
+          "p01": 0.002239,
+          "p50": 0.003282,
+          "p95": 0.0067709996,
+          "p99": 0.019682280000000017,
+          "max": 0.0875,
+          "n": 3738
+        },
+        "eye_render_ms": {
+          "p01": 12.34323984,
+          "p50": 18.10456,
+          "p95": 19.923851650000003,
+          "p99": 20.765307810000003,
+          "max": 21.765366,
+          "n": 3738
+        },
+        "eye_release_ms": {
+          "p01": 0.0019270001,
+          "p50": 0.003646,
+          "p95": 0.005677,
+          "p99": 0.008086520000000012,
+          "max": 0.048125,
+          "n": 3738
+        },
+        "eye_completion_observed_ms": null
+      },
+      "direct_output_counters": {
+        "window_interval_s": 69.03345320001245,
+        "deltas": {
+          "complete": 3654,
+          "dropped": 0,
+          "skipped": 2558,
+          "superseded": 0,
+          "stale_packets": 0,
+          "decode_failures": 0,
+          "direct_eye_copies": 3655,
+          "completed_eye_copies": 3655
+        },
+        "rates_per_s": {
+          "complete": 52.93085932429266,
+          "direct_eye_copies": 52.945345054813814,
+          "completed_eye_copies": 52.945345054813814
+        },
+        "eye_copy_deltas": {
+          "direct_eye_copies": 3655,
+          "staging_eye_copies": 0,
+          "completed_eye_copies": 3655,
+          "pending_eye_copy_deferrals": 0
+        }
+      },
+      "gates": {
+        "telemetry_complete": true,
+        "thermal_ok": true,
+        "stream_errors": [],
+        "host": {
+          "status": "observed",
+          "samples": 31,
+          "invalid_rows": 0,
+          "error_rows": 0,
+          "comfyui_running_max": 0,
+          "comfyui_pending_max": 0,
+          "gpu_utilization_percent": {
+            "min": 29.0,
+            "max": 39.0
+          },
+          "gpu_memory_used_mib": {
+            "min": 5413.0,
+            "max": 5769.0
+          },
+          "workload_isolation_ok": true
+        },
+        "source_chart": {
+          "status": "checked",
+          "covers_capture": true,
+          "source_eye_size": [
+            3072,
+            3232
+          ],
+          "quality_chart": true,
+          "pulse": true,
+          "stop_reason": "stop_file"
+        }
+      },
+      "screenshot_quality": {
+        "status": "not_collected",
+        "artifacts": [],
+        "limitation": "Compositor screenshots/video are qualitative only; they are not decoded-buffer pixel scores, display FPS, or optical evidence."
+      },
+      "limitations": "A short chart screening run is not a Godlike/90 acceptance, endurance, recovery, Metro, optical-latency, or display-FPS result.",
+      "label": "haar300-a-retry",
+      "files": {
+        "report": "present",
+        "chart": "present",
+        "host": "present"
+      },
+      "alvr_metrics_ms": {
+        "network_ms": {
+          "p01": 4.52537248,
+          "p50": 6.014283,
+          "p95": 8.049492049999998,
+          "p99": 9.188130589999991,
+          "max": 47.290627,
+          "n": 3708
+        },
+        "decoder_ms": {
+          "p01": 17.452500699999998,
+          "p50": 24.2388305,
+          "p95": 30.0399272,
+          "p99": 31.450757019999998,
+          "max": 36.42297,
+          "n": 3708
+        },
+        "client_compositor_ms": {
+          "p01": 12.04728651,
+          "p50": 18.1351045,
+          "p95": 19.943905400000002,
+          "p99": 20.789282049999997,
+          "max": 21.784846,
+          "n": 3708
+        },
+        "decoder_queue_ms": {
+          "p01": 3.88652192,
+          "p50": 5.0300270000000005,
+          "p95": 6.1978285999999905,
+          "p99": 10.599359189999996,
+          "max": 12.665104999999999,
+          "n": 3708
+        },
+        "encoder_ms": {
+          "p01": 2.6348000000000003,
+          "p50": 3.02415,
+          "p95": 4.06913,
+          "p99": 4.684789999999998,
+          "max": 11.5002,
+          "n": 3708
+        }
+      }
+    },
+    {
+      "status": "measured",
+      "capture": {
+        "requested_hz": 90.0,
+        "frames": 3789,
+        "duration_requested_s": 70.0,
+        "elapsed_s": 76.09061199997086,
+        "submission_window_s": 69.97327399998903,
+        "selected_submission_event_rate_fps": 54.13495443989935,
+        "client_fps": {
+          "p01": 44.99497704,
+          "p50": 45.00091,
+          "p95": 90.00735300000001,
+          "p99": 90.02052992,
+          "max": 90.26261,
+          "n": 3789
+        },
+        "rate_screen_passed": false,
+        "target_timestamp_reuse_events": 15
+      },
+      "settings": {
+        "start": {
+          "server_version": "20.13.0-ljk1291.2+d4735d88985a",
+          "codec": "PyroWave",
+          "bitrate_mode": "ConstantMbps",
+          "target_mbps": 400.0,
+          "requested_hz": 90.0,
+          "negotiated_hz": 90.0,
+          "decode_path": "Compute",
+          "wavelet": "Haar",
+          "chroma": "420",
+          "transport": "Tcp",
+          "render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "hdr_enabled": false,
+          "foveated_encoding_enabled": false,
+          "clientside_foveation_enabled": false
+        },
+        "end": {
+          "server_version": "20.13.0-ljk1291.2+d4735d88985a",
+          "codec": "PyroWave",
+          "bitrate_mode": "ConstantMbps",
+          "target_mbps": 400.0,
+          "requested_hz": 90.0,
+          "negotiated_hz": 90.0,
+          "decode_path": "Compute",
+          "wavelet": "Haar",
+          "chroma": "420",
+          "transport": "Tcp",
+          "render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "hdr_enabled": false,
+          "foveated_encoding_enabled": false,
+          "clientside_foveation_enabled": false
+        },
+        "unchanged": true
+      },
+      "experiment_options": {
+        "start": {
+          "verified": true,
+          "enabled": {
+            "direct_eye_copy": true,
+            "async_eye_copy": false,
+            "copy_wait": false,
+            "raw_srgb_copy": false,
+            "image_cache": false,
+            "frame_wait": false,
+            "pre_wait_poll": false,
+            "repeat_render": false,
+            "decode_workers": false,
+            "decode_handoff": false,
+            "display_scaling": false,
+            "haar_fused": false,
+            "dequant_batch": false,
+            "convert_compute": false,
+            "fragment_min_usage": false,
+            "optimal_ahb_usage": false,
+            "loop_probe": false,
+            "runtime_display_time": false
+          },
+          "effective_decode_workers": 1,
+          "effective_direct_flip_y": true,
+          "effective_pyro_precision": "1",
+          "effective_early_poll": true,
+          "effective_perf_level": "sustained_high"
+        },
+        "end": {
+          "verified": true,
+          "enabled": {
+            "direct_eye_copy": true,
+            "async_eye_copy": false,
+            "copy_wait": false,
+            "raw_srgb_copy": false,
+            "image_cache": false,
+            "frame_wait": false,
+            "pre_wait_poll": false,
+            "repeat_render": false,
+            "decode_workers": false,
+            "decode_handoff": false,
+            "display_scaling": false,
+            "haar_fused": false,
+            "dequant_batch": false,
+            "convert_compute": false,
+            "fragment_min_usage": false,
+            "optimal_ahb_usage": false,
+            "loop_probe": false,
+            "runtime_display_time": false
+          },
+          "effective_decode_workers": 1,
+          "effective_direct_flip_y": true,
+          "effective_pyro_precision": "1",
+          "effective_early_poll": true,
+          "effective_perf_level": "sustained_high"
+        },
+        "unchanged": true
+      },
+      "build": {
+        "verified": true,
+        "expected": null,
+        "actual": {
+          "application_version": "20.13.0-ljk1291.2+d4735d88985a",
+          "server_version": "20.13.0-ljk1291.2+d4735d88985a",
+          "protocol_version": "20.13.0-ljk1291.2",
+          "repository_commit": "d4735d88985a75f3605d00d88aca543327a0f090",
+          "client_package_id": "io.github.ljk1291.quest3pyrowave"
+        }
+      },
+      "runtime": {
+        "fresh_runtime_evidence": true,
+        "runtime_coverage": {
+          "status": "covered",
+          "polls": [
+            {
+              "elapsed_s": 1.0881793999578804,
+              "records": 1
+            },
+            {
+              "elapsed_s": 7.209742599981837,
+              "records": 6
+            },
+            {
+              "elapsed_s": 13.353370899916627,
+              "records": 7
+            },
+            {
+              "elapsed_s": 19.446115599945188,
+              "records": 6
+            },
+            {
+              "elapsed_s": 25.45378759992309,
+              "records": 6
+            },
+            {
+              "elapsed_s": 31.43312279996462,
+              "records": 6
+            },
+            {
+              "elapsed_s": 37.50002539996058,
+              "records": 6
+            },
+            {
+              "elapsed_s": 43.49848700000439,
+              "records": 7
+            },
+            {
+              "elapsed_s": 49.53210149996448,
+              "records": 6
+            },
+            {
+              "elapsed_s": 55.560885299928486,
+              "records": 6
+            },
+            {
+              "elapsed_s": 61.54966889997013,
+              "records": 6
+            },
+            {
+              "elapsed_s": 67.5499263999518,
+              "records": 6
+            }
+          ],
+          "max_gap_s": 6.1436282999347895
+        }
+      },
+      "selected_output": {
+        "strict_window_valid": true,
+        "reason": null,
+        "source": "selected_nonnull_post_render_release_v1",
+        "rate_fps": 54.124911299367675,
+        "interval_s": 68.23105870001018,
+        "counter_delta": 3693,
+        "max_gap_s": 1.3078819999936968
+      },
+      "video_bitrate": {
+        "requested_mbps": 400.0,
+        "observed_mbps": {
+          "p01": 366.3508892,
+          "p50": 402.39466,
+          "p95": 425.603216,
+          "p99": 433.139416,
+          "max": 443.90573,
+          "n": 3789
+        }
+      },
+      "native_timing_ms": {
+        "gpu_decode_ms": {
+          "p01": 8.24513151,
+          "p50": 9.253385250000001,
+          "p95": 9.60936165,
+          "p99": 9.809869079999997,
+          "max": 10.305312,
+          "n": 3748
+        },
+        "decode_to_fence_ms": {
+          "p01": 16.95364268,
+          "p50": 17.989168,
+          "p95": 18.98197735,
+          "p99": 20.066677499999997,
+          "max": 21.044743,
+          "n": 3748
+        },
+        "native_convert_ms": {
+          "p01": 4.1575182,
+          "p50": 5.065963249999999,
+          "p95": 5.62707529,
+          "p99": 6.188336929999985,
+          "max": 6.89401,
+          "n": 3748
+        },
+        "native_record_ms": {
+          "p01": 0.55087252,
+          "p50": 0.6939585,
+          "p95": 0.8536378499999998,
+          "p99": 0.9462416899999998,
+          "max": 1.749688,
+          "n": 3748
+        },
+        "native_wait_ms": {
+          "p01": 16.2588356,
+          "p50": 17.2765645,
+          "p95": 18.26223805,
+          "p99": 19.30592086,
+          "max": 20.190002,
+          "n": 3748
+        },
+        "eye_acquire_wait_ms": {
+          "p01": 0.0026560002,
+          "p50": 0.003489,
+          "p95": 0.007169149999999981,
+          "p99": 0.017258779999999842,
+          "max": 0.075729005,
+          "n": 3748
+        },
+        "eye_render_ms": {
+          "p01": 12.34360723,
+          "p50": 17.686617,
+          "p95": 18.7834162,
+          "p99": 19.813953149999996,
+          "max": 21.199064,
+          "n": 3748
+        },
+        "eye_release_ms": {
+          "p01": 0.0026560002,
+          "p50": 0.004687,
+          "p95": 0.007448,
+          "p99": 0.01159367999999996,
+          "max": 0.175468,
+          "n": 3748
+        },
+        "eye_completion_observed_ms": null
+      },
+      "direct_output_counters": {
+        "window_interval_s": 68.23105870001018,
+        "deltas": {
+          "complete": 3693,
+          "dropped": 0,
+          "skipped": 2448,
+          "superseded": 0,
+          "stale_packets": 0,
+          "decode_failures": 0,
+          "direct_eye_copies": 3693,
+          "completed_eye_copies": 3693
+        },
+        "rates_per_s": {
+          "complete": 54.124911299367675,
+          "direct_eye_copies": 54.124911299367675,
+          "completed_eye_copies": 54.124911299367675
+        },
+        "eye_copy_deltas": {
+          "direct_eye_copies": 3693,
+          "staging_eye_copies": 0,
+          "completed_eye_copies": 3693,
+          "pending_eye_copy_deferrals": 0
+        }
+      },
+      "gates": {
+        "telemetry_complete": true,
+        "thermal_ok": true,
+        "stream_errors": [],
+        "host": {
+          "status": "observed",
+          "samples": 31,
+          "invalid_rows": 0,
+          "error_rows": 0,
+          "comfyui_running_max": 0,
+          "comfyui_pending_max": 0,
+          "gpu_utilization_percent": {
+            "min": 28.0,
+            "max": 40.0
+          },
+          "gpu_memory_used_mib": {
+            "min": 5549.0,
+            "max": 5909.0
+          },
+          "workload_isolation_ok": true
+        },
+        "source_chart": {
+          "status": "checked",
+          "covers_capture": true,
+          "source_eye_size": [
+            3072,
+            3232
+          ],
+          "quality_chart": true,
+          "pulse": true,
+          "stop_reason": "stop_file"
+        }
+      },
+      "screenshot_quality": {
+        "status": "present_qualitative_only",
+        "artifacts": [
+          "haar400-visual\\headset-1.png",
+          "haar400-visual\\headset-2.png",
+          "haar400-visual\\headset.mp4",
+          "haar400-visual\\evidence.json"
+        ],
+        "limitation": "Compositor screenshots/video are qualitative only; they are not decoded-buffer pixel scores, display FPS, or optical evidence."
+      },
+      "limitations": "A short chart screening run is not a Godlike/90 acceptance, endurance, recovery, Metro, optical-latency, or display-FPS result.",
+      "label": "haar400",
+      "files": {
+        "report": "present",
+        "chart": "present",
+        "host": "present"
+      },
+      "alvr_metrics_ms": {
+        "network_ms": {
+          "p01": 5.7110332,
+          "p50": 7.200511,
+          "p95": 9.5462568,
+          "p99": 11.07377152,
+          "max": 43.373138,
+          "n": 3789
+        },
+        "decoder_ms": {
+          "p01": 17.631027879999998,
+          "p50": 24.412032,
+          "p95": 29.5750346,
+          "p99": 30.80909275999999,
+          "max": 36.02964,
+          "n": 3789
+        },
+        "client_compositor_ms": {
+          "p01": 12.20559292,
+          "p50": 17.705261999999998,
+          "p95": 18.8022412,
+          "p99": 19.841469999999997,
+          "max": 21.2212,
+          "n": 3789
+        },
+        "decoder_queue_ms": {
+          "p01": 3.883867,
+          "p50": 4.951771,
+          "p95": 5.899729799999999,
+          "p99": 10.635679479999999,
+          "max": 13.266304,
+          "n": 3789
+        },
+        "encoder_ms": {
+          "p01": 2.727668,
+          "p50": 3.1189,
+          "p95": 4.35576,
+          "p99": 4.8386,
+          "max": 12.9774,
+          "n": 3789
+        }
+      }
+    },
+    {
+      "status": "measured",
+      "capture": {
+        "requested_hz": 90.0,
+        "frames": 3741,
+        "duration_requested_s": 70.0,
+        "elapsed_s": 76.06993839994539,
+        "submission_window_s": 69.98694770003203,
+        "selected_submission_event_rate_fps": 53.43853565424583,
+        "client_fps": {
+          "p01": 44.994804,
+          "p50": 45.00091,
+          "p95": 90.00874,
+          "p99": 90.020924,
+          "max": 90.35764,
+          "n": 3741
+        },
+        "rate_screen_passed": false,
+        "target_timestamp_reuse_events": 23
+      },
+      "settings": {
+        "start": {
+          "server_version": "20.13.0-ljk1291.2+d4735d88985a",
+          "codec": "PyroWave",
+          "bitrate_mode": "ConstantMbps",
+          "target_mbps": 600.0,
+          "requested_hz": 90.0,
+          "negotiated_hz": 90.0,
+          "decode_path": "Compute",
+          "wavelet": "Haar",
+          "chroma": "420",
+          "transport": "Tcp",
+          "render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "hdr_enabled": false,
+          "foveated_encoding_enabled": false,
+          "clientside_foveation_enabled": false
+        },
+        "end": {
+          "server_version": "20.13.0-ljk1291.2+d4735d88985a",
+          "codec": "PyroWave",
+          "bitrate_mode": "ConstantMbps",
+          "target_mbps": 600.0,
+          "requested_hz": 90.0,
+          "negotiated_hz": 90.0,
+          "decode_path": "Compute",
+          "wavelet": "Haar",
+          "chroma": "420",
+          "transport": "Tcp",
+          "render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "hdr_enabled": false,
+          "foveated_encoding_enabled": false,
+          "clientside_foveation_enabled": false
+        },
+        "unchanged": true
+      },
+      "experiment_options": {
+        "start": {
+          "verified": true,
+          "enabled": {
+            "direct_eye_copy": true,
+            "async_eye_copy": false,
+            "copy_wait": false,
+            "raw_srgb_copy": false,
+            "image_cache": false,
+            "frame_wait": false,
+            "pre_wait_poll": false,
+            "repeat_render": false,
+            "decode_workers": false,
+            "decode_handoff": false,
+            "display_scaling": false,
+            "haar_fused": false,
+            "dequant_batch": false,
+            "convert_compute": false,
+            "fragment_min_usage": false,
+            "optimal_ahb_usage": false,
+            "loop_probe": false,
+            "runtime_display_time": false
+          },
+          "effective_decode_workers": 1,
+          "effective_direct_flip_y": true,
+          "effective_pyro_precision": "1",
+          "effective_early_poll": true,
+          "effective_perf_level": "sustained_high"
+        },
+        "end": {
+          "verified": true,
+          "enabled": {
+            "direct_eye_copy": true,
+            "async_eye_copy": false,
+            "copy_wait": false,
+            "raw_srgb_copy": false,
+            "image_cache": false,
+            "frame_wait": false,
+            "pre_wait_poll": false,
+            "repeat_render": false,
+            "decode_workers": false,
+            "decode_handoff": false,
+            "display_scaling": false,
+            "haar_fused": false,
+            "dequant_batch": false,
+            "convert_compute": false,
+            "fragment_min_usage": false,
+            "optimal_ahb_usage": false,
+            "loop_probe": false,
+            "runtime_display_time": false
+          },
+          "effective_decode_workers": 1,
+          "effective_direct_flip_y": true,
+          "effective_pyro_precision": "1",
+          "effective_early_poll": true,
+          "effective_perf_level": "sustained_high"
+        },
+        "unchanged": true
+      },
+      "build": {
+        "verified": true,
+        "expected": null,
+        "actual": {
+          "application_version": "20.13.0-ljk1291.2+d4735d88985a",
+          "server_version": "20.13.0-ljk1291.2+d4735d88985a",
+          "protocol_version": "20.13.0-ljk1291.2",
+          "repository_commit": "d4735d88985a75f3605d00d88aca543327a0f090",
+          "client_package_id": "io.github.ljk1291.quest3pyrowave"
+        }
+      },
+      "runtime": {
+        "fresh_runtime_evidence": true,
+        "runtime_coverage": {
+          "status": "covered",
+          "polls": [
+            {
+              "elapsed_s": 1.208949699997902,
+              "records": 1
+            },
+            {
+              "elapsed_s": 7.371011399896815,
+              "records": 6
+            },
+            {
+              "elapsed_s": 13.49633090000134,
+              "records": 6
+            },
+            {
+              "elapsed_s": 19.59115499991458,
+              "records": 6
+            },
+            {
+              "elapsed_s": 25.662093399907462,
+              "records": 6
+            },
+            {
+              "elapsed_s": 31.744552699965425,
+              "records": 7
+            },
+            {
+              "elapsed_s": 37.842865599901415,
+              "records": 6
+            },
+            {
+              "elapsed_s": 43.87367419991642,
+              "records": 6
+            },
+            {
+              "elapsed_s": 49.95747099991422,
+              "records": 6
+            },
+            {
+              "elapsed_s": 56.023196299909614,
+              "records": 6
+            },
+            {
+              "elapsed_s": 62.10941939998884,
+              "records": 8
+            },
+            {
+              "elapsed_s": 68.15542219998315,
+              "records": 6
+            }
+          ],
+          "max_gap_s": 6.1620616998989135
+        }
+      },
+      "selected_output": {
+        "strict_window_valid": true,
+        "reason": null,
+        "source": "selected_nonnull_post_render_release_v1",
+        "rate_fps": 53.42410136633819,
+        "interval_s": 68.07788819994312,
+        "counter_delta": 3637,
+        "max_gap_s": 1.5014027999714017
+      },
+      "video_bitrate": {
+        "requested_mbps": 600.0,
+        "observed_mbps": {
+          "p01": 548.85234,
+          "p50": 606.236,
+          "p95": 643.31654,
+          "p99": 655.1585200000001,
+          "max": 724.2325,
+          "n": 3741
+        }
+      },
+      "native_timing_ms": {
+        "gpu_decode_ms": {
+          "p01": 8.3033902,
+          "p50": 9.3264065,
+          "p95": 9.768437,
+          "p99": 10.03168695,
+          "max": 10.479635,
+          "n": 3691
+        },
+        "decode_to_fence_ms": {
+          "p01": 16.8858772,
+          "p50": 17.849482,
+          "p95": 19.665393,
+          "p99": 20.3134097,
+          "max": 20.805313,
+          "n": 3691
+        },
+        "native_convert_ms": {
+          "p01": 4.1570257999999995,
+          "p50": 5.1229167,
+          "p95": 5.70552075,
+          "p99": 6.07334894,
+          "max": 6.582135,
+          "n": 3691
+        },
+        "native_record_ms": {
+          "p01": 0.6133807,
+          "p50": 0.847032,
+          "p95": 1.290338,
+          "p99": 1.4245467,
+          "max": 1.84948,
+          "n": 3691
+        },
+        "native_wait_ms": {
+          "p01": 15.956736,
+          "p50": 16.947605,
+          "p95": 18.6549235,
+          "p99": 19.393695699999995,
+          "max": 20.161982,
+          "n": 3691
+        },
+        "eye_acquire_wait_ms": {
+          "p01": 0.0026560002,
+          "p50": 0.00349,
+          "p95": 0.007031,
+          "p99": 0.013759360000000016,
+          "max": 0.24177101,
+          "n": 3692
+        },
+        "eye_render_ms": {
+          "p01": 11.95037873,
+          "p50": 17.791877,
+          "p95": 19.597338199999996,
+          "p99": 20.2740023,
+          "max": 20.878387,
+          "n": 3692
+        },
+        "eye_release_ms": {
+          "p01": 0.002448,
+          "p50": 0.004635,
+          "p95": 0.00713545,
+          "p99": 0.010686360455000016,
+          "max": 0.22062501,
+          "n": 3692
+        },
+        "eye_completion_observed_ms": null
+      },
+      "direct_output_counters": {
+        "window_interval_s": 68.07788819994312,
+        "deltas": {
+          "complete": 3637,
+          "dropped": 0,
+          "skipped": 2490,
+          "superseded": 0,
+          "stale_packets": 0,
+          "decode_failures": 0,
+          "direct_eye_copies": 3637,
+          "completed_eye_copies": 3637
+        },
+        "rates_per_s": {
+          "complete": 53.42410136633819,
+          "direct_eye_copies": 53.42410136633819,
+          "completed_eye_copies": 53.42410136633819
+        },
+        "eye_copy_deltas": {
+          "direct_eye_copies": 3637,
+          "staging_eye_copies": 0,
+          "completed_eye_copies": 3637,
+          "pending_eye_copy_deferrals": 0
+        }
+      },
+      "gates": {
+        "telemetry_complete": true,
+        "thermal_ok": true,
+        "stream_errors": [],
+        "host": {
+          "status": "observed",
+          "samples": 31,
+          "invalid_rows": 0,
+          "error_rows": 0,
+          "comfyui_running_max": 0,
+          "comfyui_pending_max": 0,
+          "gpu_utilization_percent": {
+            "min": 23.0,
+            "max": 40.0
+          },
+          "gpu_memory_used_mib": {
+            "min": 5567.0,
+            "max": 5939.0
+          },
+          "workload_isolation_ok": true
+        },
+        "source_chart": {
+          "status": "checked",
+          "covers_capture": true,
+          "source_eye_size": [
+            3072,
+            3232
+          ],
+          "quality_chart": true,
+          "pulse": true,
+          "stop_reason": "stop_file"
+        }
+      },
+      "screenshot_quality": {
+        "status": "present_qualitative_only",
+        "artifacts": [
+          "haar600-visual\\headset-1.png",
+          "haar600-visual\\headset-2.png",
+          "haar600-visual\\headset.mp4",
+          "haar600-visual\\evidence.json"
+        ],
+        "limitation": "Compositor screenshots/video are qualitative only; they are not decoded-buffer pixel scores, display FPS, or optical evidence."
+      },
+      "limitations": "A short chart screening run is not a Godlike/90 acceptance, endurance, recovery, Metro, optical-latency, or display-FPS result.",
+      "label": "haar600",
+      "files": {
+        "report": "present",
+        "chart": "present",
+        "host": "present"
+      },
+      "alvr_metrics_ms": {
+        "network_ms": {
+          "p01": 8.469198,
+          "p50": 10.172867,
+          "p95": 12.937561,
+          "p99": 16.598040799999996,
+          "max": 75.58863000000001,
+          "n": 3741
+        },
+        "decoder_ms": {
+          "p01": 15.3183138,
+          "p50": 24.204794000000003,
+          "p95": 29.387086999999998,
+          "p99": 30.4879914,
+          "max": 37.001044,
+          "n": 3741
+        },
+        "client_compositor_ms": {
+          "p01": 11.3233036,
+          "p50": 17.81172,
+          "p95": 19.619063999999998,
+          "p99": 20.2933358,
+          "max": 20.898960000000002,
+          "n": 3741
+        },
+        "decoder_queue_ms": {
+          "p01": 3.9983232,
+          "p50": 5.092344000000001,
+          "p95": 6.111511,
+          "p99": 11.218376,
+          "max": 13.655209999999999,
+          "n": 3741
+        },
+        "encoder_ms": {
+          "p01": 2.72956,
+          "p50": 3.1041,
+          "p95": 4.2721,
+          "p99": 5.087119999999998,
+          "max": 14.9707,
+          "n": 3741
+        }
+      }
+    },
+    {
+      "status": "measured",
+      "capture": {
+        "requested_hz": 90.0,
+        "frames": 3878,
+        "duration_requested_s": 70.0,
+        "elapsed_s": 76.08102779998444,
+        "submission_window_s": 69.97415400005411,
+        "selected_submission_event_rate_fps": 55.40617182734359,
+        "client_fps": {
+          "p01": 44.99579655,
+          "p50": 45.00123,
+          "p95": 90.0059115,
+          "p99": 90.0115246,
+          "max": 90.2591,
+          "n": 3878
+        },
+        "rate_screen_passed": false,
+        "target_timestamp_reuse_events": 12
+      },
+      "settings": {
+        "start": {
+          "server_version": "20.13.0-ljk1291.2+d4735d88985a",
+          "codec": "PyroWave",
+          "bitrate_mode": "ConstantMbps",
+          "target_mbps": 300.0,
+          "requested_hz": 90.0,
+          "negotiated_hz": 90.0,
+          "decode_path": "Compute",
+          "wavelet": "Haar",
+          "chroma": "420",
+          "transport": "Tcp",
+          "render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "hdr_enabled": false,
+          "foveated_encoding_enabled": false,
+          "clientside_foveation_enabled": false
+        },
+        "end": {
+          "server_version": "20.13.0-ljk1291.2+d4735d88985a",
+          "codec": "PyroWave",
+          "bitrate_mode": "ConstantMbps",
+          "target_mbps": 300.0,
+          "requested_hz": 90.0,
+          "negotiated_hz": 90.0,
+          "decode_path": "Compute",
+          "wavelet": "Haar",
+          "chroma": "420",
+          "transport": "Tcp",
+          "render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "hdr_enabled": false,
+          "foveated_encoding_enabled": false,
+          "clientside_foveation_enabled": false
+        },
+        "unchanged": true
+      },
+      "experiment_options": {
+        "start": {
+          "verified": true,
+          "enabled": {
+            "direct_eye_copy": true,
+            "async_eye_copy": false,
+            "copy_wait": false,
+            "raw_srgb_copy": false,
+            "image_cache": false,
+            "frame_wait": false,
+            "pre_wait_poll": false,
+            "repeat_render": false,
+            "decode_workers": false,
+            "decode_handoff": false,
+            "display_scaling": false,
+            "haar_fused": false,
+            "dequant_batch": false,
+            "convert_compute": false,
+            "fragment_min_usage": false,
+            "optimal_ahb_usage": false,
+            "loop_probe": false,
+            "runtime_display_time": false
+          },
+          "effective_decode_workers": 1,
+          "effective_direct_flip_y": true,
+          "effective_pyro_precision": "1",
+          "effective_early_poll": true,
+          "effective_perf_level": "sustained_high"
+        },
+        "end": {
+          "verified": true,
+          "enabled": {
+            "direct_eye_copy": true,
+            "async_eye_copy": false,
+            "copy_wait": false,
+            "raw_srgb_copy": false,
+            "image_cache": false,
+            "frame_wait": false,
+            "pre_wait_poll": false,
+            "repeat_render": false,
+            "decode_workers": false,
+            "decode_handoff": false,
+            "display_scaling": false,
+            "haar_fused": false,
+            "dequant_batch": false,
+            "convert_compute": false,
+            "fragment_min_usage": false,
+            "optimal_ahb_usage": false,
+            "loop_probe": false,
+            "runtime_display_time": false
+          },
+          "effective_decode_workers": 1,
+          "effective_direct_flip_y": true,
+          "effective_pyro_precision": "1",
+          "effective_early_poll": true,
+          "effective_perf_level": "sustained_high"
+        },
+        "unchanged": true
+      },
+      "build": {
+        "verified": true,
+        "expected": null,
+        "actual": {
+          "application_version": "20.13.0-ljk1291.2+d4735d88985a",
+          "server_version": "20.13.0-ljk1291.2+d4735d88985a",
+          "protocol_version": "20.13.0-ljk1291.2",
+          "repository_commit": "d4735d88985a75f3605d00d88aca543327a0f090",
+          "client_package_id": "io.github.ljk1291.quest3pyrowave"
+        }
+      },
+      "runtime": {
+        "fresh_runtime_evidence": true,
+        "runtime_coverage": {
+          "status": "covered",
+          "polls": [
+            {
+              "elapsed_s": 1.0120263999560848,
+              "records": 1
+            },
+            {
+              "elapsed_s": 7.015361899975687,
+              "records": 6
+            },
+            {
+              "elapsed_s": 13.024855899973772,
+              "records": 6
+            },
+            {
+              "elapsed_s": 19.212854799930938,
+              "records": 6
+            },
+            {
+              "elapsed_s": 25.2241244999459,
+              "records": 7
+            },
+            {
+              "elapsed_s": 31.215258799958974,
+              "records": 6
+            },
+            {
+              "elapsed_s": 37.22390449990053,
+              "records": 6
+            },
+            {
+              "elapsed_s": 43.22462659992743,
+              "records": 6
+            },
+            {
+              "elapsed_s": 49.21791649993975,
+              "records": 6
+            },
+            {
+              "elapsed_s": 55.22297639993485,
+              "records": 7
+            },
+            {
+              "elapsed_s": 61.215095399995334,
+              "records": 6
+            },
+            {
+              "elapsed_s": 67.25812779995613,
+              "records": 6
+            }
+          ],
+          "max_gap_s": 6.187998899957165
+        }
+      },
+      "selected_output": {
+        "strict_window_valid": true,
+        "reason": null,
+        "source": "selected_nonnull_post_render_release_v1",
+        "rate_fps": 55.408569663408606,
+        "interval_s": 68.4731626000721,
+        "counter_delta": 3794,
+        "max_gap_s": 1.0318931000074372
+      },
+      "video_bitrate": {
+        "requested_mbps": 300.0,
+        "observed_mbps": {
+          "p01": 274.518,
+          "p50": 301.828705,
+          "p95": 318.9496405,
+          "p99": 324.7749983,
+          "max": 339.95206,
+          "n": 3878
+        }
+      },
+      "native_timing_ms": {
+        "gpu_decode_ms": {
+          "p01": 8.11643148,
+          "p50": 9.152421499999999,
+          "p95": 9.3992622,
+          "p99": 9.62782083,
+          "max": 9.953021,
+          "n": 3850
+        },
+        "decode_to_fence_ms": {
+          "p01": 16.75785816,
+          "p50": 17.60198,
+          "p95": 18.6363928,
+          "p99": 19.795944869999996,
+          "max": 21.327658,
+          "n": 3850
+        },
+        "native_convert_ms": {
+          "p01": 4.020648247,
+          "p50": 5.005937250000001,
+          "p95": 5.35497377,
+          "p99": 5.960151911999999,
+          "max": 7.3955207,
+          "n": 3850
+        },
+        "native_record_ms": {
+          "p01": 0.51627028,
+          "p50": 0.6397915000000001,
+          "p95": 0.9385445999999998,
+          "p99": 1.1070154599999993,
+          "max": 1.552813,
+          "n": 3850
+        },
+        "native_wait_ms": {
+          "p01": 15.89462762,
+          "p50": 16.9643765,
+          "p95": 17.96840855,
+          "p99": 19.096094109999996,
+          "max": 20.63521,
+          "n": 3850
+        },
+        "eye_acquire_wait_ms": {
+          "p01": 0.0026560002,
+          "p50": 0.003385,
+          "p95": 0.0069035999999999854,
+          "p99": 0.015602638489999914,
+          "max": 0.267396,
+          "n": 3850
+        },
+        "eye_render_ms": {
+          "p01": 11.92321634,
+          "p50": 17.2855225,
+          "p95": 18.3196672,
+          "p99": 19.413974639999996,
+          "max": 21.171928,
+          "n": 3850
+        },
+        "eye_release_ms": {
+          "p01": 0.0025,
+          "p50": 0.004479,
+          "p95": 0.006406,
+          "p99": 0.008125,
+          "max": 0.14546901,
+          "n": 3850
+        },
+        "eye_completion_observed_ms": null
+      },
+      "direct_output_counters": {
+        "window_interval_s": 68.4731626000721,
+        "deltas": {
+          "complete": 3795,
+          "dropped": 0,
+          "skipped": 2368,
+          "superseded": 1,
+          "stale_packets": 0,
+          "decode_failures": 0,
+          "direct_eye_copies": 3794,
+          "completed_eye_copies": 3794
+        },
+        "rates_per_s": {
+          "complete": 55.42317392531251,
+          "direct_eye_copies": 55.408569663408606,
+          "completed_eye_copies": 55.408569663408606
+        },
+        "eye_copy_deltas": {
+          "direct_eye_copies": 3794,
+          "staging_eye_copies": 0,
+          "completed_eye_copies": 3794,
+          "pending_eye_copy_deferrals": 0
+        }
+      },
+      "gates": {
+        "telemetry_complete": true,
+        "thermal_ok": true,
+        "stream_errors": [],
+        "host": {
+          "status": "observed",
+          "samples": 31,
+          "invalid_rows": 0,
+          "error_rows": 0,
+          "comfyui_running_max": 0,
+          "comfyui_pending_max": 0,
+          "gpu_utilization_percent": {
+            "min": 28.0,
+            "max": 42.0
+          },
+          "gpu_memory_used_mib": {
+            "min": 5501.0,
+            "max": 5864.0
+          },
+          "workload_isolation_ok": true
+        },
+        "source_chart": {
+          "status": "checked",
+          "covers_capture": true,
+          "source_eye_size": [
+            3072,
+            3232
+          ],
+          "quality_chart": true,
+          "pulse": true,
+          "stop_reason": "stop_file"
+        }
+      },
+      "screenshot_quality": {
+        "status": "present_qualitative_only",
+        "artifacts": [
+          "haar300-b-visual\\headset-1.png",
+          "haar300-b-visual\\headset-2.png",
+          "haar300-b-visual\\headset.mp4",
+          "haar300-b-visual\\evidence.json"
+        ],
+        "limitation": "Compositor screenshots/video are qualitative only; they are not decoded-buffer pixel scores, display FPS, or optical evidence."
+      },
+      "limitations": "A short chart screening run is not a Godlike/90 acceptance, endurance, recovery, Metro, optical-latency, or display-FPS result.",
+      "label": "haar300-b",
+      "files": {
+        "report": "present",
+        "chart": "present",
+        "host": "present"
+      },
+      "alvr_metrics_ms": {
+        "network_ms": {
+          "p01": 4.5977910699999995,
+          "p50": 5.999587,
+          "p95": 8.297991849999999,
+          "p99": 9.523460259999998,
+          "max": 37.135255,
+          "n": 3878
+        },
+        "decoder_ms": {
+          "p01": 17.56490467,
+          "p50": 23.5295075,
+          "p95": 28.6371802,
+          "p99": 30.58736947,
+          "max": 35.76995,
+          "n": 3878
+        },
+        "client_compositor_ms": {
+          "p01": 11.80986263,
+          "p50": 17.304194000000003,
+          "p95": 18.340020499999998,
+          "p99": 19.43790669,
+          "max": 21.190472,
+          "n": 3878
+        },
+        "decoder_queue_ms": {
+          "p01": 3.7921399300000003,
+          "p50": 4.839323,
+          "p95": 5.859450699999995,
+          "p99": 10.48032007,
+          "max": 13.205157999999999,
+          "n": 3878
+        },
+        "encoder_ms": {
+          "p01": 2.658639,
+          "p50": 3.07505,
+          "p95": 4.281339999999995,
+          "p99": 4.941634,
+          "max": 14.1247,
+          "n": 3878
+        }
+      }
+    }
+  ],
+  "complete": true,
+  "cross_cell_comparability": {
+    "comparable": true,
+    "observed_cells_comparable": true,
+    "reason": null,
+    "missing_cells": [],
+    "basis": "all settings, experiment options, and build identity except target_mbps",
+    "reference_cell": "haar300-a-retry",
+    "mismatching_cells": []
+  },
+  "comparison_status": "complete_short_screens_not_90hz_qualified",
+  "limitations": "Only files present at invocation are summarized. No missing or invalid evidence is inferred as a pass.",
+  "native_commit": "d4735d88985a75f3605d00d88aca543327a0f090",
+  "pair_actions_run": 37032258856,
+  "authorization": "Owner explicitly authorized finite AFK tests and screenshot/video capture.",
+  "excluded_attempts": [
+    {
+      "label": "haar300-a",
+      "reason": "No stream frames before the new server trusted the Quest; excluded from bitrate comparison."
+    }
+  ],
+  "conclusions": [
+    "No monotonic fresh-submission improvement from 300 to 600 Mbps. The final 300-Mbps repeat exceeds both higher-rate cells, so a bitrate benefit is not established.",
+    "All four new source-identity windows are valid; no PyroWave cell sustains the requested 90 Hz. Median decode-to-fence remains approximately 17.6-18.4 ms against an 11.11-ms frame interval.",
+    "The four cells match recorded build, configured/negotiated dimensions and refresh, and debug options apart from bitrate. This is not proof that every external compositor state matched."
+  ],
+  "visual_evidence": [
+    {
+      "label": "haar300-b",
+      "recorded_video_frames": 409,
+      "recording_fps": 53.1146604254656,
+      "recording_duration_s": 7.700322222222222,
+      "first_last_pixels_differ": true,
+      "screenshots": 2,
+      "screenshot_dimensions": [
+        4128,
+        2208
+      ],
+      "scope": "qualitative compositor evidence only",
+      "chart_partly_obscured_by_overlays": true,
+      "numeric_quality_score": null
+    },
+    {
+      "label": "haar400",
+      "recorded_video_frames": 418,
+      "recording_fps": 53.935097239446314,
+      "recording_duration_s": 7.750055555555555,
+      "first_last_pixels_differ": true,
+      "screenshots": 2,
+      "screenshot_dimensions": [
+        4128,
+        2208
+      ],
+      "scope": "qualitative compositor evidence only",
+      "chart_partly_obscured_by_overlays": true,
+      "numeric_quality_score": null
+    },
+    {
+      "label": "haar600",
+      "recorded_video_frames": 439,
+      "recording_fps": 57.04739655376547,
+      "recording_duration_s": 7.6953555555555555,
+      "first_last_pixels_differ": true,
+      "screenshots": 2,
+      "screenshot_dimensions": [
+        4128,
+        2208
+      ],
+      "scope": "qualitative compositor evidence only",
+      "chart_partly_obscured_by_overlays": true,
+      "numeric_quality_score": null
+    }
+  ],
+  "visual_review": {
+    "visible_content": "Stereo chart and changing content are present, with SteamVR dashboard and performance HUD covering parts of the image.",
+    "full_chart_quality_pass": null,
+    "numeric_quality_score": null,
+    "optical_display_fps": null,
+    "limitations": "Screenshots and lossy compositor recordings are separate from rate captures. Occlusion, lens/compositor transforms and capture transfer behavior prevent exact source pixel scoring. Dashboard visibility was not independently logged during the four rate captures. Repeat a clean overlay-free control before any game/quality promotion."
+  },
+  "restoration": {
+    "steamvr_resolution_restored": true,
+    "steamvr_closed": true,
+    "external_drivers_match_before": true,
+    "headset_properties_restored": true,
+    "openxr_runtime_matches_before": true,
+    "dashboard_closed": true,
+    "virtual_desktop_functional_retest_this_session": false
+  },
+  "prior_functional_checks": "Head/controller tracking and audio were previously owner-confirmed; not repeated during this AFK session."
+}

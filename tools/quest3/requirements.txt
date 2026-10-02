@@ -1,0 +1,7 @@
+# Supervised capture + stereo-chart tools. Use Python 3.12 (3.11+ required by NumPy).
+numpy==2.3.5
+opencv-python-headless==4.13.0.90
+websocket-client==1.9.2
+openvr==2.12.1401
+glfw==2.10.2
+PyOpenGL==3.1.10

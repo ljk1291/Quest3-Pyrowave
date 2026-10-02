@@ -1,138 +1,67 @@
-# Reproducible builds
+# Reproducible fork builds
 
-The fastest clean build is **Actions → Quest3-Pyrowave → Run workflow** in your own fork.
-It produces separate Android and Windows artifacts, APK certificate information and SHA-256 sums.
-No signing secrets are required for a development build. A CI development key changes between
-clean builds; Android will refuse an update signed by a different key. Keep a persistent private
-key for releases. Never commit a keystore or password. Do not uninstall another ALVR app to install
-this one: the package is `io.github.jms1717.quest3pyrowave`.
+Build Android and Windows from the **same repository commit**. `sources.lock.json` defines dependency URLs, commits and toolchains; `fork.json` defines the package/version. Reproducibility means recorded inputs and recipe, not byte-identical signatures or ZIP timestamps.
 
-Pinned inputs are recorded in [`sources.lock.json`](../sources.lock.json). Source reconstruction
-uses ALVR v20.13.0 plus the complete research patch, then `patches/quest3-alvr.patch`. PyroWave and
-Granite remain pinned to the tested research revisions. Cargo's lockfile comes from that tree.
-Reproducible here means the same inputs and recipe, not identical signature timestamps or ZIP bytes.
+## Cloud build contract
 
-## Local Windows build
+`.github/workflows/ci.yml` runs on main, `codex/**`, pull requests and manual dispatch. It reconstructs sources, checks pins/shaders, runs Python/native/Rust checks, compiles both platforms, and verifies the artifact pair. The client/server version includes the repository commit so captures can compare installed versions to build metadata.
 
-Use a short external workspace such as `C:\q3pw` to avoid Windows native-tool path limits.
-Install Git for Windows, Python 3.13, Rustup, CMake, Ninja, LLVM (libclang), and Visual Studio
-2022 C++ tools with Windows SDK and ATL. VS2019 can compile PyroWave and the transport probe;
-the supported full-streamer recipe uses VS2022. The SDK, tools and project remain separate.
+Main and manual builds require repository secrets `QUEST3_SIGNING_KEYSTORE_BASE64` and `QUEST3_SIGNING_KEYSTORE_PASSWORD`. Missing secrets fail the stable build. Branch/PR development builds use a labelled temporary key and are not a persistent installation channel. Keep a private backup of the release keystore/password, outside tracked files. Never paste secrets into issues, logs or reports.
+
+Generate a PKCS12 signing key once with JDK 17 keytool, using its interactive password prompts:
+
+```text
+keytool -genkeypair -storetype PKCS12 -keystore <private-directory>/quest3-baseline.p12 -alias quest3-baseline -keyalg RSA -keysize 3072 -validity 10000 -dname "CN=ljk1291 Quest3-Pyrowave"
+```
+
+Store the base64 file contents and password in those two Actions secrets. Keep the same key for subsequent stable builds. A development-to-stable signature change may require removing **only this fork's app**, losing its app configuration. Do not uninstall VD or another ALVR package to resolve a signature mismatch.
+
+Download `Quest3-Pyrowave-Android` and `Quest3-Pyrowave-Windows` from one successful workflow, including metadata. Verify the unpacked folders:
+
+```powershell
+python tools/ci/build_metadata.py verify-pair out/android/BUILD-METADATA.json out/windows/BUILD-METADATA.json
+```
+
+Metadata records dependency revisions, repository version, shader hashes, artifact/native-library hashes and Android signing kind/certificate fingerprint. Missing codec libraries fail packaging.
+
+## Local source reconstruction
+
+Use an empty destination, a short Windows path, Git for Windows, Python, CMake, Ninja and the pinned Rust toolchain. Windows requires Visual Studio 2022 C++ tools, Windows SDK, ATL and LLVM/libclang. Android uses JDK 17, SDK/platform 35/build-tools 35.0.0 and the locked NDK. The workflow contains loader download/integrity checks and Rust helper installation commands.
 
 ```powershell
 $env:XRWIRED_INPUTS = 'C:\q3pw'
-& 'C:\Program Files\Git\bin\sh.exe' tools/ci/fetch_sources.sh C:/q3pw/research
-rustup toolchain install 1.97.1 --profile minimal
+# Use sh.exe from your own Git for Windows installation.
+sh tools/ci/fetch_sources.sh C:/q3pw/research
+python tools/ci/stamp_alvr_version.py C:/q3pw/research/ALVR-20.13.0
 tools\windows\build_pyrowave_pc.cmd interop
 tools\windows\build_streamer.cmd
 ```
 
-The output is `C:\q3pw\research\ALVR-20.13.0\build\alvr_streamer_windows`. The PyroWave DLL
-must be next to `driver_alvr_server.dll` in `bin\win64`. Run the dashboard from the output
-directory. Select the GPU that SteamVR uses. On multiple-GPU systems the Vulkan and D3D11 LUIDs
-must match; unsupported external-memory/fence interop is a startup error.
+For Android set `XRWIRED_ANDROID_SDK`, `XRWIRED_NDK`, `JAVA_HOME`, `CARGO_APK_RELEASE_KEYSTORE` and `CARGO_APK_RELEASE_KEYSTORE_PASSWORD` to local toolchain/private-key locations, then follow CI's `tools/build_pyrowave_android.sh` and `tools/build_alvr_2013.sh` recipe. Environment variables cannot replace locked source revisions.
 
-Source fetch is for an **empty destination**. Preserve modifications before fetching again;
-use a new directory for an independent reconstruction. The pinned Granite submodules are large.
+Source fetch refuses an existing source directory. Reconstruct into a new directory rather than erasing work. ALVR applies the inherited instrumentation and Quest overlays followed by `stable-baseline-alvr.patch` and `fork-identity-alvr.patch`. PyroWave applies its cumulative research overlay then the Quest overlay. Preserve LF checkouts (`core.autocrlf=false`), as set by the fetch script.
 
-## Android APK
+## Supervised installation
 
-Use JDK 17, Android SDK platform 35 and build tools 35.0.0, NDK 27.2.12479018, CMake and Ninja.
-Install Android packages using Android's SDK manager and accept its licenses interactively.
-The old `tools/windows/install_toolchain.ps1` is inherited research tooling; use the explicit
-versions below or the CI recipe instead.
+First complete the snapshot in [STABLE-BASELINE.md](STABLE-BASELINE.md). Stop existing VR sessions and extract the Windows ZIP into a dedicated directory. Verify `bin/win64` includes the PyroWave DLL. On Windows, the dashboard keeps this installation's `session.json` beside its executable. Keep **SteamVR launcher → No action** and **Open/close SteamVR with dashboard → off** while preparing the profile. Close the setup wizard without resetting settings. Register only this ALVR driver through the dashboard's Installation tab and explicitly trust the headset. Do not select “Unregister other drivers at startup”; retain VD's registration. Use only one active ALVR driver.
 
 ```powershell
-$env:XRWIRED_INPUTS = 'C:\q3pw'
-$env:XRWIRED_ANDROID_SDK = 'C:\q3pw\toolchain\android-sdk'
-$env:XRWIRED_NDK = "$env:XRWIRED_ANDROID_SDK\ndk\27.2.12479018"
-$env:JAVA_HOME = '<your JDK 17 directory>'
-rustup target add aarch64-linux-android --toolchain 1.97.1
-cargo +1.97.1 install --locked cargo-ndk@4.1.2 cbindgen@0.29.4
-cargo +1.97.1 install --locked --git https://github.com/zarik5/cargo-apk --rev 0fd3126dad5aa1c5f0f26cdae3410f2e5af62c60 cargo-apk
+adb install -r out/android/Quest3-Pyrowave-stable.apk
+adb shell am start -n io.github.ljk1291.quest3pyrowave/android.app.NativeActivity
 ```
 
-Download the Khronos Android OpenXR loader 1.0.34 AAR (the URL and extraction path are in CI),
-and copy `libopenxr_loader.so` to the ALVR clone's `deps/android_openxr/arm64-v8a/`.
-Quest 3 uses ALVR's generic Khronos loader path, rather than the Quest 1 compatibility loader.
+SteamVR is the PC OpenXR runtime for Metro's ALVR session. Record the prior runtime before selecting it; retain VD and its registration. Select Quest 3 Touch Plus controller emulation. A terminal decoder fault requires closing/reopening the Quest app; a terminal encoder fault requires fully restarting SteamVR. Repeated faults stop the test sequence.
 
-```powershell
-& 'C:\Program Files\Git\bin\sh.exe' tools/build_pyrowave_android.sh
-& 'C:\Program Files\Git\bin\sh.exe' tools/build_alvr_2013.sh
-```
+With driver launch action set to **No action**, ending the test does not automatically restore a driver-registration backup. Close SteamVR, unregister only this fork's extracted driver, and compare the remaining registrations to the preflight snapshot. Follow the full return-to-VD check in the runbook before marking rollback verified.
 
-Despite its inherited script name, this builds the **patched Quest 3 APK**. The output is
-`research\ALVR-20.13.0\build\alvr_client_android\alvr_client_android.apk` under the inputs root.
-`cargo-apk` reads `CARGO_APK_RELEASE_KEYSTORE` and `CARGO_APK_RELEASE_KEYSTORE_PASSWORD` for your
-own persistent release key. Keep both outside the repo. Main-branch CI builds use a stable repository signing key supplied by
-`QUEST3_SIGNING_KEYSTORE_BASE64` and `QUEST3_SIGNING_KEYSTORE_PASSWORD` GitHub Actions secrets.
-Forks can generate their own key and secrets; pull requests build with a temporary development
-key and cannot access release signing secrets. APK certificate fingerprints accompany artifacts.
-
-The first unsigned-development CI snapshots used disposable keys. Updating from one of those
-to the stable signed build requires uninstalling **this app only** once; that removes its app
-configuration, so trust the newly discovered client again. Subsequent main builds can install
-with `adb install -r`. Never commit a keystore, signing password or raw device logs.
-
-## Install and rollback
-
-```powershell
-adb devices -l
-adb install -r Quest3-Pyrowave-dev.apk
-adb shell am start -n io.github.jms1717.quest3pyrowave/android.app.NativeActivity
-```
-
-Allow the requested microphone permission if you use it. In the dashboard, explicitly trust
-your headset, register this driver with SteamVR, and select **Quest 3 PyroWave 400 Mbps / 72 Hz candidate**. Use
-only one active ALVR SteamVR driver. This fork has its own protocol version; stock and Galaxy XR
-clients cannot pair with it. Driver registration and firewall rules are through the ALVR UI.
-Allow the streamer on your private LAN only; the API is local at port 8082 and PyroWave UDP at 9948.
-
-For standard Quest 3 controllers, choose **Settings → Headset → Controllers →
-Emulation mode → Quest 3 Touch Plus**, then restart SteamVR. The .8 fork defaults
-to this mode; older saved sessions can retain Quest 2 Touch. Games may choose their
-own controller meshes independently of SteamVR's render-model property.
-
-Rollback: stop SteamVR, unregister this driver in the dashboard, then re-register your previous
-driver. Uninstall only `io.github.jms1717.quest3pyrowave` if desired. No OS refresh properties,
-network adapter settings, root access, or persistent GPU clock changes are part of setup.
-
-For explicitly requested development sessions, `tools.quest3.awake` can temporarily bypass
-proximity sleep with a timed rollback. It is not enabled by the APK or the normal installation.
-
-## Validation
+## Checks and reference build
 
 ```powershell
 python -m unittest discover -s tests -v
-cd C:\q3pw\research\ALVR-20.13.0
-cargo +1.97.1 test -p alvr_session --lib
+python -m pytest tools/tests/test_ci_pins.py tools/tests/test_build_metadata.py -q
+git diff --check
 ```
 
-Main-branch CI builds artifacts only. Pull requests run tool regression checks; tests can also be run manually. On-device correctness and timing
-are separate gates: see [`BENCHMARKING.md`](BENCHMARKING.md).
+CI compiles host policy/decode tests, runs software GLES readback, verifies generated shaders and runs the Rust checks listed in the workflow. Tooling tests alone do not establish native build or headset performance success.
 
-## Switching between PyroWave and Virtual Desktop
-
-Enable **ALVR** in SteamVR’s **Manage Add-ons** before starting Quest3-Pyrowave. A repair for a Virtual Desktop session may have disabled this add-on. When returning to Virtual Desktop, disable ALVR again so the drivers do not compete to claim the headset. Keep the Virtual Desktop installation.
-
-
-## Regenerating embedded shaders
-
-Normal builds consume the committed generated header. Both build helpers verify
-its source/header hash manifest before compiling. After editing GLSL, dispatch
-the `Regenerate pinned PyroWave shaders` GitHub workflow. Review the source hash
-and download its generated header; replace `shaders/slangmosh.hpp` in the pinned
-PyroWave tree, then run `python tools/ci/check_shader_manifest.py <tree> --write`.
-Regenerate `patches/quest3-pyrowave.patch` against the staged research baseline,
-including the manifest with `git add -N`. Reverse-check the patch before committing.
-The workflow records the pinned compiler configuration and invocation.
-# Cloud build caching
-
-Actions reconstructs the pinned source trees on every run, then restores Cargo
-registry/git dependencies and compiled target directories for the same platform
-and pinned toolchain. Cargo still checks the changed sources and dependencies;
-native PyroWave configuration/build, tests, signing, packaging and checksums run
-again. Caches exclude signing keys, Cargo credentials, headset captures and session
-configuration. The first run populates the cache; speed gains require a later run.
-For a clean comparison, bump the workflow cache generation or remove its cache
-steps and dispatch a new build. Artifacts remain tied to their exact CI commit.
+Build the untouched reviewed upstream commit separately and retain its APK/server pair as the reference. Preserve any failed reference run; label any repair separately. Native builds, installation/rollback and sustained hardware qualification are separate gates.

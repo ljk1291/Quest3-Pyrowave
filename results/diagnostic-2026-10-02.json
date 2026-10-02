@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "kind": "sanitized_diagnostic",
+  "date": "2026-10-02",
+  "build": {
+    "native_repository_commit": "cbf70c27269d",
+    "benchmark_tool_commit": "0d63b17",
+    "metadata_pair_gate": {
+      "status": "failed",
+      "effect": "The build pair is diagnostic only and cannot be promoted."
+    }
+  },
+  "configuration": {
+    "requested_hz": 72,
+    "source_eye_dimensions": {
+      "width": 2080,
+      "height": 2208,
+      "basis": "diagnostic chart report"
+    },
+    "render_eye_dimensions": {
+      "width": 2080,
+      "height": 2208
+    },
+    "encoded_eye_dimensions": {
+      "width": 2080,
+      "height": 2208
+    },
+    "codec": "PyroWave",
+    "bitrate_mode": "ConstantMbps",
+    "target_mbps": 400,
+    "transport": "Tcp",
+    "chroma": "420",
+    "decode_path": "Compute",
+    "wavelet": "Cdf97",
+    "hdr_enabled": false,
+    "foveation_enabled": false
+  },
+  "runtime_evidence": {
+    "fresh_runtime_evidence": true,
+    "effective_requested_hz": 72,
+    "effective_runtime_hz": 72,
+    "coverage_max_gap_s": 6.1397,
+    "measurement_clock": "QueryPerformanceCounter"
+  },
+  "capture": {
+    "duration_s": 59.9871,
+    "graph_statistics_events": 4250,
+    "fresh_frame_timestamps": 4220,
+    "duplicate_frame_events": 30,
+    "submitted_frame_rate_fps": 70.8319,
+    "client_fps_p01": 36.0023,
+    "client_fps_p50": 72.0056,
+    "rate_screen_passed": false
+  },
+  "decoder_and_presentation": {
+    "decode_failures": 0,
+    "dropped": 0,
+    "stale_packets": 0,
+    "complete_rate_fps": 71.3285,
+    "staging_eye_copy_rate_fps": 70.8239,
+    "gpu_decode_ms": {
+      "p50": 9.7543,
+      "p95": 9.9181
+    },
+    "decode_to_fence_ms": {
+      "p50": 13.5572,
+      "p95": 14.0765
+    },
+    "native_convert_ms": {
+      "p50": 1.8921,
+      "p95": 2.8012
+    },
+    "native_wait_ms": {
+      "p50": 12.9081,
+      "p95": 13.3618
+    },
+    "eye_render_ms": {
+      "p50": 13.3316,
+      "p95": 14.0427
+    }
+  },
+  "telemetry": {
+    "complete": true,
+    "thermal_ok": true,
+    "stream_errors": []
+  },
+  "operator_observations": {
+    "initial_chart_image_clear": true,
+    "world_grid_tracking_confirmed": true,
+    "world_grid_controllers_confirmed": true,
+    "audio_two_tone_confirmed": true,
+    "manual_acceptance_proof_complete": false
+  },
+  "unqualified_reasons": [
+    "Diagnostic chart only; Metro Awakening was not tested.",
+    "72 Hz is below the 90 Hz target.",
+    "The submitted-frame rate screen failed and duplicate target timestamps were observed.",
+    "This is not a Godlike-dimension qualification, endurance, or recovery run.",
+    "The matching build-pair metadata gate failed.",
+    "Competing GPU workload was not controlled; possible ComfyUI contention requires clean performance reruns."
+  ],
+  "optical_motion_to_photon_ms": null,
+  "display_fps": null,
+  "limitations": "No optical latency or display-FPS claim is made by this diagnostic.",
+  "background_gpu_workload": {
+    "recorded_during_capture": false,
+    "user_reported_possible_comfyui_contention": true,
+    "subsequent_check_found_comfyui_processes": true,
+    "subsequent_gpu_utilization_percent": 100,
+    "subsequent_vram_used_mib_range": [
+      14585,
+      14652
+    ],
+    "total_vram_mib": 16303,
+    "performance_comparison_valid": false,
+    "note": "Later GPU observation does not establish activity at each earlier instant. Repeat all performance measurements with competing GPU workloads stopped or idle and sufficient free VRAM.",
+    "subsequent_check_with_steamvr_closed": {
+      "gpu_utilization_percent": 100,
+      "vram_used_mib": 15359,
+      "total_vram_mib": 16303
+    }
+  },
+  "timestamp_metric_correction": "The legacy fresh_frame_timestamps count represents distinct tracking timestamps, and duplicate_frame_events represents tracking timestamp reuse. Neither proves fresh or duplicated decoded-frame identity."
+}

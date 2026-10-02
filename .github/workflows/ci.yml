@@ -1,22 +1,29 @@
 name: Quest3-Pyrowave
 on:
   push:
-    branches: [main]
+    branches: [main, 'codex/**']
   pull_request:
   workflow_dispatch:
 permissions:
   contents: read
 env:
-  RUST_TOOLCHAIN: '1.97.1'
-  NDK_VERSION: '27.2.12479018'
   XRWIRED_INPUTS: ${{ github.workspace }}/ws
 jobs:
   tests:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Validate authoritative source lock
+        run: python3 tools/ci/source_lock.py --github-env >> "$GITHUB_ENV"
+      - name: Reproducible-build contract checks
+        run: |
+          python3 -m pip install --disable-pip-version-check pytest==9.1.1
+          python3 -m pytest tools/tests/test_ci_pins.py tools/tests/test_build_metadata.py -q
       - run: python3 -m unittest discover -s tests -v
       - run: g++ -std=c++17 -Wall -Werror tools/pyroclient/decode_path_test.cpp -o /tmp/decode-path && /tmp/decode-path
+      - run: g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/pass_profile_test.cpp -o /tmp/pass-profile && /tmp/pass-profile
+      - name: GPU failure-policy state-machine test
+        run: g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/gpu_failure_policy_test.cpp -o /tmp/gpu-failure-policy && /tmp/gpu-failure-policy
       - name: Software GLES readback correctness (no Quest hardware)
         env:
           EGL_PLATFORM: surfaceless
@@ -33,12 +40,16 @@ jobs:
     if: ${{ always() && (needs.tests.result == 'success' || needs.tests.result == 'skipped') }}
     steps:
       - uses: actions/checkout@v4
+      - name: Load authoritative build pins
+        run: python3 tools/ci/source_lock.py --github-env >> "$GITHUB_ENV"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
       - name: Reconstruct pinned source trees
         run: sh tools/ci/fetch_sources.sh "$XRWIRED_INPUTS/research"
+      - name: Stamp the installable client/server identity
+        run: python3 tools/ci/stamp_alvr_version.py "$XRWIRED_INPUTS/research/ALVR-20.13.0"
       - name: Cache Rust dependencies and compiled Android targets
         id: cargo_client_cache
         uses: actions/cache/restore@v4
@@ -66,19 +77,19 @@ jobs:
             ~/.cargo/bin/cargo-ndk
             ~/.cargo/bin/cbindgen
             ~/.cargo/bin/cargo-apk
-          key: q3pw-android-tools-v1-ubuntu24-${{ env.RUST_TOOLCHAIN }}-ndk4.1.2-cbindgen0.29.4-apk0fd3126dad5aa1c5f0f26cdae3410f2e5af62c60
+          key: q3pw-android-tools-v1-ubuntu24-${{ env.RUST_TOOLCHAIN }}-ndk4.1.2-cbindgen0.29.4-apk${{ env.CARGO_APK_COMMIT }}
       - name: Install pinned Android build tools on cache miss
         if: steps.android_tools_cache.outputs.cache-hit != 'true'
         run: |
           cargo +"$RUST_TOOLCHAIN" install --locked cargo-ndk@4.1.2 cbindgen@0.29.4
-          cargo +"$RUST_TOOLCHAIN" install --locked --git https://github.com/zarik5/cargo-apk --rev 0fd3126dad5aa1c5f0f26cdae3410f2e5af62c60 cargo-apk
+          cargo +"$RUST_TOOLCHAIN" install --locked --git https://github.com/zarik5/cargo-apk --rev "$CARGO_APK_COMMIT" cargo-apk
       - name: Verify cached tool executables
         run: |
           test -x "$HOME/.cargo/bin/cargo-ndk"
           test -x "$HOME/.cargo/bin/cbindgen"
           test -x "$HOME/.cargo/bin/cargo-apk"
       - name: Save pinned Android tools before application compilation
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.android_tools_cache.outputs.cache-hit != 'true' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && steps.android_tools_cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: |
@@ -90,20 +101,27 @@ jobs:
         run: |
           dest="$XRWIRED_INPUTS/research/ALVR-20.13.0/deps/android_openxr/arm64-v8a"
           mkdir -p "$dest" /tmp/openxr
-          curl -fsSL -o /tmp/openxr/loader.aar https://github.com/KhronosGroup/OpenXR-SDK-Source/releases/download/release-1.0.34/openxr_loader_for_android-1.0.34.aar
+          curl -fsSL -o /tmp/openxr/loader.aar "https://github.com/KhronosGroup/OpenXR-SDK-Source/releases/download/$OPENXR_LOADER_RELEASE/$OPENXR_LOADER_AAR"
+          echo "$OPENXR_LOADER_SHA256  /tmp/openxr/loader.aar" | sha256sum --check --status
           unzip -q /tmp/openxr/loader.aar -d /tmp/openxr
           cp /tmp/openxr/prefab/modules/openxr_loader/libs/android.arm64-v8a/libopenxr_loader.so "$dest/"
-      - name: Stable Quest development signing
-        if: github.event_name != 'pull_request'
+      - name: Configure stable or temporary APK signing
         env:
           SIGNING_KEY: ${{ secrets.QUEST3_SIGNING_KEYSTORE_BASE64 }}
           SIGNING_PASSWORD: ${{ secrets.QUEST3_SIGNING_KEYSTORE_PASSWORD }}
         run: |
-          if [ -n "$SIGNING_KEY" ] && [ -n "$SIGNING_PASSWORD" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            test -n "$SIGNING_KEY" && test -n "$SIGNING_PASSWORD" || { echo "stable builds require QUEST3_SIGNING_KEYSTORE_BASE64 and QUEST3_SIGNING_KEYSTORE_PASSWORD" >&2; exit 1; }
             mkdir -p "$RUNNER_TEMP/quest3-signing"
             printf '%s' "$SIGNING_KEY" | base64 --decode > "$RUNNER_TEMP/quest3-signing/release.p12"
             echo "CARGO_APK_RELEASE_KEYSTORE=$RUNNER_TEMP/quest3-signing/release.p12" >> "$GITHUB_ENV"
             echo "CARGO_APK_RELEASE_KEYSTORE_PASSWORD=$SIGNING_PASSWORD" >> "$GITHUB_ENV"
+            echo "Q3PW_SIGNING_KIND=stable" >> "$GITHUB_ENV"
+          else
+            keytool -genkeypair -noprompt -storetype PKCS12 -keystore "$RUNNER_TEMP/q3pw-development.p12" -storepass development -keypass development -alias q3pw-development -dname "CN=Quest3-Pyrowave CI development" -validity 2 -keyalg RSA -keysize 2048
+            echo "CARGO_APK_RELEASE_KEYSTORE=$RUNNER_TEMP/q3pw-development.p12" >> "$GITHUB_ENV"
+            echo "CARGO_APK_RELEASE_KEYSTORE_PASSWORD=development" >> "$GITHUB_ENV"
+            echo "Q3PW_SIGNING_KIND=development" >> "$GITHUB_ENV"
           fi
       - name: Native libraries, probes and APK
         run: |
@@ -116,17 +134,18 @@ jobs:
           mkdir out
           python3 tools/ci/package_licenses.py "$XRWIRED_INPUTS/research" /tmp/quest3-notices/LICENSES
           (cd /tmp/quest3-notices && zip -qr "$GITHUB_WORKSPACE/out/LICENSES.zip" LICENSES)
-          cp "$XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_client_android/alvr_client_android.apk" out/Quest3-Pyrowave-dev.apk
+          cp "$XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_client_android/alvr_client_android.apk" "out/Quest3-Pyrowave-$Q3PW_SIGNING_KIND.apk"
           cp "$XRWIRED_NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" out/
           cp tools/pyrowave_android/pyrowave_android tools/udptest/udprecv-android tools/pyroclient/pyroclient_test tools/pyroclient/libpyroclient.so "$XRWIRED_INPUTS/research/pyrowave/build-android/libpyrowave-shared.so" out/
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs out/Quest3-Pyrowave-dev.apk > out/APK-CERTIFICATE.txt
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "out/Quest3-Pyrowave-$Q3PW_SIGNING_KIND.apk" > out/APK-CERTIFICATE.txt
+          python3 tools/ci/build_metadata.py write --platform android --output out --pyrowave "$XRWIRED_INPUTS/research/pyrowave" --certificate-file out/APK-CERTIFICATE.txt --require-signing-certificate --signing-kind "$Q3PW_SIGNING_KIND" --required-native out/libpyrowave-shared.so out/libpyroclient.so
           (cd out && sha256sum * > SHA256SUMS.txt)
       - uses: actions/upload-artifact@v4
         with:
           name: Quest3-Pyrowave-Android
           path: out/
       - name: Save reusable Android compilation after success or test failure
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo_client_cache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && steps.cargo_client_cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: |
@@ -145,9 +164,15 @@ jobs:
     steps:
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
+      - name: Load authoritative build pins
+        shell: bash
+        run: python3 tools/ci/source_lock.py --github-env >> "$GITHUB_ENV"
       - name: Reconstruct pinned sources
         shell: bash
         run: sh tools/ci/fetch_sources.sh "$XRWIRED_INPUTS/research"
+      - name: Stamp the installable client/server identity
+        shell: bash
+        run: python3 tools/ci/stamp_alvr_version.py "$XRWIRED_INPUTS/research/ALVR-20.13.0"
       - name: Cache Rust dependencies and compiled Windows targets
         id: cargo_streamer_cache
         uses: actions/cache/restore@v4
@@ -180,6 +205,10 @@ jobs:
           Set-Location "$env:XRWIRED_INPUTS/research/ALVR-20.13.0"
           cargo test --release -p alvr_client_core --lib
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --release -p alvr_client_openxr --lib
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --release -p alvr_common --lib
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --release -p alvr_session --lib
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --release -p alvr_packets --lib
@@ -196,13 +225,14 @@ jobs:
           New-Item -ItemType Directory out | Out-Null
           python tools/ci/package_licenses.py "$env:XRWIRED_INPUTS/research" "$env:XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_streamer_windows/LICENSES"
           Compress-Archive "$env:XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_streamer_windows/*" out/Quest3-Pyrowave-Windows.zip
+          python tools/ci/build_metadata.py write --platform windows --output out --pyrowave "$env:XRWIRED_INPUTS/research/pyrowave" --required-native "$env:XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_streamer_windows/bin/win64/driver_alvr_server.dll" "$env:XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_streamer_windows/bin/win64/libpyrowave-shared-0.dll"
           (Get-FileHash out/Quest3-Pyrowave-Windows.zip).Hash.ToLower() + '  Quest3-Pyrowave-Windows.zip' | Set-Content out/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: Quest3-Pyrowave-Windows
           path: out/
       - name: Save reusable Windows compilation after success or test failure
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo_streamer_cache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && steps.cargo_streamer_cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: |
@@ -211,3 +241,18 @@ jobs:
             ws/research/ALVR-20.13.0/target/release
             ws/research/ALVR-20.13.0/target/debug
           key: ${{ steps.cargo_streamer_cache.outputs.cache-primary-key }}
+  matching-pair:
+    runs-on: ubuntu-24.04
+    needs: [client, streamer]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Quest3-Pyrowave-Android
+          path: android
+      - uses: actions/download-artifact@v4
+        with:
+          name: Quest3-Pyrowave-Windows
+          path: windows
+      - name: Reject mismatched build identities
+        run: python3 tools/ci/build_metadata.py verify-pair android/BUILD-METADATA.json windows/BUILD-METADATA.json

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "quest3_pyrowave_operator_review",
+  "capture_id": "",
+  "reviewer": null,
+  "reviewed_at": null,
+  "controllers_ok": null,
+  "audio_ok": null,
+  "tracking_ok": null,
+  "image_ok": null,
+  "metro_clarity_ok": null,
+  "metro_motion_ok": null,
+  "manual_confirmation": null,
+  "no_disconnects_ok": null,
+  "no_crashes_ok": null,
+  "no_competing_gpu_workload": null,
+  "notes": null
+}

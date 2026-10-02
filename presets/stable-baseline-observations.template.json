@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "kind": "quest3_pyrowave_stable_baseline_observations",
+  "known_environment": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "cpu": "AMD Ryzen 5 7600",
+    "pc_link": "Ethernet",
+    "router": "dedicated Wi-Fi 6, 5 GHz, 80 MHz",
+    "target_hz": 90,
+    "game": "Metro Awakening"
+  },
+  "observed_before_run": {
+    "quest_os_version": null,
+    "gpu_driver_version": null,
+    "steamvr_version": null,
+    "virtual_desktop_codec": null,
+    "virtual_desktop_godlike_render_resolution_per_eye": null,
+    "virtual_desktop_godlike_encoded_resolution_per_eye": null,
+    "router_channel": null,
+    "ethernet_link_speed": null
+  },
+  "run_protocol": {
+    "first_pyrowave_profile": "TCP, 4:2:0, Compute, CDF 9/7, SDR, fixed bitrate",
+    "disabled_experiments": ["UDP", "4:4:4", "adaptive bitrate", "foveation", "async copy", "multiple decoder workers", "120 Hz"],
+    "recovery_cycles_required": 10,
+    "temporary_network_interruption_required": true,
+    "return_to_virtual_desktop_verified": null
+  },
+  "evidence": {
+    "preflight_report": null,
+    "baseline_plan": null,
+    "capture_report": null,
+    "operator_review": null,
+    "acceptance_result": null
+  }
+}

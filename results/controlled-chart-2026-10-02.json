@@ -1,0 +1,469 @@
+{
+  "schema_version": 1,
+  "kind": "sanitized_controlled_chart_diagnostics",
+  "date": "2026-10-02",
+  "native_repository_commit": "0c618b809ae47dc67b4ad91a2423579c7efbb6d0",
+  "native_pair_actions_run": 37016740156,
+  "capture_tool_commit": "a09e51b",
+  "comparison": {
+    "scene": "identical stereo quality chart with changing 10 Hz counter",
+    "sequence": [
+      "HEVC 200 Mbps",
+      "PyroWave 400 Mbps"
+    ],
+    "warmup_seconds_each": 10,
+    "network": "Ethernet PC to dedicated Wi-Fi 6 5 GHz/80 MHz access point; Quest video over Wi-Fi, USB telemetry",
+    "render_scale": 1.0,
+    "resolution_scope": "2080x2208 per eye diagnostic only"
+  },
+  "runs": [
+    {
+      "label": "hevc-control",
+      "settings": {
+        "codec": "Hevc",
+        "target_mbps": 200,
+        "bitrate_mode": "ConstantMbps",
+        "requested_hz": 72.0,
+        "render_resolution": {
+          "width": 2080,
+          "height": 2208
+        },
+        "encoded_resolution": {
+          "width": 2080,
+          "height": 2208
+        },
+        "negotiated_render_resolution": {
+          "width": 2080,
+          "height": 2208
+        },
+        "negotiated_encoded_resolution": {
+          "width": 2080,
+          "height": 2208
+        },
+        "negotiated_hz": 72,
+        "transport": "Tcp",
+        "hdr_enabled": false,
+        "foveated_encoding_enabled": false,
+        "clientside_foveation_enabled": false
+      },
+      "settings_unchanged": true,
+      "native_build_version": "20.13.0-ljk1291.1+0c618b809ae4",
+      "build_identity_verified": true,
+      "chart": {
+        "covers_entire_capture": true,
+        "source_eye_size": [
+          2080,
+          2208
+        ],
+        "quality_chart": true,
+        "changing_counter": true
+      },
+      "capture": {
+        "requested_seconds": 60,
+        "observed_seconds": 59.999091100064106,
+        "graph_events": 4316,
+        "selected_submission_event_rate_fps": 71.91775610073182,
+        "target_timestamp_reuse_events": 15,
+        "distinct_target_timestamp_count": 4301,
+        "strict_fresh_output_identity_verified": false
+      },
+      "rate_proxy_screen": {
+        "passed": true,
+        "tolerance": 0.02,
+        "scope": "Selected decoded-buffer submission-event rate and client FPS p01 only; ignores valid tracking-timestamp reuse. Not strict fresh-output, optical, sustained or target acceptance."
+      },
+      "runtime": {
+        "fresh_evidence": true,
+        "coverage_status": "covered",
+        "max_poll_gap_s": 6.03336920007132
+      },
+      "host": {
+        "samples": 28,
+        "comfyui_idle_at_every_sample": true,
+        "sample_errors": 0,
+        "gpu_ranges": {
+          "utilization_percent": {
+            "min": 13.0,
+            "max": 42.0
+          },
+          "vram_MiB": {
+            "min": 4508.0,
+            "max": 5020.0
+          },
+          "power_W": {
+            "min": 53.12,
+            "max": 68.85
+          },
+          "temperature_C": {
+            "min": 41.0,
+            "max": 45.0
+          }
+        }
+      },
+      "experiment_flags_unchanged": true,
+      "experiments_enabled": {
+        "direct_eye_copy": false,
+        "async_eye_copy": false,
+        "copy_wait": false,
+        "raw_srgb_copy": false,
+        "image_cache": false,
+        "frame_wait": false,
+        "pre_wait_poll": false,
+        "repeat_render": false,
+        "decode_workers": false,
+        "decode_handoff": false,
+        "display_scaling": false,
+        "haar_fused": false,
+        "dequant_batch": false,
+        "convert_compute": false,
+        "fragment_min_usage": false,
+        "optimal_ahb_usage": false,
+        "loop_probe": false,
+        "runtime_display_time": false
+      },
+      "metrics": {
+        "encoder_ms": {
+          "p01": 3.95288,
+          "p50": 4.931,
+          "p95": 5.83363
+        },
+        "decoder_ms": {
+          "p01": 11.17031,
+          "p50": 15.71591,
+          "p95": 16.95354
+        },
+        "network_ms": {
+          "p01": 2.2838,
+          "p50": 4.30858,
+          "p95": 6.5033
+        },
+        "total_pipeline_latency_ms": {
+          "p01": 66.86138,
+          "p50": 71.52092,
+          "p95": 85.42142
+        },
+        "decoder_queue_ms": {
+          "p01": 3.62789,
+          "p50": 9.94961,
+          "p95": 24.80762
+        },
+        "server_compositor_ms": {
+          "p01": 0.11552,
+          "p50": 0.1574,
+          "p95": 0.2218
+        },
+        "client_compositor_ms": {
+          "p01": 0.75651,
+          "p50": 0.98573,
+          "p95": 1.33423
+        },
+        "vsync_queue_ms": {
+          "p01": 15.00829,
+          "p50": 19.35332,
+          "p95": 20.07613
+        },
+        "client_fps": {
+          "p01": 71.97839,
+          "p50": 72.00001,
+          "p95": 72.00777
+        },
+        "server_fps": {
+          "p01": 68.02649,
+          "p50": 71.52232,
+          "p95": 76.19048
+        },
+        "video_mbps": {
+          "p01": 36.05492,
+          "p50": 120.58688,
+          "p95": 151.82469
+        }
+      },
+      "pyrowave_stages": {
+        "gpu_decode_ms": null,
+        "decode_to_fence_ms": null,
+        "native_convert_ms": null,
+        "native_wait_ms": null,
+        "eye_render_ms": null
+      },
+      "pyrowave_counter_window": {
+        "samples": 0,
+        "interval_s": null,
+        "counter_deltas": {
+          "complete": null,
+          "partial": null,
+          "skipped": null,
+          "dropped": null,
+          "superseded": null,
+          "stale_packets": null,
+          "decode_failures": null,
+          "direct_eye_copies": null,
+          "staging_eye_copies": null,
+          "completed_eye_copies": null,
+          "pending_eye_copy_deferrals": null
+        },
+        "counter_rates_per_s": {
+          "complete": null,
+          "partial": null,
+          "skipped": null,
+          "dropped": null,
+          "superseded": null,
+          "stale_packets": null,
+          "decode_failures": null,
+          "direct_eye_copies": null,
+          "staging_eye_copies": null,
+          "completed_eye_copies": null,
+          "pending_eye_copy_deferrals": null
+        },
+        "definition": "Matching HeadsetTelemetry endpoints. Complete is producer decode completion; superseded includes pending replacement and out-of-order publication. Eye completion can include configuration redraws; staging completion is unobserved. Not unique or optical display FPS."
+      },
+      "thermal_ok": true,
+      "stream_errors": null,
+      "operator_chart_confirmation": null
+    },
+    {
+      "label": "pyro-baseline",
+      "settings": {
+        "codec": "PyroWave",
+        "target_mbps": 400,
+        "bitrate_mode": "ConstantMbps",
+        "requested_hz": 72.0,
+        "render_resolution": {
+          "width": 2080,
+          "height": 2208
+        },
+        "encoded_resolution": {
+          "width": 2080,
+          "height": 2208
+        },
+        "negotiated_render_resolution": {
+          "width": 2080,
+          "height": 2208
+        },
+        "negotiated_encoded_resolution": {
+          "width": 2080,
+          "height": 2208
+        },
+        "negotiated_hz": 72,
+        "transport": "Tcp",
+        "hdr_enabled": false,
+        "foveated_encoding_enabled": false,
+        "clientside_foveation_enabled": false,
+        "chroma": "420",
+        "decode_path": "Compute",
+        "wavelet": "Cdf97"
+      },
+      "settings_unchanged": true,
+      "native_build_version": "20.13.0-ljk1291.1+0c618b809ae4",
+      "build_identity_verified": true,
+      "chart": {
+        "covers_entire_capture": true,
+        "source_eye_size": [
+          2080,
+          2208
+        ],
+        "quality_chart": true,
+        "changing_counter": true
+      },
+      "capture": {
+        "requested_seconds": 60,
+        "observed_seconds": 59.97204799996689,
+        "graph_events": 4248,
+        "selected_submission_event_rate_fps": 70.81632429831886,
+        "target_timestamp_reuse_events": 14,
+        "distinct_target_timestamp_count": 4234,
+        "strict_fresh_output_identity_verified": false
+      },
+      "rate_proxy_screen": {
+        "passed": false,
+        "tolerance": 0.02,
+        "scope": "Selected decoded-buffer submission-event rate and client FPS p01 only; ignores valid tracking-timestamp reuse. Not strict fresh-output, optical, sustained or target acceptance."
+      },
+      "runtime": {
+        "fresh_evidence": true,
+        "coverage_status": "covered",
+        "max_poll_gap_s": 6.00401870009955
+      },
+      "host": {
+        "samples": 28,
+        "comfyui_idle_at_every_sample": true,
+        "sample_errors": 0,
+        "gpu_ranges": {
+          "utilization_percent": {
+            "min": 13.0,
+            "max": 22.0
+          },
+          "vram_MiB": {
+            "min": 4663.0,
+            "max": 4951.0
+          },
+          "power_W": {
+            "min": 49.9,
+            "max": 61.74
+          },
+          "temperature_C": {
+            "min": 38.0,
+            "max": 41.0
+          }
+        }
+      },
+      "experiment_flags_unchanged": true,
+      "experiments_enabled": {
+        "direct_eye_copy": false,
+        "async_eye_copy": false,
+        "copy_wait": false,
+        "raw_srgb_copy": false,
+        "image_cache": false,
+        "frame_wait": false,
+        "pre_wait_poll": false,
+        "repeat_render": false,
+        "decode_workers": false,
+        "decode_handoff": false,
+        "display_scaling": false,
+        "haar_fused": false,
+        "dequant_batch": false,
+        "convert_compute": false,
+        "fragment_min_usage": false,
+        "optimal_ahb_usage": false,
+        "loop_probe": false,
+        "runtime_display_time": false
+      },
+      "metrics": {
+        "encoder_ms": {
+          "p01": 1.86789,
+          "p50": 2.18355,
+          "p95": 2.62259
+        },
+        "decoder_ms": {
+          "p01": 13.22814,
+          "p50": 20.2275,
+          "p95": 26.0238
+        },
+        "network_ms": {
+          "p01": 6.80563,
+          "p50": 8.46031,
+          "p95": 12.31657
+        },
+        "total_pipeline_latency_ms": {
+          "p01": 79.00423,
+          "p50": 83.82855,
+          "p95": 97.65617
+        },
+        "decoder_queue_ms": {
+          "p01": 2.93886,
+          "p50": 3.34076,
+          "p95": 5.16176
+        },
+        "server_compositor_ms": {
+          "p01": 0.1055,
+          "p50": 0.1359,
+          "p95": 0.18296
+        },
+        "client_compositor_ms": {
+          "p01": 3.81245,
+          "p50": 13.46175,
+          "p95": 14.11316
+        },
+        "vsync_queue_ms": {
+          "p01": 27.41981,
+          "p50": 31.51525,
+          "p95": 39.26835
+        },
+        "client_fps": {
+          "p01": 36.00084,
+          "p50": 71.99991,
+          "p95": 72.00684
+        },
+        "server_fps": {
+          "p01": 67.8465,
+          "p50": 71.67765,
+          "p95": 76.31386
+        },
+        "video_mbps": {
+          "p01": 376.91531,
+          "p50": 398.18273,
+          "p95": 423.92535
+        }
+      },
+      "pyrowave_stages": {
+        "gpu_decode_ms": {
+          "p50": 9.79932,
+          "p95": 9.95213
+        },
+        "decode_to_fence_ms": {
+          "p50": 13.58516,
+          "p95": 14.16403
+        },
+        "native_convert_ms": {
+          "p50": 1.8607,
+          "p95": 2.83664
+        },
+        "native_wait_ms": {
+          "p50": 12.91552,
+          "p95": 13.41346
+        },
+        "eye_render_ms": {
+          "p50": 13.43263,
+          "p95": 14.06764
+        }
+      },
+      "pyrowave_counter_window": {
+        "samples": 60,
+        "interval_s": 59.41702960000839,
+        "counter_deltas": {
+          "complete": 4220,
+          "partial": 0,
+          "skipped": 58,
+          "dropped": 0,
+          "superseded": 13,
+          "stale_packets": 0,
+          "decode_failures": 0,
+          "direct_eye_copies": 0,
+          "staging_eye_copies": 4208,
+          "completed_eye_copies": 0,
+          "pending_eye_copy_deferrals": 0
+        },
+        "counter_rates_per_s": {
+          "complete": 71.02340908673435,
+          "partial": 0.0,
+          "skipped": 0.9761511201494295,
+          "dropped": 0.0,
+          "superseded": 0.21879249244728594,
+          "stale_packets": 0.0,
+          "decode_failures": 0.0,
+          "direct_eye_copies": 0.0,
+          "staging_eye_copies": 70.82144678601378,
+          "completed_eye_copies": 0.0,
+          "pending_eye_copy_deferrals": 0.0
+        },
+        "definition": "Matching HeadsetTelemetry endpoints. Complete is producer decode completion; superseded includes pending replacement and out-of-order publication. Eye completion can include configuration redraws; staging completion is unobserved. Not unique or optical display FPS."
+      },
+      "thermal_ok": true,
+      "stream_errors": [],
+      "operator_chart_confirmation": {
+        "clear": true,
+        "upright_labels": true,
+        "changing_counter": true,
+        "flicker_or_corruption_reported": false,
+        "basis": "Owner response: Clear and changing normally."
+      }
+    }
+  ],
+  "acceptance": {
+    "passed": false,
+    "reasons": [
+      "Not Godlike/90 Hz or Metro",
+      "Only one minute per profile; no endurance or recovery evidence",
+      "PyroWave client FPS p01 below 2% tolerance",
+      "Distinct decoder-output identity not instrumented in this native pair"
+    ]
+  },
+  "interpretation": [
+    "ComfyUI reported no running or queued jobs at all 28 samples per coordinated run; GPU utilization was 13-42% HEVC and 13-22% PyroWave. Sampling does not prove absence of every other process between samples.",
+    "PyroWave decode-to-fence p95 14.164 ms exceeds the 72 Hz 13.889 ms interval; staging eye-render CPU wall time is also material. These overlapping stage timings must not be added.",
+    "HEVC was configured at 200 Mbps and PyroWave at 400 Mbps. This is the requested profile comparison, not an equal-bitrate codec efficiency test.",
+    "Tracking target timestamps can be reused for different game frames. Reuse counts are diagnostic and are not duplicated decoded-frame counts.",
+    "The earlier HEVC capture without chart coverage is retained privately as idle-session diagnostic only and excluded here."
+  ],
+  "optical_display_fps": null,
+  "optical_motion_to_photon_ms": null
+}

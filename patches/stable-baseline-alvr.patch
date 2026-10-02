@@ -1,0 +1,815 @@
+diff --git a/alvr/client_core/src/c_api.rs b/alvr/client_core/src/c_api.rs
+index 80b24fc63a535f17c1d62bb29fef2245c90a8a5c..d1ef049fe0030d637b8370e3433b8e76e1fc94e3 100644
+--- a/alvr/client_core/src/c_api.rs
++++ b/alvr/client_core/src/c_api.rs
+@@ -1009,10 +1009,10 @@ pub extern "C" fn alvr_get_frame(
+     out_buffer_ptr: *mut *mut c_void,
+ ) -> bool {
+     if let Some(source) = &mut *DECODER_SOURCE.lock() {
+-        if let Some((timestamp, buffer_ptr)) = source.get_frame() {
++        if let Some(frame) = source.get_frame() {
+             unsafe {
+-                *out_timestamp_ns = timestamp.as_nanos() as u64;
+-                *out_buffer_ptr = buffer_ptr;
++                *out_timestamp_ns = frame.timestamp.as_nanos() as u64;
++                *out_buffer_ptr = frame.buffer_ptr;
+             }
+ 
+             true
+diff --git a/alvr/client_core/src/connection.rs b/alvr/client_core/src/connection.rs
+index 996268d3e60258a104a104b27d07c136e01b39d6..f375aea9c55120ec8db017a0263e375ddaad5c40 100644
+--- a/alvr/client_core/src/connection.rs
++++ b/alvr/client_core/src/connection.rs
+@@ -538,6 +538,8 @@ fn connection_pipeline(
+                                     battery_temperature_c,
+                                     battery_level: Some(battery_level),
+                                     pyrowave: crate::video_decoder::telemetry::take(),
++                                    selected_output_submissions: Some(crate::video_decoder::telemetry::selected_output_submissions()),
++                                    selected_output_submission_source: Some("selected_nonnull_post_render_release_v1".into()),
+                                 },
+                             ))
+                             .ok();
+diff --git a/alvr/client_core/src/video_decoder/mod.rs b/alvr/client_core/src/video_decoder/mod.rs
+index 30cdb623f08e3e67c21ff5798ce89092fd55cb65..ce7eeadc0a0c2fa19cbbdba3e83b75294b3445b6 100644
+--- a/alvr/client_core/src/video_decoder/mod.rs
++++ b/alvr/client_core/src/video_decoder/mod.rs
+@@ -293,6 +293,15 @@ enum SourceInner {
+ pub struct VideoDecoderSource {
+     #[cfg(target_os = "android")]
+     inner: SourceInner,
++    // Assigned only after a decoder source dequeues a fresh output. This is not a
++    // media or tracking timestamp, either of which may be reused.
++    next_selection_id: u64,
++}
++
++pub struct SelectedFrame {
++    pub selection_id: u64,
++    pub timestamp: Duration,
++    pub buffer_ptr: *mut std::ffi::c_void,
+ }
+ 
+ impl VideoDecoderSource {
+@@ -304,15 +313,25 @@ impl VideoDecoderSource {
+         }
+     }
+ 
+-    /// If a frame is available, return the timestamp and the AHardwareBuffer.
+-    pub fn get_frame(&mut self) -> Option<(Duration, *mut std::ffi::c_void)> {
++    /// If a fresh decoder output is available, assign it an identity and return it.
++    pub fn get_frame(&mut self) -> Option<SelectedFrame> {
+         #[cfg(target_os = "android")]
+         {
+-            match &mut self.inner {
++            let frame = match &mut self.inner {
+                 SourceInner::MediaCodec(source) => source.dequeue_frame(),
+                 SourceInner::PyroWave(source) => source.dequeue_frame(),
+                 SourceInner::PyroWaveUdp(source) => source.dequeue_frame(),
++            }?;
++            self.next_selection_id = self.next_selection_id.wrapping_add(1);
++            // Zero represents no output, including after an extremely unlikely wrap.
++            if self.next_selection_id == 0 {
++                self.next_selection_id = 1;
+             }
++            Some(SelectedFrame {
++                selection_id: self.next_selection_id,
++                timestamp: frame.0,
++                buffer_ptr: frame.1,
++            })
+         }
+         #[cfg(not(target_os = "android"))]
+         None
+@@ -342,6 +361,7 @@ pub fn create_decoder(
+     report_frame_decoded: impl Fn(Result<Duration>) + Send + Sync + 'static,
+     report_video_packet_received: impl Fn(Duration) + Send + Sync + 'static,
+ ) -> (VideoDecoderSink, VideoDecoderSource) {
++    telemetry::reset_selected_output_submissions();
+     #[cfg(target_os = "android")]
+     {
+         if config.codec == CodecType::PyroWave {
+@@ -368,6 +388,7 @@ pub fn create_decoder(
+                 },
+                 VideoDecoderSource {
+                     inner: SourceInner::PyroWaveUdp(source),
++                    next_selection_id: 0,
+                 },
+             );
+         }
+@@ -381,6 +402,7 @@ pub fn create_decoder(
+                 },
+                 VideoDecoderSource {
+                     inner: SourceInner::PyroWave(source),
++                    next_selection_id: 0,
+                 },
+             );
+         }
+@@ -398,11 +420,12 @@ pub fn create_decoder(
+             },
+             VideoDecoderSource {
+                 inner: SourceInner::MediaCodec(source),
++                next_selection_id: 0,
+             },
+         )
+     }
+     #[cfg(not(target_os = "android"))]
+-    (VideoDecoderSink {}, VideoDecoderSource {})
++    (VideoDecoderSink {}, VideoDecoderSource { next_selection_id: 0 })
+ }
+ 
+ #[cfg(test)]
+diff --git a/alvr/client_core/src/video_decoder/pyrowave.rs b/alvr/client_core/src/video_decoder/pyrowave.rs
+index 3c90e40d775d779b4bcb8135f46310ef55797513..86543a32360824908148eb44c5ff3c32c29dc400 100644
+--- a/alvr/client_core/src/video_decoder/pyrowave.rs
++++ b/alvr/client_core/src/video_decoder/pyrowave.rs
+@@ -199,9 +199,13 @@ pub fn video_decoder_split(
+                 unsafe { pyroclient_clear(client) };
+                 let pushed = unsafe { pyroclient_push_packet(client, data.as_ptr(), data.len()) };
+                 if pushed != 1 {
+-                    warn!("PyroWave: complete TCP frame rejected by codec ({pushed})");
++                    warn!("PyroWave: complete TCP frame rejected by codec ({pushed}); stopping decoder instance");
+                     totals.lock().1 += 1;
+-                    continue;
++                    running.store(false, Ordering::Relaxed);
++                    report_frame_decoded(Err(alvr_common::anyhow::anyhow!(
++                        "PyroWave TCP frame rejected by codec ({pushed}); reconnect to recreate decoder"
++                    )));
++                    break;
+                 }
+                 let mut out: *mut c_void = std::ptr::null_mut();
+                 let mut info = FrameInfo::default();
+@@ -216,9 +220,15 @@ pub fn video_decoder_split(
+                     )
+                 };
+                 if rc != 0 || out.is_null() || info.complete == 0 {
+-                    warn!("PyroWave: decode failed ({rc})");
++                    warn!("PyroWave: decode failed ({rc}); stopping decoder instance");
+                     totals.lock().1 += 1;
+-                    continue;
++                    // A native timeout/device loss can leave Vulkan work pending. Never clear
++                    // the codec or submit another frame through that instance.
++                    running.store(false, Ordering::Relaxed);
++                    report_frame_decoded(Err(alvr_common::anyhow::anyhow!(
++                        "PyroWave TCP decode failed ({rc}); reconnect to recreate decoder"
++                    )));
++                    break;
+                 }
+                 if decoded.publish_ordered(timestamp, out as usize, order) {
+                     report_frame_decoded(Ok(timestamp));
+diff --git a/alvr/client_core/src/video_decoder/pyrowave_udp.rs b/alvr/client_core/src/video_decoder/pyrowave_udp.rs
+index c6c88526fd542497109c849c75f714f11e2e7cdd..5728bb84a538f2b3a363fcf77da8cf1e76740e0f 100644
+--- a/alvr/client_core/src/video_decoder/pyrowave_udp.rs
++++ b/alvr/client_core/src/video_decoder/pyrowave_udp.rs
+@@ -293,6 +293,11 @@ pub fn video_decoder_split(
+                         if failures <= 3 {
+                             alog(&format!("reject complete transport frame: codec readiness {status}, {} packets", fragments));
+                         }
++                        running.store(false, Ordering::Relaxed);
++                        report_frame_decoded(Err(anyhow!(
++                            "PyroWave UDP frame rejected by codec ({status}); reconnect to recreate decoder"
++                        )));
++                        break;
+                     } else {
+                         let mut out: *mut c_void = std::ptr::null_mut();
+                         let mut info = FrameInfo::default();
+@@ -308,6 +313,14 @@ pub fn video_decoder_split(
+                         };
+                         if rc != 0 || out.is_null() || info.complete == 0 {
+                             failures += 1;
++                            alog(&format!("decode failed ({rc}); stopping decoder instance"));
++                            // Do not clear/reuse after a native timeout or device loss: Vulkan
++                            // commands may still own the fence, command buffer and output slot.
++                            running.store(false, Ordering::Relaxed);
++                            report_frame_decoded(Err(anyhow!(
++                                "PyroWave UDP decode failed ({rc}); reconnect to recreate decoder"
++                            )));
++                            break;
+                         } else {
+                             let ts = Duration::from_nanos(timestamp_ns);
+                             decoded.publish(ts, out as usize);
+diff --git a/alvr/client_core/src/video_decoder/telemetry.rs b/alvr/client_core/src/video_decoder/telemetry.rs
+index dfefe0008969564b5b88f363c733f0dfb0640de3..11766bb96546c5c9c5ca2b7fcee66e0353b7ca4d 100644
+--- a/alvr/client_core/src/video_decoder/telemetry.rs
++++ b/alvr/client_core/src/video_decoder/telemetry.rs
+@@ -6,6 +6,68 @@
+ use alvr_packets::PyroWaveDecodeStats;
+ use std::sync::Mutex;
+ 
++#[derive(Default)]
++struct SelectedOutputState {
++    submissions: u64,
++    last_selection_id: u64,
++}
++
++impl SelectedOutputState {
++    /// Returns true only when this is a nonzero, strictly newer source selection.
++    fn record_submission(&mut self, selection_id: u64) -> bool {
++        if selection_id == 0 || selection_id <= self.last_selection_id {
++            return false;
++        }
++        self.last_selection_id = selection_id;
++        self.submissions = self.submissions.saturating_add(1);
++        true
++    }
++}
++
++static SELECTED_OUTPUT_STATE: Mutex<SelectedOutputState> = Mutex::new(SelectedOutputState {
++    submissions: 0,
++    last_selection_id: 0,
++});
++
++pub fn reset_selected_output_submissions() {
++    *SELECTED_OUTPUT_STATE.lock().unwrap() = SelectedOutputState::default();
++}
++
++/// Record a post-render release once for each strictly newer decoder selection.
++/// Timestamp equality is deliberately irrelevant: the identity originates only
++/// when `VideoDecoderSource::get_frame()` dequeues a fresh decoder output.
++pub fn record_selected_output_submission(selection_id: u64) -> bool {
++    let mut state = SELECTED_OUTPUT_STATE.lock().unwrap();
++    state.record_submission(selection_id)
++}
++
++pub fn selected_output_submissions() -> u64 { SELECTED_OUTPUT_STATE.lock().unwrap().submissions }
++
++#[cfg(test)]
++mod selected_output_tests {
++    use super::*;
++
++    #[test]
++    fn source_identity_counts_fresh_outputs_once_without_timestamps() {
++        // Use local state: decoder-creation tests reset the production counter in
++        // parallel, and must not make this regression timing-dependent.
++        let mut state = SelectedOutputState::default();
++        // The two source dequeues may carry the same timestamp. Only their source-issued
++        // identities reach this counter, so timestamp reuse cannot affect the result.
++        let reused_timestamp = std::time::Duration::from_millis(42);
++        for (selection_id, _timestamp) in [(7, reused_timestamp), (8, reused_timestamp)] {
++            assert!(state.record_submission(selection_id));
++        }
++        assert!(!state.record_submission(8)); // repeated output
++        assert!(!state.record_submission(6)); // stale output
++        assert_eq!(state.submissions, 2);
++        state = SelectedOutputState::default();
++        assert_eq!(state.submissions, 0);
++        assert!(state.record_submission(1));
++        assert_eq!(state.submissions, 1);
++    }
++}
++
+ /// Samples kept between reports; at 90 fps a one-second window needs 90.
+ const MAX_SAMPLES: usize = 1024;
+ 
+diff --git a/alvr/client_openxr/src/stream.rs b/alvr/client_openxr/src/stream.rs
+index eb04019..accaaa4 100644
+--- a/alvr/client_openxr/src/stream.rs
++++ b/alvr/client_openxr/src/stream.rs
+@@ -3,7 +3,7 @@ use crate::{
+     interaction::{self, InteractionContext, InteractionSourcesConfig},
+ };
+ use alvr_client_core::{
+-    video_decoder::{self, VideoDecoderConfig, VideoDecoderSource},
++    video_decoder::{self, SelectedFrame, VideoDecoderConfig, VideoDecoderSource},
+     ClientCoreContext,
+ };
+ use alvr_common::{
+@@ -34,6 +34,7 @@ use std::{
+ const DECODER_MAX_TIMEOUT_MULTIPLIER: f32 = 0.8;
+ 
+ pub struct ParsedStreamConfig {
++    pub codec: CodecType,
+     pub view_resolution: UVec2,
+     pub refresh_rate_hint: f32,
+     pub use_full_range: bool,
+@@ -50,9 +51,17 @@ pub struct ParsedStreamConfig {
+     pub interaction_sources: InteractionSourcesConfig,
+ }
+ 
++// PyroWave's native converter writes ordinary full-range RGBA into its
++// AHardwareBuffer for either coded YCbCr range. The legacy remap is for the
++// platform decoder's external texture path.
++fn legacy_limited_range_remap(codec: CodecType, use_full_range: bool, enable_hdr: bool) -> bool {
++    codec != CodecType::PyroWave && use_full_range && !enable_hdr
++}
++
+ impl ParsedStreamConfig {
+     pub fn new(config: &StreamConfig) -> Self {
+         Self {
++            codec: config.settings.video.preferred_codec,
+             view_resolution: config.negotiated_config.view_resolution,
+             refresh_rate_hint: config.negotiated_config.refresh_rate_hint,
+             use_full_range: config.negotiated_config.use_full_range,
+@@ -91,7 +100,7 @@ pub struct StreamContext {
+     /// A decoded frame selected before xrWaitFrame. Legacy decoders may block while
+     /// selecting; the opt-in Quest3 PyroWave pre-wait poll only takes a ready frame.
+     /// Its existing native-buffer lease remains protected until the eye copy is ready.
+-    pending_frame: Option<(Duration, *mut std::ffi::c_void)>,
++    pending_frame: Option<SelectedFrame>,
+     frame_wait_budget: Duration,
+     frame_wait_stats: [u64; 4], // waits, ready hits, total microseconds, max microseconds
+     frame_wait_last_log: Instant,
+@@ -113,6 +122,15 @@ impl StreamContext {
+         interaction_ctx
+             .write()
+             .select_sources(&config.interaction_sources);
++        let limited_range_remap =
++            legacy_limited_range_remap(config.codec, config.use_full_range, config.enable_hdr);
++        alvr_common::info!(
++            "[Q3PW_COLOUR] codec={:?} full_range={} hdr={} legacy_range_remap={}",
++            config.codec,
++            config.use_full_range,
++            config.enable_hdr,
++            limited_range_remap,
++        );
+ 
+         let xr_exts = xr_session.instance().exts();
+ 
+@@ -190,7 +208,7 @@ impl StreamContext {
+             format,
+             config.foveated_encoding_config.clone(),
+             platform != Platform::Lynx && !((platform.is_pico()) && config.enable_hdr),
+-            config.use_full_range && !config.enable_hdr, // TODO: figure out why HDR doesn't need the limited range hackfix in staging?
++            limited_range_remap,
+             config.encoding_gamma,
+             config.upscaling.clone(),
+         );
+@@ -511,8 +529,10 @@ impl StreamContext {
+             }
+         }
+ 
+-        let (timestamp, view_params, buffer_ptr) =
+-            if let Some((timestamp, buffer_ptr)) = frame_result {
++        let (selection_id, timestamp, view_params, buffer_ptr) =
++            if let Some(frame) = frame_result {
++                let timestamp = frame.timestamp;
++                let buffer_ptr = frame.buffer_ptr;
+                 let view_params = self.core_context.report_compositor_start(timestamp);
+ 
+                 // Avoid passing invalid timestamp to runtime
+@@ -521,9 +541,9 @@ impl StreamContext {
+ 
+                 self.last_good_view_params = view_params;
+ 
+-                (timestamp, view_params, buffer_ptr)
++                (Some(frame.selection_id), timestamp, view_params, buffer_ptr)
+             } else {
+-                (vsync_time, self.last_good_view_params, ptr::null_mut())
++                (None, vsync_time, self.last_good_view_params, ptr::null_mut())
+             };
+ 
+         // Match the inverse warp to the centre the server actually foveated this frame with.
+@@ -587,6 +607,13 @@ impl StreamContext {
+ 
+             self.swapchains[0].release_image().unwrap();
+             self.swapchains[1].release_image().unwrap();
++            if !buffer_ptr.is_null() {
++                if let Some(selection_id) = selection_id {
++                    // Count exactly one new decoded output after both eyes were rendered and
++                    // released. Reused OpenXR redraws have no source-issued identity.
++                    video_decoder::telemetry::record_selected_output_submission(selection_id);
++                }
++            }
+             if latest_only {
+                 video_decoder::telemetry::record_eye_copy(acquire_wait_ms, eye_render_ms,
+                     release_start.elapsed().as_secs_f32() * 1000.0,
+@@ -805,3 +832,25 @@ fn stream_input_loop(
+         thread::sleep(deadline.saturating_duration_since(Instant::now()));
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn legacy_range_remap_is_not_applied_to_pyrowave_rgba() {
++        assert!(!legacy_limited_range_remap(CodecType::PyroWave, true, false));
++        assert!(!legacy_limited_range_remap(CodecType::PyroWave, false, false));
++        assert!(!legacy_limited_range_remap(CodecType::PyroWave, true, true));
++    }
++
++    #[test]
++    fn legacy_range_remap_preserves_hardware_sdr_and_hdr_policy() {
++        for codec in [CodecType::H264, CodecType::Hevc, CodecType::AV1] {
++            assert!(legacy_limited_range_remap(codec, true, false));
++            assert!(!legacy_limited_range_remap(codec, false, false));
++            assert!(!legacy_limited_range_remap(codec, true, true));
++            assert!(!legacy_limited_range_remap(codec, false, true));
++        }
++    }
++}
+diff --git a/alvr/dashboard/src/dashboard/components/test_report.rs b/alvr/dashboard/src/dashboard/components/test_report.rs
+index d3a1d7c323e3fe3810c6366241a111b942988bd0..02d18e9a88f995012b2088b838ab7026373f1256 100644
+--- a/alvr/dashboard/src/dashboard/components/test_report.rs
++++ b/alvr/dashboard/src/dashboard/components/test_report.rs
+@@ -522,6 +522,8 @@ mod tests {
+                 fence_ms: vec![4.8, 5.0],
+                 ..Default::default()
+             }),
++            selected_output_submissions: None,
++            selected_output_submission_source: None,
+         }
+     }
+ 
+diff --git a/alvr/packets/src/lib.rs b/alvr/packets/src/lib.rs
+index 57060522d6aa0e566e0200b6838ca3cb0e2b152c..39b311dfda24ec23a99bd66357b3c4cd94722ef5 100644
+--- a/alvr/packets/src/lib.rs
++++ b/alvr/packets/src/lib.rs
+@@ -318,6 +318,12 @@ pub struct HeadsetTelemetry {
+     pub battery_temperature_c: Option<f32>,
+     pub battery_level: Option<f32>,
+     pub pyrowave: Option<PyroWaveDecodeStats>,
++    /// Cumulative fresh decoder outputs whose non-null render commands were submitted and whose
++    /// OpenXR swapchain images were released. This does not establish GPU completion or display
++    /// presentation, and is deliberately independent of reusable tracking timestamps.
++    pub selected_output_submissions: Option<u64>,
++    /// Schema marker for the strict selected-output counter contract.
++    pub selected_output_submission_source: Option<String>,
+ }
+ 
+ #[derive(Serialize, Deserialize, Clone, Default)]
+@@ -636,6 +642,8 @@ mod beta_telemetry_tests {
+                 staging_eye_copies: 200,
+                 ..Default::default()
+             }),
++            selected_output_submissions: Some(900),
++            selected_output_submission_source: Some("selected_nonnull_post_render_release_v1".into()),
+         };
+         let packet = ClientControlPacket::HeadsetTelemetry(t.clone());
+         let bytes = bincode::serialize(&packet).unwrap();
+diff --git a/alvr/server_openvr/cpp/platform/win32/CEncoder.cpp b/alvr/server_openvr/cpp/platform/win32/CEncoder.cpp
+index 2f68f660a49913b593f84749fa254d44475a4d0c..e55d914e30748c021eda7a460bf33f901d323868 100644
+--- a/alvr/server_openvr/cpp/platform/win32/CEncoder.cpp
++++ b/alvr/server_openvr/cpp/platform/win32/CEncoder.cpp
+@@ -1,4 +1,38 @@
+ #include "CEncoder.h"
++#include "alvr_server/bindings.h"
++
++#include <mutex>
++#include <thread>
++#include <vector>
++
++namespace {
++// A timed-out D3D fence can still own the imported textures/event. Keep that exact encoder and
++// its CD3DRender reference alive until process exit; a second connection must not allocate a
++// fresh encoder on the same potentially wedged device.
++std::atomic_bool g_pyrowaveTerminalFailure { false };
++std::mutex g_terminalEncoderMutex;
++std::vector<std::shared_ptr<VideoEncoder>>& TerminalEncoders() {
++    // Deliberately never destroyed: DLL static teardown would otherwise release the encoder
++    // while a timed-out GPU command could still refer to its resources.
++    static auto* encoders = new std::vector<std::shared_ptr<VideoEncoder>>;
++    return *encoders;
++}
++
++void QuarantineTerminalEncoder(std::shared_ptr<VideoEncoder>& encoder) {
++#ifdef ALVR_PYROWAVE
++    if (auto* pyrowave = dynamic_cast<VideoEncoderPyroWave*>(encoder.get());
++        pyrowave && pyrowave->HasFatalError()) {
++        std::lock_guard<std::mutex> lock(g_terminalEncoderMutex);
++        TerminalEncoders().push_back(std::move(encoder));
++        return;
++    }
++#endif
++    if (encoder) {
++        encoder->Shutdown();
++        encoder.reset();
++    }
++}
++} // namespace
+ 
+ CEncoder::CEncoder()
+     : m_bExiting(false)
+@@ -7,13 +41,22 @@ CEncoder::CEncoder()
+ }
+ 
+ CEncoder::~CEncoder() {
+-    if (m_videoEncoder) {
+-        m_videoEncoder->Shutdown();
+-        m_videoEncoder.reset();
+-    }
++    QuarantineTerminalEncoder(m_videoEncoder);
+ }
+ 
+ void CEncoder::Initialize(std::shared_ptr<CD3DRender> d3dRender) {
++#ifdef ALVR_PYROWAVE
++    if (g_pyrowaveTerminalFailure.load()) {
++        throw MakeException("PyroWave encountered a terminal GPU failure; restart SteamVR before streaming again.");
++    }
++    if (Settings::Instance().m_pyrowaveEnabled && Settings::Instance().m_enableHdr) {
++        throw MakeException("PyroWave does not support HDR; disable HDR before starting the stream.");
++    }
++#else
++    if (Settings::Instance().m_pyrowaveEnabled) {
++        throw MakeException("PyroWave was requested but this streamer was built without ALVR_PYROWAVE support.");
++    }
++#endif
+     m_FrameRender = std::make_shared<FrameRender>(d3dRender);
+     m_FrameRender->Startup();
+     uint32_t encoderWidth, encoderHeight;
+@@ -44,7 +87,8 @@ void CEncoder::Initialize(std::shared_ptr<CD3DRender> d3dRender) {
+         ID3D11Texture2D* planes[3] = {};
+         m_FrameRender->GetPlanarTextures(planes);
+         m_videoEncoder = std::make_shared<VideoEncoderPyroWave>(
+-            d3dRender, encoderWidth, encoderHeight, planes
++            d3dRender, encoderWidth, encoderHeight, planes,
++            [this] { return m_bExiting.load(); }
+         );
+         m_videoEncoder->Initialize();
+         return;
+@@ -113,6 +157,7 @@ bool CEncoder::CopyToStaging(
+     const std::string& message,
+     const std::string& debugText
+ ) {
++    if (m_terminal.load()) return false;
+     m_presentationTime = presentationTime;
+     m_targetTimestampNs = targetTimestampNs;
+     m_FrameRender->Startup();
+@@ -127,9 +172,9 @@ void CEncoder::Run() {
+     Debug("CEncoder: Start thread. Id=%d\n", GetCurrentThreadId());
+     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_MOST_URGENT);
+ 
+-    while (!m_bExiting) {
++    while (!m_bExiting.load()) {
+         m_newFrameReady.Wait();
+-        if (m_bExiting)
++        if (m_bExiting.load())
+             break;
+ 
+         if (m_FrameRender->GetTexture()) {
+@@ -139,6 +184,25 @@ void CEncoder::Run() {
+                 m_targetTimestampNs,
+                 m_scheduler.CheckIDRInsertion()
+             );
++#ifdef ALVR_PYROWAVE
++            if (auto *pyrowave = dynamic_cast<VideoEncoderPyroWave *>(m_videoEncoder.get());
++                pyrowave && pyrowave->HasFatalError()) {
++                // Never fall back to another codec or submit through a decoder whose GPU work
++                // may still be pending. The next client connection constructs a fresh encoder.
++                Error("[PYROWAVE] terminal encoder failure; stream requires SteamVR restart\n");
++                m_terminal.store(true);
++                g_pyrowaveTerminalFailure.store(true);
++                if (!m_shutdownRequested.exchange(true)) {
++                    // `shutdown_driver` (bound as ShutdownRuntime) tears down ServerCoreContext:
++                    // it marks the client Disconnecting and joins the connection runtime. Run it
++                    // away from the compositor/encoder worker so the already-signalled completion
++                    // event is never held hostage by network teardown.
++                    std::thread([] {
++                        if (ShutdownRuntime) ShutdownRuntime();
++                    }).detach();
++                }
++            }
++#endif
+         }
+ 
+         m_encodeFinished.Set();
+@@ -146,18 +210,28 @@ void CEncoder::Run() {
+ }
+ 
+ void CEncoder::Stop() {
+-    m_bExiting = true;
++    m_bExiting.store(true);
+     m_newFrameReady.Set();
+     Join();
++    QuarantineTerminalEncoder(m_videoEncoder);
+     m_FrameRender.reset();
+ }
+ 
+ void CEncoder::NewFrameReady() {
++    if (m_terminal.load()) {
++        // OvrDirectModeComponent can keep submitting after a terminal GPU failure. Leave the
++        // completion event signalled so it cannot deadlock waiting for a worker that must not
++        // submit again.
++        m_encodeFinished.Set();
++        return;
++    }
+     m_encodeFinished.Reset();
+     m_newFrameReady.Set();
+ }
+ 
+-void CEncoder::WaitForEncode() { m_encodeFinished.Wait(); }
++void CEncoder::WaitForEncode() {
++    if (!m_terminal.load()) m_encodeFinished.Wait();
++}
+ 
+ void CEncoder::OnStreamStart() { m_scheduler.OnStreamStart(); }
+ 
+diff --git a/alvr/server_openvr/cpp/platform/win32/CEncoder.h b/alvr/server_openvr/cpp/platform/win32/CEncoder.h
+index 32509edd41ea9a4798f4e74af878eaf7504d6eaa..2bb63017cb162e291065d9b156fe0826f9fc53af 100644
+--- a/alvr/server_openvr/cpp/platform/win32/CEncoder.h
++++ b/alvr/server_openvr/cpp/platform/win32/CEncoder.h
+@@ -14,6 +14,7 @@
+ #include <d3d11.h>
+ #include <d3d11_1.h>
+ #include <map>
++#include <atomic>
+ #include <wincodec.h>
+ #include <wincodecsdk.h>
+ #include <wrl.h>
+@@ -70,6 +71,7 @@ public:
+     void InsertIDR();
+ 
+     void CaptureFrame();
++    bool IsTerminal() const { return m_terminal.load(); }
+ 
+     /// Forwards a gaze-driven foveation centre down to FrameRender. Called from the tracking
+     /// thread; FFR::SetCenterShift stores it atomically and applies it on the compositor thread.
+@@ -82,7 +84,9 @@ public:
+ private:
+     CThreadEvent m_newFrameReady, m_encodeFinished;
+     std::shared_ptr<VideoEncoder> m_videoEncoder;
+-    bool m_bExiting;
++    std::atomic_bool m_bExiting;
++    std::atomic_bool m_terminal { false };
++    std::atomic_bool m_shutdownRequested { false };
+     uint64_t m_presentationTime;
+     uint64_t m_targetTimestampNs;
+ 
+diff --git a/alvr/server_openvr/cpp/platform/win32/OvrDirectModeComponent.cpp b/alvr/server_openvr/cpp/platform/win32/OvrDirectModeComponent.cpp
+index d1a18787cf61087043cd1ad091bfcad4b26035a1..9467f7d57692e957dc618060429a9e263d3f817c 100644
+--- a/alvr/server_openvr/cpp/platform/win32/OvrDirectModeComponent.cpp
++++ b/alvr/server_openvr/cpp/platform/win32/OvrDirectModeComponent.cpp
+@@ -321,6 +321,9 @@ void OvrDirectModeComponent::CopyTexture(uint32_t layerCount) {
+     m_pD3DRender->GetContext()->Flush();
+ 
+     if (m_pEncoder) {
++        // A terminal PyroWave GPU fault is quarantined until SteamVR restarts. Do not keep
++        // composing frames into the encoder after it has made completion nonblocking.
++        if (m_pEncoder->IsTerminal()) return;
+         // Wait for the encoder to be ready.  This is important because the encoder thread
+         // blocks on transmit which uses our shared d3d context (which is not thread safe).
+         m_pEncoder->WaitForEncode();
+@@ -330,7 +333,7 @@ void OvrDirectModeComponent::CopyTexture(uint32_t layerCount) {
+         uint64_t submitFrameIndex = m_targetTimestampNs;
+ 
+         // Copy entire texture to staging so we can read the pixels to send to remote device.
+-        m_pEncoder->CopyToStaging(
++        if (!m_pEncoder->CopyToStaging(
+             pTexture,
+             bounds,
+             poses,
+@@ -340,7 +343,7 @@ void OvrDirectModeComponent::CopyTexture(uint32_t layerCount) {
+             submitFrameIndex,
+             "",
+             debugText
+-        );
++        )) return;
+ 
+         m_pD3DRender->GetContext()->Flush();
+     }
+diff --git a/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp b/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp
+index 356d83356f556d8d987ffd6cb603b0b482527457..60a501111c0beb4d95f13c908b626488bea486bf 100644
+--- a/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp
++++ b/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp
+@@ -35,11 +35,13 @@ static const char* WaveletName() { return Haar() ? "Haar" : Legall53() ? "CDF 5/
+ static bool Chroma444() { return Settings::Instance().m_pyrowaveChroma444; }
+ 
+ VideoEncoderPyroWave::VideoEncoderPyroWave(
+-    std::shared_ptr<CD3DRender> pD3DRender, int width, int height, ID3D11Texture2D* planes[3]
++    std::shared_ptr<CD3DRender> pD3DRender, int width, int height, ID3D11Texture2D* planes[3],
++    std::function<bool()> cancellationRequested
+ )
+     : m_pD3DRender(pD3DRender)
+     , m_renderWidth(width)
+     , m_renderHeight(height)
++    , m_cancellationRequested(std::move(cancellationRequested))
+     , m_codec(Settings::Instance().m_codec) {
+     for (int i = 0; i < 3; i++) {
+         if (planes[i] == nullptr) {
+@@ -426,6 +428,7 @@ void VideoEncoderPyroWave::Transmit(
+     uint64_t targetTimestampNs,
+     bool insertIDR
+ ) {
++    if (m_fatal) return;
+     // pTexture is deliberately unused: FrameRender has already rendered the three YCbCr planes
+     // this encoder imported, as part of the same frame's render.
+ 
+@@ -452,16 +455,44 @@ void VideoEncoderPyroWave::Transmit(
+     // Order the D3D11 render before the Vulkan read. A shared fence imported as a timeline
+     // semaphore would avoid the CPU round trip; this is the simpler correct version, and the
+     // encode itself is ~0.25 ms so the wait dominates neither.
+-    if (FAILED(m_context4->Signal(m_fence.Get(), ++m_fenceValue))) {
+-        Error("[PYROWAVE] fence signal failed\n");
++    const HRESULT signal = m_context4->Signal(m_fence.Get(), ++m_fenceValue);
++    if (FAILED(signal)) {
++        m_fatal = true;
++        Error("[PYROWAVE] fence signal failed: 0x%08lx device=0x%08lx; stream stopped\n",
++            signal, m_device5->GetDeviceRemovedReason());
+         return;
+     }
+     m_pD3DRender->GetContext()->Flush();
+-    if (FAILED(m_fence->SetEventOnCompletion(m_fenceValue, m_fenceEvent))) {
+-        Error("[PYROWAVE] SetEventOnCompletion failed\n");
++    const HRESULT eventResult = m_fence->SetEventOnCompletion(m_fenceValue, m_fenceEvent);
++    if (FAILED(eventResult)) {
++        m_fatal = true;
++        Error("[PYROWAVE] SetEventOnCompletion failed: 0x%08lx device=0x%08lx; stream stopped\n",
++            eventResult, m_device5->GetDeviceRemovedReason());
++        return;
++    }
++    DWORD waited = WAIT_TIMEOUT;
++    const ULONGLONG deadline = GetTickCount64() + 1000;
++    while (GetTickCount64() < deadline) {
++        if (m_cancellationRequested && m_cancellationRequested()) {
++            m_fatal = true;
++            Error("[PYROWAVE] fence wait cancelled while GPU work may be pending; stream stopped\n");
++            return;
++        }
++        const ULONGLONG remaining = deadline - GetTickCount64();
++        waited = WaitForSingleObject(m_fenceEvent, remaining > 10 ? 10 : (DWORD)remaining);
++        if (waited != WAIT_TIMEOUT) break;
++    }
++    if (waited != WAIT_OBJECT_0) {
++        m_fatal = true;
++        if (waited == WAIT_FAILED) {
++            Error("[PYROWAVE] fence wait failed: win32=%lu device=0x%08lx; stream stopped\n",
++                GetLastError(), m_device5->GetDeviceRemovedReason());
++        } else {
++            Error("[PYROWAVE] fence wait timed out after 1000 ms: device=0x%08lx; stream stopped\n",
++                m_device5->GetDeviceRemovedReason());
++        }
+         return;
+     }
+-    WaitForSingleObject(m_fenceEvent, INFINITE);
+ 
+     if (!m_dumpTriggerDir.empty() && (m_frameCount % 8) == 0)
+         PollDumpTrigger();
+diff --git a/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.h b/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.h
+index 230c7517ac3165b6b9f75cd0fe6c1d0c6e8cca52..4f6b02b0eae9df3f7488046f88262428624b5398 100644
+--- a/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.h
++++ b/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.h
+@@ -5,6 +5,7 @@
+ #include "VideoEncoder.h"
+ #include "shared/d3drender.h"
+ #include <d3d11_4.h>
++#include <functional>
+ #include <memory>
+ #include <string>
+ #include <vector>
+@@ -31,12 +32,14 @@ public:
+         std::shared_ptr<CD3DRender> pD3DRender,
+         int width,
+         int height,
+-        ID3D11Texture2D* planes[3]
++        ID3D11Texture2D* planes[3],
++        std::function<bool()> cancellationRequested
+     );
+     ~VideoEncoderPyroWave();
+ 
+     void Initialize();
+     void Shutdown();
++    bool HasFatalError() const { return m_fatal; }
+ 
+     void Transmit(
+         ID3D11Texture2D* pTexture,
+@@ -56,6 +59,8 @@ private:
+     Microsoft::WRL::ComPtr<ID3D11Fence> m_fence;
+     HANDLE m_fenceEvent = nullptr;
+     uint64_t m_fenceValue = 0;
++    std::function<bool()> m_cancellationRequested;
++    bool m_fatal = false;
+ 
+     pyrowave_device m_pyroDevice = nullptr;
+     pyrowave_encoder m_pyroEncoder = nullptr;
+diff --git a/alvr/server_openvr/src/lib.rs b/alvr/server_openvr/src/lib.rs
+index 861f726c74e38cec9058513ab412ceb08ae2e8bf..b54c2e722b9df8499013802466c7afa42c061925 100644
+--- a/alvr/server_openvr/src/lib.rs
++++ b/alvr/server_openvr/src/lib.rs
+@@ -692,7 +692,10 @@ extern "C" fn wait_for_vsync() {
+ }
+ 
+ pub extern "C" fn shutdown_driver() {
+-    SERVER_CORE_CONTEXT.write().take();
++    // Drop only after releasing the write lock. ServerCoreContext::drop joins connection
++    // workers, which can be in callbacks that take this lock to report their final state.
++    let context = { SERVER_CORE_CONTEXT.write().take() };
++    drop(context);
+ }
+ 
+ /// This is the SteamVR/OpenVR entry point
+diff --git a/alvr/client_openxr/src/performance.rs b/alvr/client_openxr/src/performance.rs
+--- a/alvr/client_openxr/src/performance.rs
++++ b/alvr/client_openxr/src/performance.rs
+@@ -35,6 +35,15 @@ impl PerformanceOverlay {
+         context: Rc<GraphicsContext>,
+         interactions: Arc<RwLock<InteractionContext>>,
+     ) -> xr::Result<Self> {
++        // Read once at client startup. The opt-in is for clean, unattended
++        // screenshot/video QA; it neither changes stream settings nor disables
++        // the existing two-thumbstick chord to show diagnostics later.
++        let initial_visible = crate::extra_extensions::perf_settings::system_property(
++            "debug.q3pw.hide_performance_overlay",
++        ) != "1";
++        alvr_common::info!("[Q3PW_OVERLAY] initial_visible={initial_visible}");
++        let mut toggle = OverlayToggle::default();
++        toggle.visible = initial_visible;
+         context.make_current();
+         let space =
+             session.create_reference_space(xr::ReferenceSpaceType::VIEW, xr::Posef::IDENTITY)?;
+@@ -62,7 +71,7 @@ impl PerformanceOverlay {
+             space,
+             swapchain,
+             renderer,
+-            toggle: OverlayToggle::default(),
++            toggle,
+             next_update: Instant::now(),
+             header: "Connecting".into(),
+         })

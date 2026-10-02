@@ -1,0 +1,270 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index f16efe893b1ce0bb1449536ab551be1c018d054a..877e81aebb1dd1f4cd81aabdfe4b694c16221b99 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -182,7 +182,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_adb"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_common",
+  "alvr_filesystem",
+@@ -195,7 +195,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_audio"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_common",
+  "alvr_session",
+@@ -211,7 +211,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_client_core"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_audio",
+  "alvr_common",
+@@ -235,7 +235,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_client_mock"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_client_core",
+  "alvr_common",
+@@ -248,7 +248,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_client_openxr"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_client_core",
+  "alvr_common",
+@@ -265,7 +265,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_common"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "anyhow",
+  "backtrace",
+@@ -282,7 +282,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_dashboard"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_adb",
+  "alvr_common",
+@@ -314,7 +314,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_events"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_common",
+  "alvr_packets",
+@@ -325,7 +325,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_filesystem"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "dirs",
+  "once_cell",
+@@ -333,7 +333,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_graphics"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_common",
+  "alvr_session",
+@@ -347,7 +347,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_gui_common"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_common",
+  "egui",
+@@ -355,7 +355,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_launcher"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_adb",
+  "alvr_common",
+@@ -378,7 +378,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_packets"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_common",
+  "alvr_session",
+@@ -389,7 +389,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_server_core"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_adb",
+  "alvr_audio",
+@@ -423,7 +423,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_server_io"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_common",
+  "alvr_events",
+@@ -439,7 +439,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_server_openvr"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_common",
+  "alvr_filesystem",
+@@ -456,7 +456,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_session"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_common",
+  "alvr_filesystem",
+@@ -470,7 +470,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_sockets"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_common",
+  "alvr_session",
+@@ -483,7 +483,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_system_info"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_common",
+  "jni",
+@@ -497,7 +497,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_vrcompositor_wrapper"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_common",
+  "alvr_filesystem",
+@@ -507,7 +507,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_vulkan_layer"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_common",
+  "alvr_filesystem",
+@@ -519,7 +519,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "alvr_xtask"
+-version = "20.13.0-quest3.pyro.22"
++version = "20.13.0-ljk1291.2"
+ dependencies = [
+  "alvr_filesystem",
+  "pico-args",
+diff --git a/Cargo.toml b/Cargo.toml
+index df60e08ffbacfaaa16c35dcb2ab08cc7616394fc..837d2d7dfe90b26bccb878a6b744702730786def 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -4,7 +4,7 @@ members = ["alvr/*"]
+ 
+ [workspace.package]
+ # Pre-release tag: a different protocol ID, so stock ALVR 20.x clients and servers are refused
+-version = "20.13.0-quest3.pyro.23"
++version = "20.13.0-ljk1291.2"
+ edition = "2021"
+ rust-version = "1.82"
+ authors = ["alvr-org"]
+diff --git a/alvr/client_openxr/Cargo.toml b/alvr/client_openxr/Cargo.toml
+index d9d9cf1e00309959aa02bab31454c848d7a1bcf8..6b1fe5fabc93fc25f8526083064056bc210f53d2 100644
+--- a/alvr/client_openxr/Cargo.toml
++++ b/alvr/client_openxr/Cargo.toml
+@@ -26,7 +26,7 @@ libc = "0.2"
+ ndk-context = "0.1"
+ 
+ [package.metadata.android]
+-package = "io.github.jms1717.quest3pyrowave"          # Galaxy XR 20.13 test app
++package = "io.github.ljk1291.quest3pyrowave"          # Independent Quest 3 baseline fork
+ install_location = "auto"
+ build_targets = ["aarch64-linux-android"]
+ runtime_libs = "../../deps/android_openxr"
+@@ -90,7 +90,7 @@ authorities = "org.khronos.openxr.runtime_broker;org.khronos.openxr.system_runti
+ debuggable = false
+ theme = "@android:style/Theme.Black.NoTitleBar.Fullscreen"
+ icon = "@mipmap/ic_launcher"
+-label = "Quest3 PyroWave"
++label = "Quest3 PyroWave Baseline"
+ 
+ [package.metadata.android.application.activity]
+ config_changes = "density|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|uiMode"
+diff --git a/alvr/common/src/version.rs b/alvr/common/src/version.rs
+index ce5ecd001d9552aa6d0e7467457e1d4b02045800..87a113cd5a086582a4266fdfcf64020e18940efc 100644
+--- a/alvr/common/src/version.rs
++++ b/alvr/common/src/version.rs
+@@ -48,3 +48,15 @@ pub fn is_version_compatible(other_version: &Version) -> bool {
+ 
+     protocol_id_u64() == hash_string(&protocol_string)
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn telemetry_schema_protocol_rejects_the_previous_fork_prerelease() {
++        let previous_schema = Version::parse("20.13.0-ljk1291.1").unwrap();
++        assert!(!is_version_compatible(&previous_schema));
++        assert!(is_version_compatible(&ALVR_VERSION));
++    }
++}
+diff --git a/alvr/session/src/settings.rs b/alvr/session/src/settings.rs
+index 70ed8209fcfd1ca3d1bb24f2c60380539b29b7ef..989c74f5918bb38458259d05cee0e12a3a543156 100644
+--- a/alvr/session/src/settings.rs
++++ b/alvr/session/src/settings.rs
+@@ -2185,7 +2185,7 @@ pub fn session_settings_default() -> SettingsDefault {
+                 },
+             },
+             wired_client_type: ClientFlavorDefault {
+-                Custom: "io.github.jms1717.quest3pyrowave".to_owned(),
++                Custom: "io.github.ljk1291.quest3pyrowave".to_owned(),
+                 variant: ClientFlavorDefaultVariant::Custom,
+             },
+             wired_client_autolaunch: true,

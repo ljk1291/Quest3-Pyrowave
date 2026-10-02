@@ -9,7 +9,6 @@ setlocal
 set "WS=%~dp0..\..\.."
 if not "%XRWIRED_INPUTS%"=="" set "WS=%XRWIRED_INPUTS%"
 set "PW=%WS%\research\pyrowave"
-if not "%XRWIRED_PYROWAVE%"=="" set "PW=%XRWIRED_PYROWAVE%"
 if not exist "%PW%\pyrowave.h" ( echo no pyrowave.h under %PW% & exit /b 1 )
 set "GEN=Visual Studio 17 2022"
 if not "%Q3PW_CMAKE_GENERATOR%"=="" set "GEN=%Q3PW_CMAKE_GENERATOR%"

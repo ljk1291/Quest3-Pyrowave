@@ -1,0 +1,445 @@
+{
+  "schema_version": 1,
+  "kind": "sanitized_decoder_profile_diagnostic",
+  "date": "2026-10-02",
+  "configuration": {
+    "codec": "PyroWave",
+    "bitrate_mode": "ConstantMbps",
+    "target_mbps": 300,
+    "requested_hz": 90.0,
+    "negotiated_hz": 90,
+    "decode_path": "Compute",
+    "wavelet": "Haar",
+    "chroma": "420",
+    "transport": "Tcp",
+    "stream_protocol": "Tcp",
+    "hdr_enabled": false,
+    "foveated_encoding_enabled": false,
+    "clientside_foveation_enabled": false,
+    "render_resolution": {
+      "width": 3072,
+      "height": 3232
+    },
+    "encoded_resolution": {
+      "width": 3072,
+      "height": 3232
+    },
+    "negotiated_render_resolution": {
+      "width": 3072,
+      "height": 3232
+    },
+    "negotiated_encoded_resolution": {
+      "width": 3072,
+      "height": 3232
+    },
+    "enforce_server_frame_pacing": true,
+    "profile_property_enabled": true,
+    "performance_overlay_hidden": true,
+    "direct_eye_copy_enabled": true,
+    "display_scaling_forced_off": true,
+    "effective_debug_options_start": {
+      "direct_eye_copy": true,
+      "async_eye_copy": false,
+      "copy_wait": false,
+      "raw_srgb_copy": false,
+      "image_cache": false,
+      "frame_wait": false,
+      "pre_wait_poll": false,
+      "repeat_render": false,
+      "decode_workers": false,
+      "decode_handoff": false,
+      "display_scaling": true,
+      "haar_fused": false,
+      "dequant_batch": false,
+      "convert_compute": false,
+      "fragment_min_usage": false,
+      "optimal_ahb_usage": false,
+      "loop_probe": false,
+      "runtime_display_time": false,
+      "pass_profile": true,
+      "hide_performance_overlay": true
+    },
+    "effective_debug_options_end": {
+      "direct_eye_copy": true,
+      "async_eye_copy": false,
+      "copy_wait": false,
+      "raw_srgb_copy": false,
+      "image_cache": false,
+      "frame_wait": false,
+      "pre_wait_poll": false,
+      "repeat_render": false,
+      "decode_workers": false,
+      "decode_handoff": false,
+      "display_scaling": true,
+      "haar_fused": false,
+      "dequant_batch": false,
+      "convert_compute": false,
+      "fragment_min_usage": false,
+      "optimal_ahb_usage": false,
+      "loop_probe": false,
+      "runtime_display_time": false,
+      "pass_profile": true,
+      "hide_performance_overlay": true
+    }
+  },
+  "build": {
+    "identity_verified": true,
+    "application_version": "20.13.0-ljk1291.2+f2e9df5704cc",
+    "server_version": "20.13.0-ljk1291.2+f2e9df5704cc",
+    "protocol_version": "20.13.0-ljk1291.2",
+    "repository_commit": "f2e9df5704cc679513848bf6ffb63ef1695479f9",
+    "client_package_id": "io.github.ljk1291.quest3pyrowave",
+    "native_library_sha256": {
+      "libpyroclient.so": "bd33b0fa2ac6eb600c16806f645b4704afa4144a501fed08835efa39bc6c246d",
+      "libpyrowave-shared.so": "9c5ba02ba372745f23289a5ebd9555a6b2a21a9672a3ad545143c26889c09848"
+    },
+    "identity_note": "Application/protocol identity is read from fork.json. The immutable artifact metadata also contains a raw source-lock snapshot whose unused duplicate fork.protocol_version is stale at .1; the actual version, wire protocol and installed pair are .2. Historical metadata is preserved unchanged."
+  },
+  "profile": {
+    "activation": {
+      "present": true,
+      "valid": true,
+      "cadence_completed_frames": 90,
+      "scope": "granite_frame_context_mean"
+    },
+    "valid_phase_samples": 42,
+    "invalid_phase_samples": 0,
+    "phase_window_means_ms": {
+      "Dequant": {
+        "windows": 21,
+        "mean_avg_ms": 3.7499047619047623,
+        "p50_avg_ms": 3.74,
+        "min_avg_ms": 3.703,
+        "max_avg_ms": 3.896
+      },
+      "iDWT": {
+        "windows": 21,
+        "mean_avg_ms": 4.997190476190476,
+        "p50_avg_ms": 4.974,
+        "min_avg_ms": 4.93,
+        "max_avg_ms": 5.201
+      }
+    },
+    "fresh_marker_phase_timestamp_span_s": 32.04299998283386,
+    "capture_scope": {
+      "telemetry_capture_duration_requested_s": 25,
+      "marker_scope_note": "Phase samples span 32.043 seconds inside a finite 51.907-second chart, including setup/teardown around the separate 25-second telemetry capture. Activation precedes capture as current-decoder configuration provenance. Timestamp means lag by the Granite frame-context ring.",
+      "chart_duration_s": 51.90700000000652,
+      "seconds_excluded_after_device_marker": 4
+    },
+    "healthy_parser_result": true,
+    "warnings": [],
+    "failure_reasons": [],
+    "limitations": "Each value is a delayed Granite frame-context window mean. Ninety completed submissions trigger reporting, but do not imply exactly ninety retired timestamp samples. It is not exact-frame latency, a p95 frame time, display FPS, or optical latency."
+  },
+  "capture_diagnostic": {
+    "status": "measured",
+    "frames": 1404,
+    "submission_rate_window_s": 24.975621999939904,
+    "selected_output": {
+      "strict_window_valid": true,
+      "source": "selected_nonnull_post_render_release_v1",
+      "rate_fps": 56.348794094381034,
+      "interval_s": 23.638482799986377,
+      "counter_delta": 1332,
+      "max_gap_s": 1.4924618999939412
+    },
+    "client_fps": {
+      "n": 1404,
+      "p01": 44.99463489,
+      "p50": 45.0017355,
+      "p95": 90.007548,
+      "p99": 90.0205552,
+      "max": 90.365395
+    },
+    "video_mbps": {
+      "n": 1404,
+      "p01": 276.85368059999996,
+      "p50": 302.618965,
+      "p95": 316.783352,
+      "p99": 324.0770314,
+      "max": 336.70192
+    },
+    "diagnostic_only": true,
+    "not_acceptance_reason": "Profiling property was enabled and the screen is shorter than sustained/endurance acceptance. No optical or display-FPS measurement was made.",
+    "stage_timings_ms": {
+      "gpu_decode_ms": {
+        "n": 1385,
+        "p01": 8.10997072,
+        "p50": 8.990208,
+        "p95": 9.2551454,
+        "p99": 9.597325200000002,
+        "max": 9.912188
+      },
+      "native_convert_ms": {
+        "n": 1385,
+        "p01": 4.0942770159999995,
+        "p50": 4.917187,
+        "p95": 5.3673956,
+        "p99": 5.9362356,
+        "max": 7.2952604
+      },
+      "decode_to_fence_ms": {
+        "n": 1385,
+        "p01": 16.45532028,
+        "p50": 17.312971,
+        "p95": 18.6030116,
+        "p99": 19.7335374,
+        "max": 20.071669
+      },
+      "native_record_ms": {
+        "n": 1385,
+        "p01": 0.53259568,
+        "p50": 0.678594,
+        "p95": 0.9617291999999998,
+        "p99": 1.1153892000000007,
+        "max": 1.883646
+      },
+      "native_wait_ms": {
+        "n": 1385,
+        "p01": 15.591121919999999,
+        "p50": 16.625992,
+        "p95": 17.885668199999994,
+        "p99": 18.91720388,
+        "max": 19.397242
+      },
+      "eye_acquire_wait_ms": {
+        "n": 1385,
+        "p01": 0.002647840168,
+        "p50": 0.003438,
+        "p95": 0.005197799999999998,
+        "p99": 0.01774192000000023,
+        "max": 0.259011
+      },
+      "eye_render_ms": {
+        "n": 1385,
+        "p01": 16.30487864,
+        "p50": 17.035524,
+        "p95": 18.3565024,
+        "p99": 19.30902508,
+        "max": 19.964376
+      },
+      "eye_release_ms": {
+        "n": 1385,
+        "p01": 0.002448,
+        "p50": 0.004427,
+        "p95": 0.006968799999999998,
+        "p99": 0.018358600000000225,
+        "max": 0.18515599
+      },
+      "eye_completion_observed_ms": null
+    },
+    "timing_note": "GPU decode and conversion are consecutive GPU timestamp intervals. Record, wait, fence and eye-render times include CPU/wall waits and overlap; do not sum them."
+  },
+  "gates": {
+    "profile_configuration_start": {
+      "valid": true,
+      "checks": {
+        "codec": true,
+        "target_mbps": true,
+        "requested_hz": true,
+        "negotiated_hz": true,
+        "decode_path": true,
+        "wavelet": true,
+        "chroma": true,
+        "transport": true,
+        "stream_protocol": true,
+        "render_resolution": true,
+        "encoded_resolution": true,
+        "negotiated_render_resolution": true,
+        "negotiated_encoded_resolution": true,
+        "matching_build": true,
+        "streaming": true,
+        "debug.q3pw.direct_eye_copy": true,
+        "debug.q3pw.pass_profile": true,
+        "debug.q3pw.hide_performance_overlay": true,
+        "debug.oculus.refreshRate": true,
+        "dashboard_disabled": true
+      }
+    },
+    "profile_configuration_end": {
+      "valid": true,
+      "checks": {
+        "codec": true,
+        "target_mbps": true,
+        "requested_hz": true,
+        "negotiated_hz": true,
+        "decode_path": true,
+        "wavelet": true,
+        "chroma": true,
+        "transport": true,
+        "stream_protocol": true,
+        "render_resolution": true,
+        "encoded_resolution": true,
+        "negotiated_render_resolution": true,
+        "negotiated_encoded_resolution": true,
+        "matching_build": true,
+        "streaming": true,
+        "debug.q3pw.direct_eye_copy": true,
+        "debug.q3pw.pass_profile": true,
+        "debug.q3pw.hide_performance_overlay": true,
+        "debug.oculus.refreshRate": true,
+        "dashboard_disabled": true
+      }
+    },
+    "profile_settings_unchanged": true,
+    "runtime_evidence_fresh": true,
+    "runtime_evidence_coverage": {
+      "status": "covered",
+      "polls": [
+        {
+          "elapsed_s": 1.0182844999944791,
+          "records": 1
+        },
+        {
+          "elapsed_s": 7.051284300046973,
+          "records": 6
+        },
+        {
+          "elapsed_s": 13.136221900000237,
+          "records": 6
+        },
+        {
+          "elapsed_s": 19.183917499962263,
+          "records": 7
+        },
+        {
+          "elapsed_s": 25.35920249996707,
+          "records": 7
+        }
+      ],
+      "max_gap_s": 6.175285000004806
+    },
+    "telemetry_complete": true,
+    "thermal_ok": true,
+    "stream_errors": [],
+    "profile_chart": {
+      "source_eye_size": [
+        3072,
+        3232
+      ],
+      "quality_chart": true,
+      "pulse": true
+    },
+    "restoration_complete": true,
+    "experiment_options_unchanged": true
+  },
+  "qualitative_compositor_capture": {
+    "configuration_start": {
+      "valid": true,
+      "checks": {
+        "codec": true,
+        "target_mbps": true,
+        "requested_hz": true,
+        "negotiated_hz": true,
+        "decode_path": true,
+        "wavelet": true,
+        "chroma": true,
+        "transport": true,
+        "stream_protocol": true,
+        "render_resolution": true,
+        "encoded_resolution": true,
+        "negotiated_render_resolution": true,
+        "negotiated_encoded_resolution": true,
+        "matching_build": true,
+        "streaming": true,
+        "debug.q3pw.direct_eye_copy": true,
+        "debug.q3pw.pass_profile": true,
+        "debug.q3pw.hide_performance_overlay": true,
+        "debug.oculus.refreshRate": true,
+        "dashboard_disabled": true
+      }
+    },
+    "configuration_end": {
+      "valid": true,
+      "checks": {
+        "codec": true,
+        "target_mbps": true,
+        "requested_hz": true,
+        "negotiated_hz": true,
+        "decode_path": true,
+        "wavelet": true,
+        "chroma": true,
+        "transport": true,
+        "stream_protocol": true,
+        "render_resolution": true,
+        "encoded_resolution": true,
+        "negotiated_render_resolution": true,
+        "negotiated_encoded_resolution": true,
+        "matching_build": true,
+        "streaming": true,
+        "debug.q3pw.direct_eye_copy": true,
+        "debug.q3pw.pass_profile": true,
+        "debug.q3pw.hide_performance_overlay": true,
+        "debug.oculus.refreshRate": true,
+        "dashboard_disabled": true
+      }
+    },
+    "settings_unchanged": true,
+    "chart": {
+      "source_eye_size": [
+        3072,
+        3232
+      ],
+      "quality_chart": true,
+      "pulse": true
+    },
+    "artifact_hashes": [
+      {
+        "name": "headset-1.png",
+        "bytes": 8512344,
+        "sha256": "92c5254a0a291932ce7b567e571ba1781d78d31b3325bcbef551db5575ae1c63"
+      },
+      {
+        "name": "headset-2.png",
+        "bytes": 8538844,
+        "sha256": "e0cc9909640f103b4c25a0aaf47d78b3c056135719627358089c901c542d9ff0"
+      },
+      {
+        "name": "headset.mp4",
+        "bytes": 17215154,
+        "sha256": "cbb2bf20082f2756f74437a6ff4829d9fddd03959da50a487941d2e695d9b81c"
+      }
+    ],
+    "screenshot_dimensions": [
+      [
+        4128,
+        2208
+      ],
+      [
+        4128,
+        2208
+      ]
+    ],
+    "screenshots_differ": true,
+    "video_frames": 414,
+    "video_container_fps": 53.15658222863893,
+    "video_duration_s": 7.788311111111111,
+    "video_first_last_frames_differ": true,
+    "pixel_quality_score": null,
+    "independent_optical_measurement": false,
+    "video_frame_rate_is_display_fps": false,
+    "assistant_image_review": {
+      "steamvr_or_hud_occlusion": false,
+      "left_and_right_labels_present": true,
+      "counter_observed_range": [
+        52,
+        120
+      ],
+      "fine_chroma_edges_and_text": "softened_or_fringed",
+      "interpretation": "Qualitative compositor observation only; codec effects cannot be isolated from compositor, recording, and display transforms."
+    },
+    "human_quality_acceptance": null,
+    "video_dimensions": [
+      2048,
+      1088
+    ]
+  },
+  "claims_not_made": [
+    "No numerical pixel-quality score.",
+    "No codec-isolated image-quality claim.",
+    "No optical latency result.",
+    "No display-FPS result.",
+    "No 90-Hz sustained, endurance, Metro, recovery, or stable-profile acceptance."
+  ]
+}
