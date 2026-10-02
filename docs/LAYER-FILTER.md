@@ -24,6 +24,9 @@ important: a pointer to a stack-local raw OpenXR structure would be unsafe if
 the wrapper moved before submission. The returned wrapper also borrows the
 builder, keeping its projection-view array alive through submission.
 
+The flag values and automatic mode's required companion flag follow the
+[Khronos flag specification](https://registry.khronos.org/OpenXR/specs/1.1/man/html/XrCompositionLayerSettingsFlagBitsFB.html).
+
 ## Finite comparison protocol
 
 Do not run this outside an armed unattended window or an owner-supervised
