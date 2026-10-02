@@ -27,6 +27,27 @@ EXPERIMENT_PROPERTIES = (
     'debug.xrwired.perf_level',
 )
 
+
+def measurement_clock():
+    """Return the high-resolution, monotonic capture clock.
+
+    On Windows ``monotonic`` can be backed by GetTickCount64 (15.625 ms on
+    this host), which is too coarse to timestamp 72 Hz GraphStatistics
+    arrivals. ``perf_counter`` uses QueryPerformanceCounter there.
+    """
+    return time.perf_counter()
+
+
+def measurement_clock_info():
+    info = time.get_clock_info('perf_counter')
+    return {
+        'name': 'perf_counter',
+        'implementation': info.implementation,
+        'monotonic': info.monotonic,
+        'adjustable': info.adjustable,
+        'resolution_s': info.resolution,
+    }
+
 def supported(requested, rates):
     return any(math.isfinite(r) and r > 0 and abs(r - requested) < .01 for r in rates)
 
@@ -443,11 +464,16 @@ def capture(args):
     # clearing global logcat or changing a system setting.
     adb_run(args.adb,'shell','log','-t','Q3PW_CAPTURE',capture_id)
     marker_epoch=capture_marker_epoch(args.adb,capture_id)
-    stop=threading.Event();begin_wall_ns=time.time_ns();begin=time.monotonic()
+    # Keep event-arrival timing on perf_counter rather than time.monotonic:
+    # Windows can expose the latter through a 15.625 ms GetTickCount64 clock.
+    # Do not relax duplicate-frame validation; measure the arrivals precisely.
+    clock=measurement_clock
+    clock_info=measurement_clock_info()
+    stop=threading.Event();begin_wall_ns=time.time_ns();begin=clock()
     runtime_samples=[];runtime_polls=[];runtime_cursor=[marker_epoch - .001 if marker_epoch is not None else None]
     def sample_device():
         while not stop.is_set():
-            samples.append({'elapsed_s':time.monotonic()-begin,'state':snapshot(args.adb)})
+            samples.append({'elapsed_s':clock()-begin,'state':snapshot(args.adb)})
             # Poll frequently enough that the log ring cannot lose a 30-minute session;
             # retain only Q3PW records after the immutable marker timestamp.
             if runtime_cursor[0] is not None:
@@ -456,23 +482,23 @@ def capture(args):
                     fresh=[line for line in batch if (_log_epoch(line) or -1)>runtime_cursor[0]]
                     if fresh: runtime_cursor[0]=max(_log_epoch(line) for line in fresh)
                     runtime_samples.extend(fresh)
-                    runtime_polls.append({'elapsed_s':time.monotonic()-begin,'records':len(fresh)})
-                except (RuntimeError,subprocess.TimeoutExpired): runtime_polls.append({'elapsed_s':time.monotonic()-begin,'records':0})
+                    runtime_polls.append({'elapsed_s':clock()-begin,'records':len(fresh)})
+                except (RuntimeError,subprocess.TimeoutExpired): runtime_polls.append({'elapsed_s':clock()-begin,'records':0})
             stop.wait(5)
     sampler=threading.Thread(target=sample_device,daemon=True);sampler.start()
     try:
         ws=websocket.create_connection(args.events,header=['X-ALVR: true'],timeout=2)
         with (root/'events.jsonl').open('w',encoding='utf-8') as out:
-            while time.monotonic()-begin<args.seconds:
+            while clock()-begin<args.seconds:
                 try:
                     event=json.loads(ws.recv())
                     if event.get('event_type',{}).get('id') in ('GraphStatistics','StatisticsSummary','HeadsetTelemetry'):
-                        row={'capture_elapsed_s':time.monotonic()-begin,'event':event}
+                        row={'capture_elapsed_s':clock()-begin,'event':event}
                         events.append(row);out.write(json.dumps(row)+'\n')
                 except websocket.WebSocketTimeoutException: pass
     except Exception as e:error=str(e)
     finally:
-        capture_end_elapsed=time.monotonic()-begin
+        capture_end_elapsed=clock()-begin
         stop.set();sampler.join(timeout=25)
         if ws:ws.close()
     report=summarise(events,args.hz)
@@ -483,7 +509,8 @@ def capture(args):
     coverage=runtime_coverage(runtime_polls,capture_end_elapsed)
     fresh=fresh_rate_evidence(evidence,args.hz)
     identity_ok=build_identity_verified(manifest,settings_start,build)
-    report.update({'duration_requested_s':args.seconds,'capture_started_unix_ns':begin_wall_ns,'elapsed_s':time.monotonic()-begin,
+    report.update({'duration_requested_s':args.seconds,'capture_started_unix_ns':begin_wall_ns,'elapsed_s':clock()-begin,
+        'measurement_clock':clock_info,
         'error':error,'state_start':start,'state_end':snapshot(args.adb),'device_samples':samples,
         'settings_start':settings_start,'settings_end':settings_end,'client_build':build,
         'capture_id':capture_id, 'runtime_evidence':evidence, 'fresh_runtime_evidence':fresh,

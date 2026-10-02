@@ -1,7 +1,20 @@
 import unittest
-from tools.quest3.bench import parse_capabilities,plan,summarise,distribution,pyrowave_counter_window, fresh_rate_evidence, build_identity_verified, merge_review, rate_stability, filter_runtime_evidence
+from unittest.mock import patch
+from tools.quest3.bench import parse_capabilities,plan,summarise,distribution,pyrowave_counter_window, fresh_rate_evidence, build_identity_verified, merge_review, rate_stability, filter_runtime_evidence, measurement_clock, measurement_clock_info
 
 class BenchTests(unittest.TestCase):
+    def test_capture_clock_uses_perf_counter_not_coarse_monotonic(self):
+        # Capture timing must go through the QPC-backed abstraction. On Windows,
+        # monotonic may otherwise be a 15.625 ms GetTickCount64 clock.
+        with patch('tools.quest3.bench.time.perf_counter', return_value=12.5) as perf, \
+             patch('tools.quest3.bench.time.monotonic', side_effect=AssertionError('coarse clock used')):
+            self.assertEqual(measurement_clock(), 12.5)
+            perf.assert_called_once_with()
+        info=measurement_clock_info()
+        self.assertEqual(info['name'], 'perf_counter')
+        self.assertTrue(info['monotonic'])
+        self.assertGreater(info['resolution_s'], 0)
+
     def test_unprobed_rates_are_not_declared_unsupported(self):
         caps=parse_capabilities('[Q3PW_CAPS] model=Quest3 rates=[72.0, 90.0, 120.0] runtime=true')
         p=plan(caps,repeats=1)
