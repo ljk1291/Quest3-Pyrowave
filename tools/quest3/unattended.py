@@ -41,7 +41,7 @@ class _BerlinFallback(tzinfo):
     def utcoffset(self, dt):
         if dt is None: return timedelta(hours=1)
         naive=dt.replace(tzinfo=None)
-        # 02:00–02:59 on the fall-back date occurs twice. ``fold`` selects
+        # 02:00ï¿½02:59 on the fall-back date occurs twice. ``fold`` selects
         # the second, CET occurrence so expiry and deadline arithmetic remain
         # monotonic even without the Windows IANA time-zone database.
         fall=datetime(naive.year,10,self._last_sunday(naive.year,10),2)
@@ -309,7 +309,7 @@ def live_preconditions(arm, host):
 
 def check_preconditions(arm, host, directory, now=None, alvr_session_path=None):
     window=arm_window(arm,now); serial=arm['headset_serial']; failures,battery,thermal=live_preconditions(arm,host)
-    report={'schema':1,'checked_utc':utc_now().isoformat(),'arm_sha256':arm_digest(arm),'window':{'deadline_utc':window['deadline'].isoformat(),'remaining_s':window['remaining_s']},'serial':serial,'failures':failures,'battery':battery,'thermal_status':thermal,'gpu_sample':getattr(host,'last_gpu_sample',None),'adb':host.adb,'passed':not failures}
+    report={'schema':1,'checked_utc':utc_now().isoformat(),'arm_sha256':arm_digest(arm),'window':{'deadline_utc':window['deadline'].isoformat(),'remaining_s':window['remaining_s']},'serial':serial,'failures':failures,'battery':battery,'thermal_status':thermal,'gpu_sample':getattr(host,'last_gpu_sample',None),'adb':getattr(host,'adb','adb'),'passed':not failures}
     if not failures:
         try: report['snapshot']=snapshot(host,serial,directory,alvr_session_path)
         except Exception as exc: report['failures'].append('snapshot_incomplete:'+str(exc)); report['passed']=False
