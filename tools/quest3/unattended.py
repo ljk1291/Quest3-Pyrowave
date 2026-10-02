@@ -5,7 +5,7 @@ an owner-only convenience: it requires an explicit acknowledgement and is never
 called by automation. All device commands include the serial stored in the arm.
 """
 from __future__ import annotations
-import argparse, ctypes, json, os, shutil, subprocess, sys, time
+import argparse, ctypes, hashlib, json, os, shutil, subprocess, sys, time, uuid
 from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -26,6 +26,7 @@ MANAGED_PROPERTIES = (
     'debug.oculus.refreshRate', 'debug.oculus.guardian_pause',
 )
 GUARD_READY_SECONDS = 5
+CHECK_FRESH_SECONDS = 5 * 60
 
 class Refusal(RuntimeError): pass
 
@@ -69,6 +70,7 @@ def timezone_for(name):
 
 def utc_now(): return datetime.now(timezone.utc)
 def json_read(path): return json.loads(Path(path).read_text(encoding='utf-8'))
+def arm_digest(arm): return hashlib.sha256(json.dumps(arm,sort_keys=True,separators=(',',':')).encode()).hexdigest()
 def atomic_write(path, value):
     path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(path.suffix + '.tmp')
@@ -212,9 +214,9 @@ def snapshot(host, serial, directory):
     data={'schema':1,'created_utc':utc_now().isoformat(),'preflight':inv,'configuration_snapshots':records,'headset_properties':props}
     atomic_write(before/'snapshot.json',data); return data
 
-def check_preconditions(arm, host, directory, now=None):
-    window=arm_window(arm,now); serial=arm['headset_serial']; failures=[]
-    devices=host.adb_devices()
+def live_preconditions(arm, host):
+    """Read-only gates repeated immediately before start; no snapshot or mutation."""
+    serial=arm['headset_serial']; failures=[]; devices=host.adb_devices()
     if devices != [serial]: failures.append('adb_devices_not_exactly_pinned')
     if not failures:
         if host.adb_run(serial,'shell','getprop','ro.product.model').strip()!='Quest 3': failures.append('not_quest_3')
@@ -226,7 +228,11 @@ def check_preconditions(arm, host, directory, now=None):
     if host.idle_seconds() < 30*60: failures.append('owner_not_idle')
     if host.vr_connected(): failures.append('vr_or_virtual_desktop_connected')
     if host.competing_gpu(): failures.append('competing_gpu_workload')
-    report={'schema':1,'checked_utc':utc_now().isoformat(),'window':{'deadline_utc':window['deadline'].isoformat(),'remaining_s':window['remaining_s']},'serial':serial,'failures':failures,'battery':battery,'thermal_status':thermal,'passed':not failures}
+    return failures,battery,thermal
+
+def check_preconditions(arm, host, directory, now=None):
+    window=arm_window(arm,now); serial=arm['headset_serial']; failures,battery,thermal=live_preconditions(arm,host)
+    report={'schema':1,'checked_utc':utc_now().isoformat(),'arm_sha256':arm_digest(arm),'window':{'deadline_utc':window['deadline'].isoformat(),'remaining_s':window['remaining_s']},'serial':serial,'failures':failures,'battery':battery,'thermal_status':thermal,'passed':not failures}
     if not failures:
         try: report['snapshot']=snapshot(host,serial,directory)
         except Exception as exc: report['failures'].append('snapshot_incomplete:'+str(exc)); report['passed']=False
@@ -313,9 +319,10 @@ def health_decision(sample, state, now):
 
 def worker(state_path, monitor=False):
     state_path=Path(state_path); host=Host(); state=json_read(state_path); host.keep_awake(True)
-    ready = state_path.parent / ('monitor.ready' if monitor else 'restorer.ready')
+    role='monitor' if monitor else 'restorer'
+    ready = state_path.parent / (role+'.ready')
     try:
-        atomic_write(ready, {'pid':os.getpid(),'role':'monitor' if monitor else 'restorer','ready_utc':utc_now().isoformat()})
+        atomic_write(ready, {'pid':os.getpid(),'role':role,'nonce':state['guard_nonce'],'ready_utc':utc_now().isoformat()})
         while True:
             state=json_read(state_path); now=time.time()
             if (state_path.parent/'stop').exists() or now>=state['deadline_epoch_s']:
@@ -349,10 +356,16 @@ def spawn_worker(state, monitor):
     opts={'creationflags':getattr(subprocess,'CREATE_NO_WINDOW',0)} if os.name=='nt' else {'start_new_session':True}
     return subprocess.Popen(args,cwd=ROOT,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,**opts)
 
-def wait_for_guard(directory, name, timeout_s=GUARD_READY_SECONDS):
+def wait_for_guard(directory, name, nonce, pid, timeout_s=GUARD_READY_SECONDS):
     marker=Path(directory)/(name+'.ready'); deadline=time.monotonic()+timeout_s
     while time.monotonic()<deadline:
-        if marker.is_file(): return True
+        if marker.is_file():
+            try:
+                ready=json_read(marker)
+                if (set(ready) == {'pid','role','nonce','ready_utc'} and ready['pid'] == pid and
+                        ready['role'] == name and ready['nonce'] == nonce and isinstance(ready['ready_utc'],str)):
+                    return True
+            except (OSError, ValueError, json.JSONDecodeError): pass
         time.sleep(.05)
     return False
 
@@ -443,16 +456,38 @@ def main():
     if args.cmd=='check': print(json.dumps(check_preconditions(arm,Host(),directory),indent=2)); return
     if args.cmd=='start':
         check=json_read(Path(directory)/'check.json') if (Path(directory)/'check.json').is_file() else None
-        if not check or not check.get('passed'): p.error('refusing start: successful check and snapshot required')
-        state={'schema':1,'window_id':directory.name,'serial':arm['headset_serial'],'adb':'adb','deadline_epoch_s':window['deadline'].timestamp(),'snapshot':check['snapshot'],'restoration':{'status':'pending'},'guards_ready':False,'guard_pids':{}}
+        if not check or not check.get('passed') or not check.get('snapshot'): p.error('refusing start: successful check and snapshot required')
+        try:
+            checked=datetime.fromisoformat(check['checked_utc']).astimezone(timezone.utc)
+            check_deadline=datetime.fromisoformat(check['window']['deadline_utc']).astimezone(timezone.utc)
+        except (KeyError, ValueError, TypeError): p.error('refusing start: malformed check record')
+        check_age=(utc_now()-checked).total_seconds()
+        if (check.get('serial') != arm['headset_serial'] or check.get('arm_sha256') != arm_digest(arm) or
+                check_deadline != window['deadline'] or not 0 <= check_age <= CHECK_FRESH_SECONDS):
+            p.error('refusing start: check is stale or belongs to a different arm/window')
+        try:
+            from .preflight import verify_snapshot
+            source_ok=all(x.get('error') is None and x.get('current_matches') is True
+                          for x in verify_snapshot(check['snapshot']['configuration_snapshots']))
+        except (KeyError, OSError, ValueError): source_ok=False
+        if not source_ok: p.error('refusing start: source settings changed after snapshot')
+        live_failures, _, _ = live_preconditions(arm,Host())
+        if live_failures: p.error('refusing start: preconditions changed: '+','.join(live_failures))
+        if state_path.exists() or (directory/'stop').exists() or (directory/'pause').exists():
+            p.error('refusing start: window already has state or a cancellation marker')
+        # Ready records are generated by fresh workers and bound to a nonce/PID.
+        for name in ('restorer.ready','monitor.ready','monitor.json'):
+            (directory/name).unlink(missing_ok=True)
+        nonce=uuid.uuid4().hex
+        state={'schema':1,'window_id':directory.name,'serial':arm['headset_serial'],'adb':'adb','deadline_epoch_s':window['deadline'].timestamp(),'snapshot':check['snapshot'],'restoration':{'status':'pending'},'guards_ready':False,'guard_pids':{},'guard_nonce':nonce}
         atomic_write(state_path,state)
         r=spawn_worker(state_path,False)
-        if not wait_for_guard(directory,'restorer'):
+        if not wait_for_guard(directory,'restorer',nonce,r.pid) or not pid_alive(r.pid):
             (directory/'stop').write_text('restorer failed readiness\n',encoding='utf-8')
             p.error('refusing start: deadline restorer did not become ready')
         state=json_read(state_path); state['guard_pids']['restorer']=r.pid; atomic_write(state_path,state)
         m=spawn_worker(state_path,True)
-        if not wait_for_guard(directory,'monitor'):
+        if not wait_for_guard(directory,'monitor',nonce,m.pid) or not pid_alive(m.pid):
             (directory/'stop').write_text('monitor failed readiness\n',encoding='utf-8')
             p.error('refusing start: thermal monitor did not become ready')
         state=json_read(state_path); state['guard_pids']['monitor']=m.pid; state['guards_ready']=True; atomic_write(state_path,state)

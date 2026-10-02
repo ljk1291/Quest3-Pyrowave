@@ -77,10 +77,12 @@ def test_restore_replays_empty_managed_property(monkeypatch, tmp_path):
     assert ('Q3',('shell','setprop','debug.q3pw.codec','')) in host.calls
     assert ('Q3',('shell','setprop','debug.oculus.refreshRate','90')) in host.calls
 
-def test_guard_readiness_is_explicit(tmp_path):
-    assert not u.wait_for_guard(tmp_path,'restorer',timeout_s=0)
-    u.atomic_write(tmp_path/'restorer.ready', {'role':'restorer'})
-    assert u.wait_for_guard(tmp_path,'restorer',timeout_s=0.1)
+def test_guard_readiness_is_bound_to_new_nonce_and_pid(tmp_path):
+    assert not u.wait_for_guard(tmp_path,'restorer','new',10,timeout_s=0)
+    u.atomic_write(tmp_path/'restorer.ready', {'role':'restorer','pid':9,'nonce':'old','ready_utc':'now'})
+    assert not u.wait_for_guard(tmp_path,'restorer','new',10,timeout_s=0.01)
+    u.atomic_write(tmp_path/'restorer.ready', {'role':'restorer','pid':10,'nonce':'new','ready_utc':'now'})
+    assert u.wait_for_guard(tmp_path,'restorer','new',10,timeout_s=0.1)
 
 
 def test_status_lease_fails_closed_for_guard_staleness_or_revoke(monkeypatch, tmp_path):
@@ -100,33 +102,66 @@ def test_status_lease_fails_closed_for_guard_staleness_or_revoke(monkeypatch, tm
     assert 'arm_inactive' in u.status_payload(tmp_path,arm,now)['lease']['blockers']
 
 def test_start_orders_guards_before_ready_state(monkeypatch, tmp_path):
-    arm=tmp_path/'arm.json'; arm.write_text('{}')
+    arm_path=tmp_path/'arm.json'; arm_path.write_text('{}')
+    arm={'headset_serial':'Q3'}; deadline=datetime.now(timezone.utc)+timedelta(hours=1)
     snapshot={'headset_properties':{'managed':{},'all_filtered':[]},'configuration_snapshots':[], 'preflight':{}}
-    u.atomic_write(tmp_path/'check.json',{'passed':True,'snapshot':snapshot})
+    u.atomic_write(tmp_path/'check.json',{'passed':True,'snapshot':snapshot,'serial':'Q3','arm_sha256':u.arm_digest(arm),
+                                          'checked_utc':u.utc_now().isoformat(),'window':{'deadline_utc':deadline.isoformat()}})
     order=[]
     class Process:
         def __init__(self,pid): self.pid=pid
     def spawn(path, monitor):
-        order.append('monitor' if monitor else 'restorer')
-        u.atomic_write(tmp_path/(('monitor' if monitor else 'restorer')+'.ready'), {'ready':True})
+        role='monitor' if monitor else 'restorer'; order.append(role); state=u.json_read(path)
+        u.atomic_write(tmp_path/(role+'.ready'), {'pid':20 if monitor else 10,'role':role,'nonce':state['guard_nonce'],'ready_utc':'now'})
         return Process(20 if monitor else 10)
     monkeypatch.setattr(u,'spawn_worker',spawn)
-    monkeypatch.setattr(u,'load_arm',lambda path: ({'headset_serial':'Q3'}, {'deadline':datetime.now(timezone.utc)+timedelta(hours=1)}))
-    monkeypatch.setattr('sys.argv',['unattended.py','start','--arm',str(arm),'--window',str(tmp_path)])
+    monkeypatch.setattr(u,'load_arm',lambda path: (arm, {'deadline':deadline}))
+    monkeypatch.setattr(u,'pid_alive',lambda pid: True)
+    monkeypatch.setattr('tools.quest3.preflight.verify_snapshot',lambda records: [])
+    monkeypatch.setattr(u,'live_preconditions',lambda arm,host: ([],{},0))
+    monkeypatch.setattr('sys.argv',['unattended.py','start','--arm',str(arm_path),'--window',str(tmp_path)])
     u.main()
     state=u.json_read(tmp_path/'state.json')
     assert order==['restorer','monitor'] and state['guards_ready']
     assert state['guard_pids']=={'restorer':10,'monitor':20}
 
-def test_start_refuses_before_monitor_when_restorer_is_not_ready(monkeypatch, tmp_path):
-    arm=tmp_path/'arm.json'; arm.write_text('{}')
+def test_start_replaces_stale_ready_marker_with_nonce_bound_record(monkeypatch, tmp_path):
+    arm_path=tmp_path/'arm.json'; arm_path.write_text('{}')
+    arm={'headset_serial':'Q3'}; deadline=datetime.now(timezone.utc)+timedelta(hours=1)
     snapshot={'headset_properties':{'managed':{},'all_filtered':[]},'configuration_snapshots':[], 'preflight':{}}
-    u.atomic_write(tmp_path/'check.json',{'passed':True,'snapshot':snapshot})
+    u.atomic_write(tmp_path/'check.json',{'passed':True,'snapshot':snapshot,'serial':'Q3','arm_sha256':u.arm_digest(arm),
+                                          'checked_utc':u.utc_now().isoformat(),'window':{'deadline_utc':deadline.isoformat()}})
+    u.atomic_write(tmp_path/'restorer.ready', {'pid':999,'role':'restorer','nonce':'stale','ready_utc':'old'})
+    observed=[]
+    class Process:
+        def __init__(self,pid): self.pid=pid
+    def spawn(path, monitor):
+        role='monitor' if monitor else 'restorer'; observed.append((role,(tmp_path/'restorer.ready').exists()))
+        state=u.json_read(path); u.atomic_write(tmp_path/(role+'.ready'), {'pid':20 if monitor else 10,'role':role,'nonce':state['guard_nonce'],'ready_utc':'new'})
+        return Process(20 if monitor else 10)
+    monkeypatch.setattr(u,'load_arm',lambda path: (arm, {'deadline':deadline}))
+    monkeypatch.setattr('tools.quest3.preflight.verify_snapshot',lambda records: [])
+    monkeypatch.setattr(u,'live_preconditions',lambda arm,host: ([],{},0))
+    monkeypatch.setattr(u,'spawn_worker',spawn)
+    monkeypatch.setattr(u,'pid_alive',lambda pid: True)
+    monkeypatch.setattr('sys.argv',['unattended.py','start','--arm',str(arm_path),'--window',str(tmp_path)])
+    u.main()
+    ready=u.json_read(tmp_path/'restorer.ready')
+    assert observed[0] == ('restorer',False) and ready['nonce'] != 'stale'
+
+def test_start_refuses_before_monitor_when_restorer_is_not_ready(monkeypatch, tmp_path):
+    arm_path=tmp_path/'arm.json'; arm_path.write_text('{}')
+    arm={'headset_serial':'Q3'}; deadline=datetime.now(timezone.utc)+timedelta(hours=1)
+    snapshot={'headset_properties':{'managed':{},'all_filtered':[]},'configuration_snapshots':[], 'preflight':{}}
+    u.atomic_write(tmp_path/'check.json',{'passed':True,'snapshot':snapshot,'serial':'Q3','arm_sha256':u.arm_digest(arm),
+                                          'checked_utc':u.utc_now().isoformat(),'window':{'deadline_utc':deadline.isoformat()}})
     calls=[]
     monkeypatch.setattr(u,'spawn_worker',lambda path,monitor: calls.append(monitor) or type('P',(),{'pid':1})())
     monkeypatch.setattr(u,'wait_for_guard',lambda *args: False)
-    monkeypatch.setattr(u,'load_arm',lambda path: ({'headset_serial':'Q3'}, {'deadline':datetime.now(timezone.utc)+timedelta(hours=1)}))
-    monkeypatch.setattr('sys.argv',['unattended.py','start','--arm',str(arm),'--window',str(tmp_path)])
+    monkeypatch.setattr(u,'load_arm',lambda path: (arm, {'deadline':deadline}))
+    monkeypatch.setattr('tools.quest3.preflight.verify_snapshot',lambda records: [])
+    monkeypatch.setattr(u,'live_preconditions',lambda arm,host: ([],{},0))
+    monkeypatch.setattr('sys.argv',['unattended.py','start','--arm',str(arm_path),'--window',str(tmp_path)])
     with pytest.raises(SystemExit): u.main()
     assert calls==[False] and (tmp_path/'stop').is_file()
 
