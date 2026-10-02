@@ -190,6 +190,12 @@ class Host:
         return ((ctypes.windll.kernel32.GetTickCount64() - info.dwTime) & 0xffffffff) / 1000
     def _tasklist(self):
         return self.run('tasklist','/FO','CSV','/NH',timeout=10).lower() if os.name=='nt' else ''
+    def _comfy_pids(self):
+        if os.name != 'nt': return []
+        script="Get-CimInstance Win32_Process | Where-Object {$_.CommandLine -match 'ComfyUI|--port\\s+8192|:8192'} | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"
+        try:
+            data=json.loads(self.run('powershell','-NoProfile','-NonInteractive','-Command',script,timeout=8)); return data if isinstance(data,list) else ([data] if data else [])
+        except Exception: return []
     def _comfy_queue(self):
         url=os.environ.get('Q3PW_COMFY_URL','http://127.0.0.1:8192')+'/queue'
         try:
@@ -200,7 +206,7 @@ class Host:
         except Exception as exc: return {'endpoint':url,'known':False,'running':None,'pending':None,'error':str(exc)}
     def gpu_sample(self):
         """Record compute contention without treating every Python/service process as GPU work."""
-        out=self._tasklist(); comfy_running='comfyui' in out
+        comfy_pids=self._comfy_pids(); comfy_running=bool(comfy_pids)
         comfy=self._comfy_queue() if comfy_running else {'known':True,'running':0,'pending':0,'error':None}
         conflicts=[]
         if comfy_running and (not comfy['known'] or comfy['running'] or comfy['pending']): conflicts.append('comfy_queue_active_or_unknown')
@@ -213,7 +219,7 @@ class Host:
                 conflicts.extend(row for row in apps if 'comfy' not in row.lower())
             except Refusal as exc: apps=['nvidia-smi-error:'+str(exc)]; conflicts.append('gpu_compute_status_unknown')
         else: conflicts.append('gpu_compute_status_unknown')
-        sample={'at_utc':utc_now().isoformat(),'comfy':comfy,'nvidia_compute_apps':apps,'conflicts':conflicts}
+        sample={'at_utc':utc_now().isoformat(),'comfy':comfy,'comfy_processes':comfy_pids,'nvidia_compute_apps':apps,'conflicts':conflicts}
         self.last_gpu_sample=sample; return sample
     def competing_gpu(self): return self.gpu_sample()['conflicts']
     def _vd_log_state(self):
