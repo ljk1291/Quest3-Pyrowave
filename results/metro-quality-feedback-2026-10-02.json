@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "scope": "first supervised Metro Awakening subjective-quality observation",
+  "build": {
+    "application_version": "20.13.0-ljk1291.2+f2e9df5704cc",
+    "protocol_version": "20.13.0-ljk1291.2"
+  },
+  "profile": {
+    "codec": "PyroWave",
+    "bitrate_mode": "ConstantMbps",
+    "target_mbps": 500,
+    "transport": "TCP",
+    "wavelet": "Haar",
+    "chroma": "4:2:0",
+    "hdr": false,
+    "refresh_hz": 90,
+    "render_and_encoded_resolution_per_eye": [3072, 3232],
+    "encoder_stereo_resolution": [6144, 3232],
+    "direct_eye_copy": true,
+    "fragment_min_usage": true,
+    "optimal_ahb_usage": true,
+    "actual_ahardwarebuffer_usage": "0x10000300"
+  },
+  "runtime_evidence": {
+    "runtime_90_hz_confirmed": true,
+    "external_geometry_confirmed": true,
+    "internal_ue_scale": "100% recorded; this does not prove the game's internal render resolution"
+  },
+  "operator_observation": {
+    "subjective_quality": "fail",
+    "reported_symptoms": [
+      "dull colours",
+      "mura-like compression",
+      "aliasing"
+    ],
+    "allocation_regression": "unknown; this was the first Metro gameplay observation"
+  },
+  "evidence_boundaries": {
+    "excluded": [
+      "The post-exit 30-second telemetry capture and screenshots were taken after Metro closed and are not gameplay workload or image-quality evidence.",
+      "No exact source-frame to decoded-frame pairing or numerical pixel-quality measurement was collected.",
+      "No optical display-FPS or motion-to-photon result is claimed."
+    ],
+    "not_an_acceptance_result": true
+  },
+  "investigation_status": {
+    "known_colour_path_candidate": "A legacy full-RGBA to limited-range remap remains enabled downstream even when this PyroWave session negotiates full range. A codec-specific bypass is implemented in source and is not in this tested build; build and headset validation remain pending.",
+    "compression_cause": "unknown; do not attribute the observation to Haar, 4:2:0, bitrate, allocation usage, or the colour-path candidate without controlled replay."
+  },
+  "restoration": {
+    "complete": true,
+    "errors": 0,
+    "vdxr_registration_and_manifest_match_before": true
+  },
+  "next_quality_gates": [
+    "Validate the colour-path patch with grayscale/range checks before gameplay replay.",
+    "Replay the same Metro checkpoint with allocation off/on at fixed 500 Mbps Haar settings.",
+    "Compare Haar and CDF 9/7 at the same 500 Mbps profile.",
+    "Use HEVC and a Virtual Desktop reference only as separately documented controls when needed.",
+    "Record external and internal game geometry, and require exact source/decode frame identity before numerical quality claims."
+  ]
+}

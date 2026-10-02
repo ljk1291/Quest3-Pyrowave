@@ -2,6 +2,33 @@
 
 ## Current evidence — 2026-10-02
 
+### First Metro subjective-quality observation
+
+The first supervised Metro Awakening observation on the verified
+`f2e9df5704cc` protocol `.2` pair is a **subjective quality fail**. The active
+profile was 3072×3232 per eye at runtime-confirmed 90 Hz, producing a 6144×3232 stereo
+encoder image: PyroWave Haar/Compute, TCP, fixed 500 Mbps, 4:2:0 SDR, direct
+eye copy and the recommended AHardwareBuffer allocation (`0x10000300`). The
+owner reported dull colours, mura-like compression and aliasing. This was the
+first Metro observation, so allocation-related regression is unknown. The
+saved UE 100% scale is not proof of the game's internal render dimensions.
+
+The telemetry capture and screenshots were taken after Metro had closed. They
+are excluded from this gameplay observation and supply no Metro performance or
+image-quality evidence. No source-frame/decoded-frame match or numerical
+quality score exists. Do not label a bitrate, Haar, 4:2:0, allocation setting
+or decoder stage as the cause.
+
+The session negotiated full range, but a legacy downstream full-RGBA to
+limited-range remap remains a candidate for the dull-colour symptom. A
+codec-specific bypass is implemented in source and is not part of this tested build.
+Validate it first with grayscale/range checks, then replay the same Metro
+checkpoint with allocation off/on at fixed 500-Mbps Haar settings. Compare Haar
+with CDF 9/7 at the same profile; use HEVC and a Virtual Desktop reference only
+as separately recorded controls. Preserve external and internal geometry and
+require exact source/decode frame identity before any numerical quality claim.
+See [the sanitized observation](../results/metro-quality-feedback-2026-10-02.json).
+
 Session 05 identified a substantial output-allocation improvement on the verified
 `f2e9df5704cc` pair. With `fragment_min_usage=1` held constant, requesting the
 driver's recommended AHardwareBuffer usage raised fresh selected outputs from

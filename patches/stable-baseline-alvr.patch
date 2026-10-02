@@ -259,7 +259,7 @@ index dfefe0008969564b5b88f363c733f0dfb0640de3..11766bb96546c5c9c5ca2b7fcee66e03
  const MAX_SAMPLES: usize = 1024;
  
 diff --git a/alvr/client_openxr/src/stream.rs b/alvr/client_openxr/src/stream.rs
-index eb04019edefff6ebbc77744948a173d41687de19..3147b2279f22b8251ca769f75c633b5d16c71a50 100644
+index eb04019..accaaa4 100644
 --- a/alvr/client_openxr/src/stream.rs
 +++ b/alvr/client_openxr/src/stream.rs
 @@ -3,7 +3,7 @@ use crate::{
@@ -271,7 +271,33 @@ index eb04019edefff6ebbc77744948a173d41687de19..3147b2279f22b8251ca769f75c633b5d
      ClientCoreContext,
  };
  use alvr_common::{
-@@ -91,7 +91,7 @@ pub struct StreamContext {
+@@ -34,6 +34,7 @@ use std::{
+ const DECODER_MAX_TIMEOUT_MULTIPLIER: f32 = 0.8;
+ 
+ pub struct ParsedStreamConfig {
++    pub codec: CodecType,
+     pub view_resolution: UVec2,
+     pub refresh_rate_hint: f32,
+     pub use_full_range: bool,
+@@ -50,9 +51,17 @@ pub struct ParsedStreamConfig {
+     pub interaction_sources: InteractionSourcesConfig,
+ }
+ 
++// PyroWave's native converter writes ordinary full-range RGBA into its
++// AHardwareBuffer for either coded YCbCr range. The legacy remap is for the
++// platform decoder's external texture path.
++fn legacy_limited_range_remap(codec: CodecType, use_full_range: bool, enable_hdr: bool) -> bool {
++    codec != CodecType::PyroWave && use_full_range && !enable_hdr
++}
++
+ impl ParsedStreamConfig {
+     pub fn new(config: &StreamConfig) -> Self {
+         Self {
++            codec: config.settings.video.preferred_codec,
+             view_resolution: config.negotiated_config.view_resolution,
+             refresh_rate_hint: config.negotiated_config.refresh_rate_hint,
+             use_full_range: config.negotiated_config.use_full_range,
+@@ -91,7 +100,7 @@ pub struct StreamContext {
      /// A decoded frame selected before xrWaitFrame. Legacy decoders may block while
      /// selecting; the opt-in Quest3 PyroWave pre-wait poll only takes a ready frame.
      /// Its existing native-buffer lease remains protected until the eye copy is ready.
@@ -280,7 +306,32 @@ index eb04019edefff6ebbc77744948a173d41687de19..3147b2279f22b8251ca769f75c633b5d
      frame_wait_budget: Duration,
      frame_wait_stats: [u64; 4], // waits, ready hits, total microseconds, max microseconds
      frame_wait_last_log: Instant,
-@@ -511,8 +511,10 @@ impl StreamContext {
+@@ -113,6 +122,15 @@ impl StreamContext {
+         interaction_ctx
+             .write()
+             .select_sources(&config.interaction_sources);
++        let limited_range_remap =
++            legacy_limited_range_remap(config.codec, config.use_full_range, config.enable_hdr);
++        alvr_common::info!(
++            "[Q3PW_COLOUR] codec={:?} full_range={} hdr={} legacy_range_remap={}",
++            config.codec,
++            config.use_full_range,
++            config.enable_hdr,
++            limited_range_remap,
++        );
+ 
+         let xr_exts = xr_session.instance().exts();
+ 
+@@ -190,7 +208,7 @@ impl StreamContext {
+             format,
+             config.foveated_encoding_config.clone(),
+             platform != Platform::Lynx && !((platform.is_pico()) && config.enable_hdr),
+-            config.use_full_range && !config.enable_hdr, // TODO: figure out why HDR doesn't need the limited range hackfix in staging?
++            limited_range_remap,
+             config.encoding_gamma,
+             config.upscaling.clone(),
+         );
+@@ -511,8 +529,10 @@ impl StreamContext {
              }
          }
  
@@ -293,7 +344,7 @@ index eb04019edefff6ebbc77744948a173d41687de19..3147b2279f22b8251ca769f75c633b5d
                  let view_params = self.core_context.report_compositor_start(timestamp);
  
                  // Avoid passing invalid timestamp to runtime
-@@ -521,9 +523,9 @@ impl StreamContext {
+@@ -521,9 +541,9 @@ impl StreamContext {
  
                  self.last_good_view_params = view_params;
  
@@ -305,7 +356,7 @@ index eb04019edefff6ebbc77744948a173d41687de19..3147b2279f22b8251ca769f75c633b5d
              };
  
          // Match the inverse warp to the centre the server actually foveated this frame with.
-@@ -587,6 +589,13 @@ impl StreamContext {
+@@ -587,6 +607,13 @@ impl StreamContext {
  
              self.swapchains[0].release_image().unwrap();
              self.swapchains[1].release_image().unwrap();
@@ -319,6 +370,32 @@ index eb04019edefff6ebbc77744948a173d41687de19..3147b2279f22b8251ca769f75c633b5d
              if latest_only {
                  video_decoder::telemetry::record_eye_copy(acquire_wait_ms, eye_render_ms,
                      release_start.elapsed().as_secs_f32() * 1000.0,
+@@ -805,3 +832,25 @@ fn stream_input_loop(
+         thread::sleep(deadline.saturating_duration_since(Instant::now()));
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn legacy_range_remap_is_not_applied_to_pyrowave_rgba() {
++        assert!(!legacy_limited_range_remap(CodecType::PyroWave, true, false));
++        assert!(!legacy_limited_range_remap(CodecType::PyroWave, false, false));
++        assert!(!legacy_limited_range_remap(CodecType::PyroWave, true, true));
++    }
++
++    #[test]
++    fn legacy_range_remap_preserves_hardware_sdr_and_hdr_policy() {
++        for codec in [CodecType::H264, CodecType::Hevc, CodecType::AV1] {
++            assert!(legacy_limited_range_remap(codec, true, false));
++            assert!(!legacy_limited_range_remap(codec, false, false));
++            assert!(!legacy_limited_range_remap(codec, true, true));
++            assert!(!legacy_limited_range_remap(codec, false, true));
++        }
++    }
++}
 diff --git a/alvr/dashboard/src/dashboard/components/test_report.rs b/alvr/dashboard/src/dashboard/components/test_report.rs
 index d3a1d7c323e3fe3810c6366241a111b942988bd0..02d18e9a88f995012b2088b838ab7026373f1256 100644
 --- a/alvr/dashboard/src/dashboard/components/test_report.rs

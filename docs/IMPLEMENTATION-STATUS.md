@@ -12,6 +12,29 @@ Target: Wi-Fi 6 / 5 GHz / 80 MHz, actual VD Godlike dimensions, 90 Hz, Metro Awa
 
 ## Evidence and remaining gates
 
+The first supervised Metro Awakening quality observation is a **subjective
+fail**, not a rate or acceptance result. The verified `f2e9df5704cc` protocol
+`.2` pair used 3072×3232 per eye, confirmed 90 Hz, PyroWave Haar/Compute,
+fixed 500 Mbps TCP, 4:2:0 SDR, direct eye copy and the recommended allocation
+(`0x10000300`). The owner reported dull colours, mura-like compression and
+aliasing. This was the first Metro observation, so whether allocation changed
+quality is unknown. The recorded UE 100% scale does not establish the game's
+actual internal render resolution.
+
+The post-exit 30-second telemetry capture and screenshots are excluded: Metro
+had already closed, so they are not gameplay or Metro image-quality evidence.
+There is no exact source/decode frame identity or numerical quality score.
+Full range was negotiated, but a legacy downstream full-RGBA to limited-range
+remap is a candidate for the dull-colour symptom. A codec-specific bypass is
+implemented in source, with hardware-codec policy regression tests and a
+`Q3PW_COLOUR` activation log. Build and headset validation remain pending; the
+fix is not in the tested pair and does not diagnose the compression artifacts.
+The session restored all recorded settings and verified the original VDXR
+registration/manifest with zero restoration errors. The next sequence is
+grayscale/range validation of the patch, then a fixed-checkpoint allocation
+off/on replay, Haar/CDF 9/7 comparison at fixed 500 Mbps, and HEVC/VD controls
+only where needed. See [the sanitized Metro observation](../results/metro-quality-feedback-2026-10-02.json).
+
 The latest owner-authorized AFK Session 05 found a repeatable AHardwareBuffer
 allocation improvement on the verified `f2e9df5704cc` pair. At the same
 3072×3232 per eye, 90 Hz, 300 Mbps Haar/direct/Compute/4:2:0/TCP profile,
