@@ -19,6 +19,31 @@
     "installed_apk_version": "20.13.0-ljk1291.1+cbf70c27269d",
     "apk_signing_certificate_sha256": "4a3fe0a8d47ee67b01710df6ffdc870e91ebc5b8e7feec7c87534944ca2a44aa"
   },
+  "verified_stable_run": {
+    "id": 37016740156,
+    "repository_commit": "0c618b809ae47dc67b4ad91a2423579c7efbb6d0",
+    "tests_job": "success",
+    "android_job": "success",
+    "windows_job": "success",
+    "matching_pair_job": "success",
+    "application_version": "20.13.0-ljk1291.1+0c618b809ae4",
+    "server_version": "20.13.0-ljk1291.1+0c618b809ae4",
+    "protocol_version": "20.13.0-ljk1291.1",
+    "client_package_id": "io.github.ljk1291.quest3pyrowave",
+    "apk_signing_kind": "stable",
+    "apk_signing_certificate_sha256": "4a3fe0a8d47ee67b01710df6ffdc870e91ebc5b8e7feec7c87534944ca2a44aa",
+    "canonical_sources_lock_sha256": "dc4cce99166cfc910b2fddc8610ce0ebebbbed63b0f469589300ebff0de0f071",
+    "artifact_download_sha256": {
+      "android_artifact_zip": "c1798812cdcadd7e16837aa7694d66bc83d18b74b3d226e1d97885c60aa72c37",
+      "windows_artifact_zip": "02a73f66675d79d97f0b2896433de0e050936d524fb94572aa51d84f9ef5c393"
+    },
+    "artifact_checksums_verified": true,
+    "matching_dependency_revisions": true,
+    "matching_shader_hashes": true,
+    "installed_apk_version": "20.13.0-ljk1291.1+0c618b809ae4",
+    "apk_install_verified": true,
+    "updated_pair_stream_tested": false
+  },
   "pair_diagnostic": {
     "status": "failed_gate_diagnostic_only",
     "only_identity_mismatch": "sources_lock_sha256",

@@ -56,7 +56,7 @@ Warm up consistently, alternate comparisons and return to comparable thermal con
 
 ## Capture and acceptance
 
-Use Python 3.12 and install `tools/quest3/requirements.txt` into a local environment for the capture and stereo-chart tools. Start capture after the profile/game settles. Use 310 seconds for a five-minute observed frame window and 1810 seconds for thirty minutes to allow event-boundary overhead:
+Use Python 3.12 and install `tools/quest3/requirements.txt` into a local environment for the capture and stereo-chart tools. Before each warm-up, confirm that no unrelated GPU workload is running and that VRAM has enough headroom: check process names and VRAM consumers in a local GPU monitor, including ComfyUI or other compute backends. Record the result in the operator review. Do not infer a competing workload solely from overall GPU utilization, since the VR workload itself can legitimately use the GPU heavily. Start capture after the profile/game settles. Use 310 seconds for a five-minute observed frame window and 1810 seconds for thirty minutes to allow event-boundary overhead:
 
 ```powershell
 python -m tools.quest3.bench capture --adb adb --seconds 1810 --hz 90 --build-manifest out/android/BUILD-METADATA.json --out results/local/metro-target-final
@@ -64,7 +64,7 @@ python -m tools.quest3.bench capture --adb adb --seconds 1810 --hz 90 --build-ma
 
 The report records settings at both ends, negotiated dimensions/rate, installed versions, fresh runtime markers, device samples and frame counters. Use metadata from the verified artifact pair. Missing telemetry prevents a pass; improve instrumentation instead of inventing values.
 
-Copy `presets/operator-review.template.json` into the capture folder. Bind it to the report's `capture_id` and record actual chart, Metro clarity/motion, tracking, controller and audio observations. Leave unknown fields null. Then:
+Copy `presets/operator-review.template.json` into the capture folder. Bind it to the report's `capture_id` and record actual chart, Metro clarity/motion, tracking, controller and audio observations. Set `no_competing_gpu_workload` true only after the pre-capture process/VRAM check; unknown or false prevents acceptance. Leave other unknown fields null. Then:
 
 ```powershell
 python -m tools.quest3.bench accept --report results/local/metro-target-final/report.json --expected results/local/baseline-plan.json --mbps 400 --review results/local/metro-target-final/operator-review.json --out results/local/metro-target-final/acceptance.json

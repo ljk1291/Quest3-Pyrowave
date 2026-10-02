@@ -13,5 +13,6 @@
   "manual_confirmation": null,
   "no_disconnects_ok": null,
   "no_crashes_ok": null,
+  "no_competing_gpu_workload": null,
   "notes": null
 }

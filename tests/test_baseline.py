@@ -26,7 +26,7 @@ class BaselineTests(unittest.TestCase):
                 'thermal_ok': True, 'stream_errors': [], 'controllers_ok': True, 'audio_ok':True,
                 'tracking_ok':True, 'image_ok': True, 'manual_confirmation': True,
                 'metro_clarity_ok':True, 'metro_motion_ok':True,
-                'no_disconnects_ok':True, 'no_crashes_ok':True,
+                'no_disconnects_ok':True, 'no_crashes_ok':True, 'no_competing_gpu_workload':True,
                 'pyrowave_counter_window':{'counter_deltas':{'decode_failures':0,'complete':1}},
                 'experiment_options_start':{'verified':True,'enabled':{},'effective_pyro_precision':'1',
                     'effective_early_poll':True,'effective_perf_level':'sustained_high'},
@@ -52,6 +52,12 @@ class BaselineTests(unittest.TestCase):
         self.assertFalse(result['accepted'])
         self.assertIn('no_fresh_stream_frames', result['failure_reasons'])
         self.assertIn('manual_confirmation_missing', result['failure_reasons'])
+
+    def test_workload_isolation_must_be_explicitly_confirmed(self):
+        report=self.passing_report(); report.pop('no_competing_gpu_workload')
+        self.assertIn('gpu_workload_isolation_unverified', acceptance(report, self.expected())['failure_reasons'])
+        report=self.passing_report(); report['no_competing_gpu_workload']=False
+        self.assertIn('gpu_workload_isolation_unverified', acceptance(report, self.expected())['failure_reasons'])
 
     def test_missing_identity_settings_change_and_stale_runtime_fail(self):
         report = self.passing_report(); report['build_identity_verified'] = False

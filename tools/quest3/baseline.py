@@ -133,6 +133,7 @@ def acceptance(report, expected, selected_target_mbps=None):
     if report.get("manual_confirmation") is not True: reasons.append("manual_confirmation_missing")
     if report.get('no_disconnects_ok') is not True: reasons.append('disconnect_status_unverified')
     if report.get('no_crashes_ok') is not True: reasons.append('crash_status_unverified')
+    if report.get('no_competing_gpu_workload') is not True: reasons.append('gpu_workload_isolation_unverified')
     if not report.get("sustained_requested_fps"): reasons.append("fresh_submission_rate_failed")
     experiments_start=report.get('experiment_options_start',{})
     experiments_end=report.get('experiment_options_end',{})

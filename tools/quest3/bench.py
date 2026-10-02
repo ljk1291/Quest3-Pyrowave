@@ -433,7 +433,7 @@ def merge_review(report, review):
     if not isinstance(review,dict) or review.get('capture_id') != report.get('capture_id'):
         return report
     fields=('controllers_ok','audio_ok','tracking_ok','image_ok','manual_confirmation','metro_clarity_ok','metro_motion_ok',
-            'no_disconnects_ok','no_crashes_ok')
+            'no_disconnects_ok','no_crashes_ok','no_competing_gpu_workload')
     report=dict(report)
     report.update({field:review.get(field) for field in fields})
     report['operator_review']={key:review.get(key) for key in ('capture_id','reviewer','reviewed_at','notes')}

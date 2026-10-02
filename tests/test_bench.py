@@ -245,8 +245,9 @@ class BenchTests(unittest.TestCase):
         self.assertNotIn('image_ok', merge_review(report, {'capture_id':'other','image_ok':True}))
         merged=merge_review(report, {'capture_id':'capture-a','image_ok':True,'controllers_ok':True,
             'audio_ok':True,'tracking_ok':True,'manual_confirmation':True,
-            'metro_clarity_ok':True,'metro_motion_ok':True})
+            'metro_clarity_ok':True,'metro_motion_ok':True,'no_competing_gpu_workload':True})
         self.assertTrue(merged['image_ok'])
+        self.assertTrue(merged['no_competing_gpu_workload'])
         self.assertEqual(merged['operator_review']['capture_id'],'capture-a')
 
     def test_endurance_windows_report_pending_until_all_six_are_observed(self):
