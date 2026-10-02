@@ -212,7 +212,8 @@ class Host:
             try:
                 from .control import session as alvr_session
                 clients=alvr_session().get('client_connections',{})
-                return bool(clients)
+                states=[str(row.get('connection_state','')).casefold() for row in clients.values() if isinstance(row,dict)]
+                return any(state in {'connected','streaming','streamingactive'} for state in states)
             except Exception:
                 # Dashboard exists but its actual session state cannot be read.
                 return True
@@ -462,6 +463,7 @@ def worker(state_path, monitor=False):
                 m['last_sample_epoch_s']=now
                 action=health_decision({'battery':b['level'],'temperature_c':b['temperature_c'],'thermal_status':t},m,now)
                 gpu_sample=host.gpu_sample() if hasattr(host,'gpu_sample') else {'conflicts':host.competing_gpu()}
+                gpu_sample=exclude_owned_compute_jobs(state,host,gpu_sample) if hasattr(host,'process_identity') else gpu_sample
                 workload=gpu_sample['conflicts']; m['competing_gpu']=workload; m['gpu_sample']=gpu_sample
                 pause_marker=state_path.parent/'pause'
                 if workload:
@@ -655,6 +657,19 @@ def unregister_owned_pc_job(state_path, pid, host=None):
         if not pid_alive(pid): jobs.remove(record)
         else: raise
     atomic_write(state_path,state); return record
+
+def exclude_owned_compute_jobs(state, host, sample):
+    """Exclude only live jobs whose PID/path/start/nonce still exactly match."""
+    owned=[]
+    for record in state.get('owned_pc_jobs',[]):
+        try:
+            if ownership_matches(record,host.process_identity(record['pid']),state.get('guard_nonce')): owned.append(str(record['pid']))
+        except Exception: pass
+    kept=[]
+    for row in sample.get('conflicts',[]):
+        pid=row.split(',',1)[0].strip()
+        if pid not in owned: kept.append(row)
+    result=dict(sample); result['conflicts']=kept; result['excluded_owned_pids']=owned; return result
 
 def pid_alive(pid):
     if not isinstance(pid, int) or pid <= 0: return False
