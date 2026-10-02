@@ -183,15 +183,15 @@ def build_plan(source:Path,projection_px_per_deg:float,*,projection_evidence:str
     if not isinstance(projection_evidence,str) or not projection_evidence.strip(): raise ValueError("projection_evidence must name logged projection measurement")
     if not isinstance(hvs_height_factor,(int,float)) or not math.isfinite(hvs_height_factor) or not any(abs(hvs_height_factor-(1+i/8))<1e-6 for i in range(16)): raise ValueError("hvs_height_factor must be one upstream-supported factor")
     info=inspect_y4m(source,require_c444=True)
-    if (info.fps_num,info.fps_den)!=(fps,1): raise ValueError(f"source dump is {info.fps_num}:{info.fps_den}; WO-1 requires {fps} Hz")
+    if (info.fps_num,info.fps_den) not in ((72,1),(90,1)): raise ValueError("source dump header must be F72:1 or F90:1")
     if (info.width//2,info.height)!=tuple(display_eye): raise ValueError("source dump must be logged presentation input")
     cells=[]
     for wv in wavelets:
         if wv not in WAVELETS: raise ValueError(f"unsupported wavelet {wv}")
         for rate in rates_mbps:
             for ew,eh in geometries:
-                cap=cap_bytes(int(rate),fps); cells.append({"wavelet":wv,"rate_mbps":int(rate),"fps":fps,"eye_width":int(ew),"eye_height":int(eh),"stereo_width":int(ew)*2,"encoded_chroma":"420","cap_bytes":cap,"bits_per_pixel":bpp(cap,int(ew),int(eh))})
-    return {"schema":SCHEMA,"kind":"pyrowave_frame_bank","source":{"sha256":sha256_file(source),"geometry":[info.width,info.height],"frames":info.frames,"fps":[info.fps_num,info.fps_den],"chroma":"444","color_range":"FULL","frame_identity":frame_records(source)},"presentation_eye":list(display_eye),"projection_px_per_deg":float(projection_px_per_deg),"projection_evidence":projection_evidence.strip(),"hvs_height_factor":float(hvs_height_factor),"resize":{"scope":"per_eye","filter":"lanczos4","seam_crossing":False},"crops":validate_crops(crops),"cells":cells,"required_metrics":["psnr_y","psnr_cb","psnr_cr","ssim","vmaf","psnr_hvs_m_h"]}
+                cap=cap_bytes(int(rate),fps); cells.append({"wavelet":wv,"rate_mbps":int(rate),"fps":fps,"eye_width":int(ew),"eye_height":int(eh),"stereo_width":int(ew)*2,"encoded_chroma":"444","cap_bytes":cap,"bits_per_pixel":bpp(cap,int(ew),int(eh))})
+    return {"schema":SCHEMA,"kind":"pyrowave_frame_bank","source":{"sha256":sha256_file(source),"geometry":[info.width,info.height],"frames":info.frames,"header_fps":[info.fps_num,info.fps_den],"target_fps":fps,"chroma":"444","color_range":"FULL","frame_identity":frame_records(source)},"presentation_eye":list(display_eye),"projection_px_per_deg":float(projection_px_per_deg),"projection_evidence":projection_evidence.strip(),"hvs_height_factor":float(hvs_height_factor),"resize":{"scope":"per_eye","filter":"lanczos4","seam_crossing":False},"crops":validate_crops(crops),"cells":cells,"required_metrics":["psnr_y","psnr_cb","psnr_cr","ssim","vmaf","psnr_hvs_m_h"]}
 
 def validate_plan(plan):
     if not isinstance(plan,dict) or plan.get("schema")!=SCHEMA or plan.get("kind")!="pyrowave_frame_bank": raise ValueError("not a frame-bank schema-2 manifest")
@@ -202,7 +202,7 @@ def validate_plan(plan):
     validate_crops(plan.get("crops",[]))
     if not plan.get("cells"): raise ValueError("frame bank contains no cells")
     for c in plan["cells"]:
-        if c.get("encoded_chroma")!="420": raise ValueError("WO-1 baseline codec target is C420")
+        if c.get("encoded_chroma")!="444": raise ValueError("WO-1 pinned offline encoder input/output is C444")
         if c.get("cap_bytes")!=cap_bytes(c.get("rate_mbps"),c.get("fps")): raise ValueError("cell cap math does not match its rate and frame rate")
         if c.get("stereo_width")!=c.get("eye_width",0)*2: raise ValueError("cell stereo geometry is not two separate eyes")
     return plan
@@ -289,10 +289,10 @@ def _private_path(path:Path):
     if not candidate.is_relative_to(root): raise ValueError("raw frame-bank evidence must be under this repository's results/local")
     return candidate
 def _stream_reference(source,source_info,cell,path):
-    info=Y4MInfo(cell["stereo_width"],cell["eye_height"],cell["fps"],1,"420","FULL",_frame_bytes(cell["stereo_width"],cell["eye_height"],"420"),source_info.frames); ids=[]
+    info=Y4MInfo(cell["stereo_width"],cell["eye_height"],cell["fps"],1,"444","FULL",_frame_bytes(cell["stereo_width"],cell["eye_height"],"444"),source_info.frames); ids=[]
     with _open_writer(path,info) as out:
         for index,planes,digest in iter_y4m(source,source_info):
-            ids.append({"source_frame":index,"source_sha256":digest,"reference_sha256":_write_frame(out,info,to_420(resize_per_eye(planes,cell["eye_width"],cell["eye_height"])))})
+            ids.append({"source_frame":index,"source_sha256":digest,"reference_sha256":_write_frame(out,info,resize_per_eye(planes,cell["eye_width"],cell["eye_height"]))})
     return info,ids
 def _write_display(source,info,out_path,display_eye):
     di=Y4MInfo(display_eye[0]*2,display_eye[1],info.fps_num,info.fps_den,info.chroma,"FULL",_frame_bytes(display_eye[0]*2,display_eye[1],info.chroma),info.frames)
@@ -321,16 +321,17 @@ def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,
     if source_info.frames!=plan["source"]["frames"]: raise ValueError("source dump frame count differs from frozen plan")
     private_out.mkdir(parents=True,exist_ok=True); result={"schema":SCHEMA,"kind":"pyrowave_frame_bank_result","frozen_plan_sha256":hashlib.sha256(raw_plan).hexdigest(),"source_sha256_start":sha256_file(source),"source_sha256_end":None,"tool_provenance_start":initial,"tool_provenance_end":None,"projection_px_per_deg":plan["projection_px_per_deg"],"projection_evidence":plan["projection_evidence"],"cells":[],"complete":False,"failure_reasons":[]}
     for index,cell in enumerate(plan["cells"]):
-        directory=private_out/f"cell-{index:02d}-{cell['wavelet']}-{cell['rate_mbps']}-{cell['eye_width']}x{cell['eye_height']}";directory.mkdir(parents=True,exist_ok=True); ref=directory/"reference-c420.y4m";wave=directory/"encoded.wave";decoded=directory/"decoded-c420.y4m"; row=dict(cell)
+        directory=private_out/f"cell-{index:02d}-{cell['wavelet']}-{cell['rate_mbps']}-{cell['eye_width']}x{cell['eye_height']}";directory.mkdir(parents=True,exist_ok=True); ref=directory/"reference-c444.y4m";wave=directory/"encoded.wave";decoded=directory/"decoded-c444.y4m"; row=dict(cell)
         try:
             ref_info,ids=_stream_reference(source,source_info,cell,ref); row["identity_count"]=len(ids)
             if [x["source_sha256"] for x in ids] != [x["source_sha256"] for x in plan["source"]["frame_identity"]]: raise ValueError("source_frame_identity_drift")
             env=os.environ.copy();env["PYROWAVE_WAVELET"]=cell["wavelet"]
-            # Frame-bank adapter contract: explicit rate and output eliminate positional ambiguity.
-            code,_,_=guard.run([str(tools["encode"]),"--input",str(ref),"--output",str(wave),"--rate",str(cell["cap_bytes"]),"--chroma","420"],cwd=directory,env=env,timeout_s=command_timeout_s)
+            # Pinned pyrowave-encode CLI: input.y4m output.wave bytes_per_frame.
+            code,_,_=guard.run([str(tools["encode"]),str(ref),str(wave),str(cell["cap_bytes"])],cwd=directory,env=env,timeout_s=command_timeout_s)
             if code or not wave.is_file() or wave.stat().st_size<=0: raise RuntimeError("encode_failed")
             row["actual_container_bytes"]=wave.stat().st_size
-            code,_,_=guard.run([str(tools["decode"]),"--input",str(wave),"--output",str(decoded)],cwd=directory,env=env,timeout_s=command_timeout_s)
+            # Pinned pyrowave-decode CLI: input.wave output.y4m.
+            code,_,_=guard.run([str(tools["decode"]),str(wave),str(decoded)],cwd=directory,env=env,timeout_s=command_timeout_s)
             if code or not decoded.is_file(): raise RuntimeError("decode_failed")
             dec_info=_assert_same_frames(ref,decoded,ref_info);row["decoded_frame_identity"]=[{"cell_frame":i,"source_frame":x["source_frame"],"reference_sha256":x["reference_sha256"],"decoded_sha256":d} for (i,_,d),x in zip(iter_y4m(decoded,dec_info),ids)]
             if len(row["decoded_frame_identity"])!=len(ids): raise ValueError("decoded_identity_or_geometry_mismatch")

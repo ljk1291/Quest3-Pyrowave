@@ -35,7 +35,7 @@ class FrameBankTests(unittest.TestCase):
             source = tiny_source(Path(temp)); plan = fb.build_plan(source, 24.2, projection_evidence="test-projection", display_eye=(4,4), geometries=((4,4),(2,2)))
             self.assertEqual(fb.inspect_y4m(source).frames,2); self.assertEqual(len(plan["cells"]),24)
             self.assertEqual([x["source_frame"] for x in plan["source"]["frame_identity"]],[0,1]); self.assertIs(fb.validate_plan(plan),plan)
-            self.assertTrue(all(x["encoded_chroma"] == "420" for x in plan["cells"]))
+            self.assertTrue(all(x["encoded_chroma"] == "444" for x in plan["cells"]))
 
     def test_cap_math_and_tampering_fail(self):
         self.assertEqual(fb.cap_bytes(500,90),694444); self.assertAlmostEqual(fb.bpp(694444,3072,3232),694444*8/(2*3072*3232))
@@ -67,7 +67,8 @@ class FrameBankTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,"presentation input"):fb.build_plan(src,24,projection_evidence="test")
             p=fb.build_plan(src,24,projection_evidence="test",display_eye=(4,4),geometries=((4,4),));p["source"]["frame_identity"][1]["source_frame"]=7
             with self.assertRaisesRegex(ValueError,"ordered"):fb.validate_plan(p)
-            with self.assertRaisesRegex(ValueError,"90 Hz"):fb.build_plan(tiny_source(Path(t),fps=72),24,projection_evidence="test",display_eye=(4,4))
+            self.assertEqual(fb.build_plan(tiny_source(Path(t),fps=72),24,projection_evidence="test",display_eye=(4,4))["source"]["header_fps"],[72,1])
+            with self.assertRaisesRegex(ValueError,"F72:1 or F90:1"):fb.build_plan(tiny_source(Path(t),fps=60),24,projection_evidence="test",display_eye=(4,4))
             with self.assertRaisesRegex(ValueError,"height_factor"):fb.build_plan(src,24,projection_evidence="test",display_eye=(4,4),hvs_height_factor=1.05)
 
     def test_lossless_psnr_infinity_is_valid(self):
@@ -105,7 +106,7 @@ class FrameBankTests(unittest.TestCase):
         with self.assertRaisesRegex(FileNotFoundError,"psnr_hvs_m_h"):fb.required_tools({"encode":sys.executable,"decode":sys.executable,"ffmpeg":sys.executable})
         with self.assertRaisesRegex(ValueError,"results/local"):fb._private_path(Path(tempfile.gettempdir())/"raw")
 
-    def test_fake_end_to_end_streams_c420_and_uses_explicit_cli(self):
+    def test_fake_end_to_end_preserves_c444_and_uses_pinned_cli(self):
         # No codec is launched: fake guard child calls copy files so the test proves
         # frame ordering, geometry and command construction without a GPU.
         with self.tmp() as t:
@@ -116,8 +117,8 @@ class FrameBankTests(unittest.TestCase):
             def fake_status(self): return lease()
             def fake_child(self,argv,**kwargs):
                 calls.append(argv)
-                if "--rate" in argv: shutil.copyfile(argv[argv.index("--input")+1],argv[argv.index("--output")+1])
-                elif "--input" in argv: shutil.copyfile(argv[argv.index("--input")+1],argv[argv.index("--output")+1])
+                if len(argv) == 4: shutil.copyfile(argv[1],argv[2])
+                elif len(argv) == 3: shutil.copyfile(argv[1],argv[2])
                 return 0,"",""
             def fake_score(*args,**kwargs): return {"psnr_y":math.inf,"psnr_cb":math.inf,"psnr_cr":math.inf,"ssim":1.0,"ssim_all":1.0,"vmaf":100.0,"psnr_hvs_m_h":math.inf}
             tools={"encode":sys.executable,"decode":sys.executable,"ffmpeg":sys.executable,"psnr_hvs_m_h":sys.executable}
@@ -125,7 +126,8 @@ class FrameBankTests(unittest.TestCase):
                 with mock.patch.object(fb.WindowGuard,"status",fake_status),mock.patch.object(fb.WindowGuard,"run",fake_child):
                     result=fb.run_plan(plan_path,src,out,tools,t/"window",score_fn=fake_score)
                 self.assertTrue(result["complete"]);self.assertEqual(result["cells"][0]["identity_count"],2)
-                self.assertIn("--rate",calls[0]);self.assertIn("--output",calls[0]);self.assertEqual(fb.sanitized_report(result)["cells"][0]["codec_only"]["psnr_y"],math.inf)
+                self.assertEqual(calls[0][1:], [str(out/"cell-00-haar-300-4x4"/"reference-c444.y4m"),str(out/"cell-00-haar-300-4x4"/"encoded.wave"),str(fb.cap_bytes(300,90))])
+                self.assertEqual(calls[1][1:], [str(out/"cell-00-haar-300-4x4"/"encoded.wave"),str(out/"cell-00-haar-300-4x4"/"decoded-c444.y4m")]);self.assertEqual(fb.sanitized_report(result)["cells"][0]["codec_only"]["psnr_y"],math.inf)
             finally: shutil.rmtree(out,ignore_errors=True)
 
     def test_sanitized_report_omits_private_identity(self):
