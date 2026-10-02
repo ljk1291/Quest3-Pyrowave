@@ -750,7 +750,9 @@ def register_owned_pc_job(state_path, pid, path, started_epoch_s, arm_path=ARM, 
 
 @locked_state_mutation
 def unregister_owned_pc_job(state_path, pid, host=None):
-    state_path=Path(state_path); state=json_read(state_path); jobs=state.get('owned_pc_jobs',[])
+    state_path=Path(state_path); state=json_read(state_path)
+    if state.get('restoration',{}).get('status') != 'pending': return None
+    jobs=state.get('owned_pc_jobs',[])
     record=next((row for row in jobs if row['pid']==pid),None)
     if not record: raise Refusal('PC job not registered')
     host=host or Host(state.get('adb','adb'))
