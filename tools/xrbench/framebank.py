@@ -65,10 +65,12 @@ def _parse_header(line:bytes,path:Path)->Y4MInfo:
     except ValueError as exc: raise ValueError(f"{path}: invalid Y4M geometry/rate") from exc
     if width<=0 or height<=0 or width%2 or height%2 or fn<=0 or fd<=0: raise ValueError(f"{path}: invalid Y4M geometry/rate")
     chroma=_chroma(token("C","420jpeg"))
-    if "XCOLORRANGE=FULL" not in text: raise ValueError(f"{path}: WO-1 requires XCOLORRANGE=FULL")
-    return Y4MInfo(width,height,fn,fd,chroma,"FULL",_frame_bytes(width,height,chroma),0)
+    range_match=re.search(r"\bXCOLORRANGE=(FULL|LIMITED)\b",text)
+    if not range_match: raise ValueError(f"{path}: missing XCOLORRANGE")
+    color_range=range_match.group(1)
+    return Y4MInfo(width,height,fn,fd,chroma,color_range,_frame_bytes(width,height,chroma),0)
 
-def inspect_y4m(path:Path, *, require_c444:bool=False)->Y4MInfo:
+def inspect_y4m(path:Path)->Y4MInfo:
     path=Path(path)
     with path.open("rb") as f:
         base=_parse_header(f.readline(),path); frames=0
@@ -77,7 +79,6 @@ def inspect_y4m(path:Path, *, require_c444:bool=False)->Y4MInfo:
             if len(f.read(base.frame_bytes))!=base.frame_bytes: raise ValueError(f"{path}: truncated frame {frames}")
             frames+=1
     if not frames: raise ValueError(f"{path}: no frames")
-    if require_c444 and base.chroma!="444": raise ValueError(f"{path}: WO-1 requires lossless C444 source input, got C{base.chroma}")
     return Y4MInfo(**{**asdict(base),"frames":frames})
 
 def iter_y4m(path:Path,info:Y4MInfo|None=None)->Iterator[tuple[int,list[np.ndarray],str]]:
@@ -94,7 +95,7 @@ def iter_y4m(path:Path,info:Y4MInfo|None=None)->Iterator[tuple[int,list[np.ndarr
             yield index,planes,hashlib.sha256(raw).hexdigest()
 
 def _header(info:Y4MInfo)->bytes:
-    return f"YUV4MPEG2 W{info.width} H{info.height} F{info.fps_num}:{info.fps_den} Ip A1:1 C{info.chroma} XCOLORRANGE=FULL\n".encode("ascii")
+    return f"YUV4MPEG2 W{info.width} H{info.height} F{info.fps_num}:{info.fps_den} Ip A1:1 C{info.chroma} XCOLORRANGE={info.color_range}\n".encode("ascii")
 
 def write_y4m(path:Path,info:Y4MInfo,frames:Sequence[Sequence[np.ndarray]])->list[str]:
     path=Path(path); path.parent.mkdir(parents=True,exist_ok=True); hashes=[]
@@ -176,13 +177,13 @@ def crop_y4m(planes, info:Y4MInfo, crop):
     return result
 
 def frame_records(source):
-    info=inspect_y4m(source,require_c444=True); return [{"source_frame":i,"source_sha256":d} for i,_,d in iter_y4m(source,info)]
+    info=inspect_y4m(source); return [{"source_frame":i,"source_sha256":d} for i,_,d in iter_y4m(source,info)]
 
 def build_plan(source:Path,projection_px_per_deg:float,*,projection_evidence:str,hvs_height_factor:float=1.0,fps:int=FPS,wavelets=WAVELETS,rates_mbps=RATES_MBPS,geometries=GEOMETRIES,display_eye=DISPLAY_EYE,crops=DEFAULT_CROPS)->dict:
     if not isinstance(projection_px_per_deg,(int,float)) or not math.isfinite(projection_px_per_deg) or projection_px_per_deg<=0: raise ValueError("projection_px_per_deg must be finite and positive")
     if not isinstance(projection_evidence,str) or not projection_evidence.strip(): raise ValueError("projection_evidence must name logged projection measurement")
     if not isinstance(hvs_height_factor,(int,float)) or not math.isfinite(hvs_height_factor) or not any(abs(hvs_height_factor-(1+i/8))<1e-6 for i in range(16)): raise ValueError("hvs_height_factor must be one upstream-supported factor")
-    info=inspect_y4m(source,require_c444=True)
+    info=inspect_y4m(source)
     if (info.fps_num,info.fps_den) not in ((72,1),(90,1)): raise ValueError("source dump header must be F72:1 or F90:1")
     if (info.width//2,info.height)!=tuple(display_eye): raise ValueError("source dump must be logged presentation input")
     cells=[]
@@ -190,19 +191,19 @@ def build_plan(source:Path,projection_px_per_deg:float,*,projection_evidence:str
         if wv not in WAVELETS: raise ValueError(f"unsupported wavelet {wv}")
         for rate in rates_mbps:
             for ew,eh in geometries:
-                cap=cap_bytes(int(rate),fps); cells.append({"wavelet":wv,"rate_mbps":int(rate),"fps":fps,"eye_width":int(ew),"eye_height":int(eh),"stereo_width":int(ew)*2,"encoded_chroma":"444","cap_bytes":cap,"bits_per_pixel":bpp(cap,int(ew),int(eh))})
-    return {"schema":SCHEMA,"kind":"pyrowave_frame_bank","source":{"sha256":sha256_file(source),"geometry":[info.width,info.height],"frames":info.frames,"header_fps":[info.fps_num,info.fps_den],"target_fps":fps,"chroma":"444","color_range":"FULL","frame_identity":frame_records(source)},"presentation_eye":list(display_eye),"projection_px_per_deg":float(projection_px_per_deg),"projection_evidence":projection_evidence.strip(),"hvs_height_factor":float(hvs_height_factor),"resize":{"scope":"per_eye","filter":"lanczos4","seam_crossing":False},"crops":validate_crops(crops),"cells":cells,"required_metrics":["psnr_y","psnr_cb","psnr_cr","ssim","vmaf","psnr_hvs_m_h"]}
+                cap=cap_bytes(int(rate),fps); cells.append({"wavelet":wv,"rate_mbps":int(rate),"fps":fps,"eye_width":int(ew),"eye_height":int(eh),"stereo_width":int(ew)*2,"encoded_chroma":info.chroma,"cap_bytes":cap,"bits_per_pixel":bpp(cap,int(ew),int(eh))})
+    return {"schema":SCHEMA,"kind":"pyrowave_frame_bank","source":{"sha256":sha256_file(source),"geometry":[info.width,info.height],"frames":info.frames,"header_fps":[info.fps_num,info.fps_den],"target_fps":fps,"chroma":info.chroma,"color_range":info.color_range,"frame_identity":frame_records(source)},"presentation_eye":list(display_eye),"projection_px_per_deg":float(projection_px_per_deg),"projection_evidence":projection_evidence.strip(),"hvs_height_factor":float(hvs_height_factor),"resize":{"scope":"per_eye","filter":"lanczos4","seam_crossing":False},"crops":validate_crops(crops),"cells":cells,"required_metrics":["psnr_y","psnr_cb","psnr_cr","ssim","vmaf","psnr_hvs_m_h"]}
 
 def validate_plan(plan):
     if not isinstance(plan,dict) or plan.get("schema")!=SCHEMA or plan.get("kind")!="pyrowave_frame_bank": raise ValueError("not a frame-bank schema-2 manifest")
     src=plan.get("source",{}); ids=src.get("frame_identity")
-    if src.get("chroma")!="444" or src.get("color_range")!="FULL": raise ValueError("only full-range C444 source dumps are valid")
+    if src.get("chroma") not in ("420","444") or src.get("color_range") not in ("FULL","LIMITED"): raise ValueError("source format/range is unsupported")
     if not isinstance(ids,list) or len(ids)!=src.get("frames") or [x.get("source_frame") for x in ids]!=list(range(len(ids))): raise ValueError("source frame identities must be ordered and contiguous")
     if not isinstance(src.get("sha256"),str) or len(src["sha256"])!=64: raise ValueError("source hash is missing")
     validate_crops(plan.get("crops",[]))
     if not plan.get("cells"): raise ValueError("frame bank contains no cells")
     for c in plan["cells"]:
-        if c.get("encoded_chroma")!="444": raise ValueError("WO-1 pinned offline encoder input/output is C444")
+        if c.get("encoded_chroma") != src.get("chroma"): raise ValueError("cell chroma must preserve the native dump format")
         if c.get("cap_bytes")!=cap_bytes(c.get("rate_mbps"),c.get("fps")): raise ValueError("cell cap math does not match its rate and frame rate")
         if c.get("stereo_width")!=c.get("eye_width",0)*2: raise ValueError("cell stereo geometry is not two separate eyes")
     return plan
@@ -289,22 +290,23 @@ def _private_path(path:Path):
     if not candidate.is_relative_to(root): raise ValueError("raw frame-bank evidence must be under this repository's results/local")
     return candidate
 def _stream_reference(source,source_info,cell,path):
-    info=Y4MInfo(cell["stereo_width"],cell["eye_height"],cell["fps"],1,"444","FULL",_frame_bytes(cell["stereo_width"],cell["eye_height"],"444"),source_info.frames); ids=[]
+    info=Y4MInfo(cell["stereo_width"],cell["eye_height"],cell["fps"],1,source_info.chroma,source_info.color_range,_frame_bytes(cell["stereo_width"],cell["eye_height"],source_info.chroma),source_info.frames); ids=[]
     with _open_writer(path,info) as out:
         for index,planes,digest in iter_y4m(source,source_info):
-            ids.append({"source_frame":index,"source_sha256":digest,"reference_sha256":_write_frame(out,info,resize_per_eye(planes,cell["eye_width"],cell["eye_height"]))})
+            ids.append({"source_frame":index,"source_sha256":digest,"reference_sha256":_write_frame(out,info,_resize_matching(planes,source_info,cell["eye_width"],cell["eye_height"]))})
     return info,ids
 def _write_display(source,info,out_path,display_eye):
-    di=Y4MInfo(display_eye[0]*2,display_eye[1],info.fps_num,info.fps_den,info.chroma,"FULL",_frame_bytes(display_eye[0]*2,display_eye[1],info.chroma),info.frames)
+    di=Y4MInfo(display_eye[0]*2,display_eye[1],info.fps_num,info.fps_den,info.chroma,info.color_range,_frame_bytes(display_eye[0]*2,display_eye[1],info.chroma),info.frames)
     with _open_writer(out_path,di) as out:
         for _,p,_ in iter_y4m(source,info): _write_frame(out,di,_resize_matching(p,info,*display_eye))
     return di
 def _grid_png(path,source,decoded):
-    tiles=[]
+    tiles=[]; y_shape=source[0].shape
     for ref,got in zip(source,decoded):
         # Grids are qualitative. Upsampling C420 chroma here is solely to make a
         # viewable side-by-side PNG; all numeric scores use the original Y4M.
-        if got.shape != ref.shape: got = _resize(got,ref.shape[1],ref.shape[0])
+        if ref.shape != y_shape: ref = _resize(ref,y_shape[1],y_shape[0])
+        if got.shape != y_shape: got = _resize(got,y_shape[1],y_shape[0])
         tiles += [np.repeat(ref[...,None],3,axis=2),np.repeat(got[...,None],3,axis=2)]
     path.parent.mkdir(parents=True,exist_ok=True);Image.fromarray(np.concatenate(tiles,axis=1)).save(path)
 
@@ -317,11 +319,11 @@ def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,
     raw_plan=Path(plan_path).read_bytes();plan=validate_plan(json.loads(raw_plan)); source=Path(source); private_out=_private_path(private_out); guard=WindowGuard(window,arm,status_command)
     required_tools(tools); guard.status(); initial={n:sha256_file(_tool_path(v)) for n,v in tools.items()};
     if sha256_file(source)!=plan["source"]["sha256"]: raise ValueError("source dump hash differs from frozen plan")
-    source_info=inspect_y4m(source,require_c444=True)
+    source_info=inspect_y4m(source)
     if source_info.frames!=plan["source"]["frames"]: raise ValueError("source dump frame count differs from frozen plan")
     private_out.mkdir(parents=True,exist_ok=True); result={"schema":SCHEMA,"kind":"pyrowave_frame_bank_result","frozen_plan_sha256":hashlib.sha256(raw_plan).hexdigest(),"source_sha256_start":sha256_file(source),"source_sha256_end":None,"tool_provenance_start":initial,"tool_provenance_end":None,"projection_px_per_deg":plan["projection_px_per_deg"],"projection_evidence":plan["projection_evidence"],"cells":[],"complete":False,"failure_reasons":[]}
     for index,cell in enumerate(plan["cells"]):
-        directory=private_out/f"cell-{index:02d}-{cell['wavelet']}-{cell['rate_mbps']}-{cell['eye_width']}x{cell['eye_height']}";directory.mkdir(parents=True,exist_ok=True); ref=directory/"reference-c444.y4m";wave=directory/"encoded.wave";decoded=directory/"decoded-c444.y4m"; row=dict(cell)
+        directory=private_out/f"cell-{index:02d}-{cell['wavelet']}-{cell['rate_mbps']}-{cell['eye_width']}x{cell['eye_height']}";directory.mkdir(parents=True,exist_ok=True); ref=directory/f"reference-c{cell['encoded_chroma']}.y4m";wave=directory/"encoded.wave";decoded=directory/f"decoded-c{cell['encoded_chroma']}.y4m"; row=dict(cell)
         try:
             ref_info,ids=_stream_reference(source,source_info,cell,ref); row["identity_count"]=len(ids)
             if [x["source_sha256"] for x in ids] != [x["source_sha256"] for x in plan["source"]["frame_identity"]]: raise ValueError("source_frame_identity_drift")
@@ -344,9 +346,9 @@ def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,
             disp_info=inspect_y4m(display_ref)
             for crop in plan["crops"]:
                 rp,gp=directory/f"crop-{crop['name']}-reference.y4m",directory/f"crop-{crop['name']}-decoded.y4m"; first=None
-                with _open_writer(rp,Y4MInfo(1,1,disp_info.fps_num,disp_info.fps_den,disp_info.chroma,"FULL",0,disp_info.frames)) as rf: pass
+                with _open_writer(rp,Y4MInfo(1,1,disp_info.fps_num,disp_info.fps_den,disp_info.chroma,disp_info.color_range,0,disp_info.frames)) as rf: pass
                 # Crops differ in size; derive from first stream frame before opening final writers.
-                riter=iter_y4m(display_ref,disp_info); giter=iter_y4m(display_dec,inspect_y4m(display_dec)); _,rp0,_=next(riter); _,gp0,_=next(giter); riter.close(); giter.close(); c0=crop_y4m(rp0,disp_info,crop); ci=Y4MInfo(c0[0].shape[1],c0[0].shape[0],disp_info.fps_num,disp_info.fps_den,disp_info.chroma,"FULL",_frame_bytes(c0[0].shape[1],c0[0].shape[0],disp_info.chroma),disp_info.frames)
+                riter=iter_y4m(display_ref,disp_info); giter=iter_y4m(display_dec,inspect_y4m(display_dec)); _,rp0,_=next(riter); _,gp0,_=next(giter); riter.close(); giter.close(); c0=crop_y4m(rp0,disp_info,crop); ci=Y4MInfo(c0[0].shape[1],c0[0].shape[0],disp_info.fps_num,disp_info.fps_den,disp_info.chroma,disp_info.color_range,_frame_bytes(c0[0].shape[1],c0[0].shape[0],disp_info.chroma),disp_info.frames)
                 with _open_writer(rp,ci) as rf,_open_writer(gp,ci) as gf:
                     # Reopen lockstep streams: bounded memory regardless of corpus length.
                     for (_,rplanes,_),(_,gplanes,_) in zip(iter_y4m(display_ref,disp_info),iter_y4m(display_dec,inspect_y4m(display_dec))):
