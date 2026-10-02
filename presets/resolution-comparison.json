@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "description": "Candidate geometry-only profiles for owner-supervised and armed chart A/B/A work. The profile command changes only the two geometry fields; capture preflight must independently verify codec, 90 Hz, 500 Mbps, Haar, 4:2:0, transport, foveation, and experiment properties. No profile is a performance or quality claim.",
+  "profiles": {
+    "godlike-3072": {
+      "render_eye": [3072, 3216],
+      "encode_eye": [3072, 3232]
+    },
+    "quality-2560": {
+      "render_eye": [3072, 3216],
+      "encode_eye": [2560, 2688]
+    },
+    "quality-2080": {
+      "render_eye": [3072, 3216],
+      "encode_eye": [2080, 2208]
+    }
+  },
+  "comparison_target": {
+    "hz": 90,
+    "mbps": 500,
+    "codec": "PyroWave",
+    "wavelet": "Haar",
+    "decode_path": "Compute",
+    "chroma": "420",
+    "transport": "Tcp",
+    "foveated_encoding": false,
+    "recommended_ahb_allocation": true,
+    "sustained_performance_verified": false,
+    "visual_improvement_verified": false
+  }
+}

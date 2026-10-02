@@ -8,6 +8,7 @@ import os
 import shlex
 from pathlib import Path
 from .bench import supported
+from .resolution import ENCODE_FIELD, RENDER_FIELD, aligned_eye, assignments, profiles, validate_eye
 
 API='http://127.0.0.1:8082/api/dashboard-request'
 EVENTS='ws://127.0.0.1:8082/api/events'
@@ -71,6 +72,75 @@ def session():
 def set_values(values):
     request({'SetValues':[{'path':[{'Name':s} for s in path.split('.')],'value':value}
         for path,value in values.items()]})
+
+
+def _session_video(session_document):
+    try:
+        return session_document['session_settings']['video']
+    except (KeyError, TypeError) as exc:
+        raise RuntimeError('ALVR session did not contain video settings') from exc
+
+
+def resolution(render_eye=None, encode_eye=None, profile=None):
+    """Apply geometry only and verify exact session readback.
+
+    The saved ``previous_resolution_settings`` object is intentionally the raw
+    ALVR value rather than a reconstructed size, so a Scale or optional-height
+    setting can be restored without guessing.
+    """
+    if profile is not None:
+        if render_eye is not None or encode_eye is not None:
+            raise ValueError('Use a profile or explicit geometry, not both')
+        selected = profiles().get(profile)
+        if selected is None:
+            raise ValueError(f'Unknown resolution profile: {profile}')
+        render_eye, encode_eye = selected['render_eye'], selected['encode_eye']
+    values = assignments(render_eye, encode_eye)
+    before = session()
+    previous = {field: _session_video(before).get(field) for field in (RENDER_FIELD, ENCODE_FIELD)}
+    set_values(values)
+    after = session()
+    video = _session_video(after)
+    expected = {}
+    for field, size in ((RENDER_FIELD, render_eye), (ENCODE_FIELD, encode_eye)):
+        if size is None:
+            continue
+        width, height = validate_eye(size)
+        expected[field] = _absolute_resolution(width, height)
+        if video.get(field) != expected[field]:
+            raise RuntimeError(f'Geometry setting rejected: {field}')
+    return {
+        'profile': profile,
+        'settings_verified': True,
+        'previous_resolution_settings': previous,
+        'applied_resolution_settings': expected,
+        'render_eye_requested': validate_eye(render_eye) if render_eye is not None else None,
+        'encode_eye_requested': validate_eye(encode_eye) if encode_eye is not None else None,
+        'render_eye_aligned': aligned_eye(render_eye),
+        'encode_eye_aligned': aligned_eye(encode_eye),
+        'steamvr_restart_required': True,
+        'sustained_performance_verified': False,
+    }
+
+
+def restore_resolution(snapshot):
+    """Restore raw geometry settings from a prior :func:`resolution` result."""
+    previous = snapshot.get('previous_resolution_settings') if isinstance(snapshot, dict) else None
+    if not isinstance(previous, dict) or set(previous) != {RENDER_FIELD, ENCODE_FIELD}:
+        raise ValueError('Restore file lacks an exact previous_resolution_settings snapshot')
+    if any(value is None for value in previous.values()):
+        raise ValueError('Refusing to restore an absent resolution setting')
+    before = session()
+    _session_video(before)  # Validate before writing.
+    values = {f'session_settings.video.{field}': value for field, value in previous.items()}
+    set_values(values)
+    after = session()
+    video = _session_video(after)
+    rejected = [field for field, value in previous.items() if video.get(field) != value]
+    if rejected:
+        raise RuntimeError('Geometry restoration rejected: ' + ', '.join(rejected))
+    return {'settings_restored': True, 'restored_resolution_settings': previous,
+            'steamvr_restart_required': True}
 
 def adb_property_snapshot(adb):
     """Read only the two display-scaling experiment properties; no defaults inferred."""
@@ -216,6 +286,12 @@ def main():
                    help='explicitly reset display-scaling experiment properties and print before/after readback')
     e.add_argument('--disable-experiments',action='store_true',
                    help='explicitly clear all known direct-copy, scheduling and worker experiment properties')
+    geometry=sub.add_parser('resolution', help='change or exactly restore geometry only; restart SteamVR after readback')
+    geometry.add_argument('--profile', choices=sorted(profiles()))
+    geometry.add_argument('--restore', type=Path,
+                                help='JSON output from an earlier resolution command')
+    geometry.add_argument('--render-eye', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'))
+    geometry.add_argument('--encode-eye', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'))
     c=sub.add_parser('apply');c.add_argument('--codec',choices=['PyroWave','H264','Hevc','AV1'],default='PyroWave')
     c.add_argument('--mbps',type=int,required=True);c.add_argument('--hz',type=int,required=True)
     c.add_argument('--decode-path',choices=['Auto','Compute','Fragment'],default='Compute');c.add_argument('--capabilities',required=True)
@@ -230,10 +306,23 @@ def main():
     if a.cmd=='experiment-properties':
         result=experiment_properties(a.adb,a.disable_display_scaling,a.disable_experiments)
         print(json.dumps(result));return 1 if result['errors'] else 0
+    if a.cmd=='resolution':
+        if a.restore:
+            if a.profile or a.render_eye is not None or a.encode_eye is not None:
+                parser.error('--restore cannot be combined with --profile, --render-eye or --encode-eye')
+            print(json.dumps(restore_resolution(json.loads(a.restore.read_text(encoding='utf-8')))))
+        else:
+            if a.profile and (a.render_eye is not None or a.encode_eye is not None):
+                parser.error('--profile cannot be combined with explicit geometry')
+            if not a.profile and a.render_eye is None and a.encode_eye is None:
+                parser.error('specify --profile, --render-eye, --encode-eye or --restore')
+            print(json.dumps(resolution(a.render_eye, a.encode_eye, a.profile)))
+        return
     if a.cmd=='apply':print(json.dumps(apply(a.codec,a.mbps,a.hz,a.decode_path,json.loads(Path(a.capabilities).read_text()),a.chroma,a.transport,a.wavelet,
         {'width':a.render_width,'height':a.render_height},{'width':a.encoded_width,'height':a.encoded_height})));return
     s=session();v=s['session_settings']['video'];clients=s.get('client_connections',{})
-    print(json.dumps({'video':{key:v.get(key) for key in ('preferred_codec','preferred_fps','bitrate','pyrowave','transcoding_view_resolution')},
+    print(json.dumps({'video':{key:v.get(key) for key in ('preferred_codec','preferred_fps','bitrate','pyrowave',
+        'emulated_headset_view_resolution','transcoding_view_resolution')},
                      'client_count':len(clients)}))
 
 if __name__=='__main__':main()
