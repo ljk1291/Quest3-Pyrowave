@@ -265,17 +265,21 @@ def parse_thermal(text):
     m=re.search(r'Thermal Status:\s*(\d+)',text)
     return int(m.group(1)) if m else None
 
-def snapshot(host, serial, directory):
+def snapshot(host, serial, directory, alvr_session_path=None):
     """Capture only private evidence before settings change. Any read failure rejects the window."""
     directory=Path(directory); before=directory/'before'; before.mkdir(parents=True,exist_ok=False)
     from . import preflight
     from .control import session as alvr_session
     inv,sources=preflight.inventory()
     try:
-        session_snapshot=alvr_session()
-        alvr_path=session_snapshot.get('drivers_backup',{}).get('alvr_path')
-        if not alvr_path: raise Refusal('ALVR session path unavailable')
-        sources['alvr_session']=Path(alvr_path)/'session.json'
+        if alvr_session_path:
+            cold=Path(alvr_session_path)
+            session_snapshot=json_read(cold); sources['alvr_session']=cold
+        else:
+            session_snapshot=alvr_session()
+            alvr_path=session_snapshot.get('drivers_backup',{}).get('alvr_path')
+            if not alvr_path: raise Refusal('ALVR session path unavailable')
+            sources['alvr_session']=Path(alvr_path)/'session.json'
     except Exception as exc: raise Refusal('matched ALVR session snapshot unavailable: '+str(exc)) from exc
     records=preflight.snapshot_files(sources,before/'configurations')
     if any(r.get('error') or not r.get('exists') for r in records): raise Refusal('incomplete PC/VD/ALVR settings snapshot')
@@ -303,11 +307,11 @@ def live_preconditions(arm, host):
     if host.competing_gpu(): failures.append('competing_gpu_workload')
     return failures,battery,thermal
 
-def check_preconditions(arm, host, directory, now=None):
+def check_preconditions(arm, host, directory, now=None, alvr_session_path=None):
     window=arm_window(arm,now); serial=arm['headset_serial']; failures,battery,thermal=live_preconditions(arm,host)
-    report={'schema':1,'checked_utc':utc_now().isoformat(),'arm_sha256':arm_digest(arm),'window':{'deadline_utc':window['deadline'].isoformat(),'remaining_s':window['remaining_s']},'serial':serial,'failures':failures,'battery':battery,'thermal_status':thermal,'gpu_sample':getattr(host,'last_gpu_sample',None),'passed':not failures}
+    report={'schema':1,'checked_utc':utc_now().isoformat(),'arm_sha256':arm_digest(arm),'window':{'deadline_utc':window['deadline'].isoformat(),'remaining_s':window['remaining_s']},'serial':serial,'failures':failures,'battery':battery,'thermal_status':thermal,'gpu_sample':getattr(host,'last_gpu_sample',None),'adb':host.adb,'passed':not failures}
     if not failures:
-        try: report['snapshot']=snapshot(host,serial,directory)
+        try: report['snapshot']=snapshot(host,serial,directory,alvr_session_path)
         except Exception as exc: report['failures'].append('snapshot_incomplete:'+str(exc)); report['passed']=False
     atomic_write(Path(directory)/'check.json',report); return report
 
@@ -726,7 +730,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__); sub=p.add_subparsers(dest='cmd',required=True)
     a=sub.add_parser('arm'); a.add_argument('--file',type=Path,required=True); a.add_argument('--owner-confirm',action='store_true')
     for name in ('check','start','status','stop','restore'):
-        x=sub.add_parser(name); x.add_argument('--arm',type=Path,default=ARM); x.add_argument('--window',type=Path); x.add_argument('--require-allow')
+        x=sub.add_parser(name); x.add_argument('--arm',type=Path,default=ARM); x.add_argument('--window',type=Path); x.add_argument('--require-allow'); x.add_argument('--adb',default='adb'); x.add_argument('--alvr-session',type=Path)
     claim=sub.add_parser('claim-runtime'); claim.add_argument('--window',type=Path,required=True); claim.add_argument('--role',choices=('dashboard','steamvr'),required=True); claim.add_argument('--pid',type=int,required=True); claim.add_argument('--path',required=True); claim.add_argument('--started-epoch-s',type=float,required=True)
     p.add_argument('--worker',type=Path,help=argparse.SUPPRESS); p.add_argument('--monitor',action='store_true',help=argparse.SUPPRESS); p.add_argument('--restorer',action='store_true',help=argparse.SUPPRESS)
     args=p.parse_args()
@@ -752,7 +756,7 @@ def main():
     if args.cmd in {'check','start'}:
         if not args.arm.is_file(): p.error('arm file missing')
         arm,window=load_arm(args.arm)
-    if args.cmd=='check': print(json.dumps(check_preconditions(arm,Host(),directory),indent=2)); return
+    if args.cmd=='check': print(json.dumps(check_preconditions(arm,Host(args.adb),directory,alvr_session_path=args.alvr_session),indent=2)); return
     if args.cmd=='start':
         check=json_read(Path(directory)/'check.json') if (Path(directory)/'check.json').is_file() else None
         if not check or not check.get('passed') or not check.get('snapshot'): p.error('refusing start: successful check and snapshot required')
@@ -778,7 +782,7 @@ def main():
         for name in ('restorer.ready','monitor.ready','monitor.json'):
             (directory/name).unlink(missing_ok=True)
         nonce=uuid.uuid4().hex
-        state={'schema':1,'window_id':directory.name,'serial':arm['headset_serial'],'adb':'adb','deadline_epoch_s':window['deadline'].timestamp(),'snapshot':check['snapshot'],'restoration':{'status':'pending'},'guards_ready':False,'guard_pids':{},'guard_nonce':nonce,'arm_sha256':arm_digest(arm)}
+        state={'schema':1,'window_id':directory.name,'serial':arm['headset_serial'],'adb':check.get('adb',args.adb),'deadline_epoch_s':window['deadline'].timestamp(),'snapshot':check['snapshot'],'restoration':{'status':'pending'},'guards_ready':False,'guard_pids':{},'guard_nonce':nonce,'arm_sha256':arm_digest(arm)}
         atomic_write(state_path,state)
         r=spawn_worker(state_path,False)
         if not wait_for_guard(directory,'restorer',nonce,r.pid) or not pid_alive(r.pid):
