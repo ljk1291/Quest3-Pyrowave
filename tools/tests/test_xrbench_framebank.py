@@ -51,7 +51,7 @@ class FrameBankTests(unittest.TestCase):
             p=Path(t)/"420jpeg.y4m"; info=fb.Y4MInfo(8,4,90,1,"420","FULL",48,2);fb.write_y4m(p,info,[fb.to_420(planes)] * 2)
             p.write_bytes(p.read_bytes().replace(b"C420 XCOLOR",b"C420jpeg XCOLOR",1))
             native=fb.inspect_y4m(p);self.assertEqual((native.chroma,native.frame_bytes,native.frames,native.fps_num),("420",48,2,90))
-            plan=fb.build_plan(p,24,projection_evidence="test",display_eye=(4,4),geometries=((4,4),), fixture=True)
+            plan=fb.build_plan(p,24,projection_evidence="test",display_eye=(4,4),geometries=((4,4),),crops=({"name":"aligned","eye":"left","x":0,"y":0,"w":.5,"h":.5},), fixture=True)
             self.assertEqual(plan["source"]["chroma"],"420");self.assertEqual(plan["cells"][0]["encoded_chroma"],"420")
             cropped=fb.crop_y4m(fb.to_420(planes),fb.Y4MInfo(8,4,90,1,"420","FULL",48,1),{"name":"odd","eye":"left","x":.1,"y":.1,"w":.5,"h":.5})
             self.assertEqual(cropped[0].shape[0] % 2,0);self.assertEqual(cropped[0].shape[1] % 2,0)
@@ -72,7 +72,7 @@ class FrameBankTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,"ordered"):fb.validate_plan(p)
             self.assertEqual(fb.build_plan(tiny_source(Path(t),fps=72),24,projection_evidence="test",display_eye=(4,4), fixture=True)["source"]["header_fps"],[72,1])
             with self.assertRaisesRegex(ValueError,"F72:1 or F90:1"):fb.build_plan(tiny_source(Path(t)/"bad",fps=60),24,projection_evidence="test",display_eye=(4,4), fixture=True)
-            with self.assertRaisesRegex(ValueError,"90 source frames"):fb.build_plan(src,24,projection_evidence="test",crop_evidence="semantic-crops",display_eye=(4,4))
+            with self.assertRaisesRegex(ValueError,"90 source frames"):fb.build_plan(src,24,projection_evidence="test",crop_evidence="semantic-crops",crops=({"name":"ui","eye":"left","x":0,"y":0,"w":.5,"h":.5},),display_eye=(4,4))
 
     def test_lossless_psnr_infinity_is_valid(self):
         self.assertTrue(fb._valid_metric("psnr_y",math.inf));self.assertFalse(fb._valid_metric("vmaf",math.inf));self.assertFalse(fb._valid_metric("psnr_y",math.nan))
@@ -96,9 +96,30 @@ class FrameBankTests(unittest.TestCase):
 
     def test_production_plan_requires_90_frames_and_records_vertical_hvs_adapter(self):
         with self.tmp() as t:
-            t=Path(t); source=tiny_source(t,frames=90); plan=fb.build_plan(source,23.6,horizontal_pixels_per_degree=24.2,projection_evidence="projection-verified",crop_evidence="metro-crop-review",display_eye=(4,4),geometries=((4,4),),wavelets=("haar",),rates_mbps=(300,)); self.assertEqual(plan["projection"]["hvs_axis"],"vertical")
+            t=Path(t); source=tiny_source(t,frames=90); plan=fb.build_plan(source,23.6,horizontal_pixels_per_degree=24.2,projection_evidence="projection-verified",crop_evidence="metro-crop-review",crops=({"name":"rails","eye":"left","x":0,"y":0,"w":.5,"h":.5},),display_eye=(4,4),geometries=((4,4),),wavelets=("haar",),rates_mbps=(300,)); self.assertEqual(plan["projection"]["hvs_axis"],"vertical")
             self.assertAlmostEqual(plan["hvs_calibration"]["display"]["vertical_pixels_per_degree"],23.6)
             self.assertIs(fb.validate_plan(plan),plan)
+
+    def test_production_crops_are_explicit_safe_and_pixel_frozen(self):
+        with self.tmp() as t:
+            source=tiny_source(Path(t),frames=90,chroma="420")
+            crops=[{"name":"rails","eye":"left","x":.11,"y":.11,"w":.51,"h":.51},{"name":"fog-ui","eye":"right","x":.25,"y":.25,"w":.5,"h":.5}]
+            with self.assertRaisesRegex(ValueError,"caller-selected"): fb.build_plan(source,23.6,projection_evidence="p",crop_evidence="c",display_eye=(4,4))
+            plan=fb.build_plan(source,23.6,projection_evidence="p",crop_evidence="c",crops=crops,display_eye=(4,4),geometries=((4,4),),wavelets=("haar",),rates_mbps=(300,))
+            self.assertEqual(plan["crops"][0]["resolved_pixels"],{"eye_x":0,"stereo_x":0,"y":0,"width":2,"height":2,"chroma_aligned":True})
+            self.assertEqual(plan["crops"][1]["resolved_pixels"]["stereo_x"],4)
+            self.assertIs(fb.validate_plan(plan),plan)
+            plan["crops"][0]["resolved_pixels"]["width"]+=2
+            with self.assertRaisesRegex(ValueError,"frozen crop pixels"): fb.validate_plan(plan)
+        with self.assertRaisesRegex(ValueError,"safe lowercase"): fb.validate_crops([{"name":"Foliage.png","eye":"left","x":0,"y":0,"w":.5,"h":.5}])
+
+    def test_crops_cli_json_and_file_input(self):
+        crops=[{"name":"ui","eye":"left","x":0,"y":0,"w":.5,"h":.5}]
+        self.assertEqual(fb.parse_crops_argument(json.dumps(crops)),crops)
+        with self.tmp() as t:
+            path=Path(t)/"crops.json";path.write_text(json.dumps(crops))
+            self.assertEqual(fb.parse_crops_argument("@"+str(path)),crops)
+        with self.assertRaisesRegex(ValueError,"JSON"): fb.parse_crops_argument("not-json")
 
     def test_guard_uses_status_allow_and_rejects_revocation(self):
         calls=[]

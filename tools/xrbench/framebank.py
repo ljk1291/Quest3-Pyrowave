@@ -136,10 +136,11 @@ def _resize_matching(planes,info:Y4MInfo,ew,eh):
     if info.chroma=="444": return resize_per_eye(planes,ew,eh)
     y=resize_per_eye([planes[0]]*3,ew,eh)[0]; ch=resize_per_eye([planes[1]]*3,ew//2,eh//2)[0]; cr=resize_per_eye([planes[2]]*3,ew//2,eh//2)[0]; return [y,ch,cr]
 
-def validate_crops(crops):
-    clean=[]; names=set()
+def validate_crops(crops, *, resolved=False):
+    clean=[]; names=set(); required={"name","eye","x","y","w","h"}
     for c in crops:
-        if not isinstance(c,dict) or set(c)!={"name","eye","x","y","w","h"}: raise ValueError("crop schema is exactly name, eye, x, y, w, h")
+        if not isinstance(c,dict) or set(c) != (required | ({"resolved_pixels"} if resolved else set())): raise ValueError("crop schema is exactly name, eye, x, y, w, h" + (", resolved_pixels" if resolved else ""))
+        if not isinstance(c["name"],str) or not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}",c["name"]): raise ValueError("crop name must be a safe lowercase filename label")
         if c["name"] in names or c["eye"] not in ("left","right"): raise ValueError("crop names must be unique and eye must be left or right")
         vals=[c[k] for k in ("x","y","w","h")]
         if not all(isinstance(x,(int,float)) and math.isfinite(x) for x in vals): raise ValueError("crop coordinates must be finite")
@@ -148,6 +149,19 @@ def validate_crops(crops):
         names.add(c["name"]);clean.append(dict(c))
     if not clean: raise ValueError("at least one fixed crop is required")
     return clean
+
+def resolve_crop_pixels(crop, eye_width:int, eye_height:int, chroma:str):
+    """Resolve one normalized eye crop once; C420 dimensions are inward aligned."""
+    validate_crops([crop]);
+    if not isinstance(eye_width,int) or not isinstance(eye_height,int) or eye_width <= 0 or eye_height <= 0: raise ValueError("crop eye geometry is invalid")
+    left=0 if crop["eye"]=="left" else eye_width
+    x=left+round(crop["x"]*eye_width); y=round(crop["y"]*eye_height)
+    width=max(1,round(crop["w"]*eye_width)); height=max(1,round(crop["h"]*eye_height))
+    if chroma=="420":
+        x-=x%2; y-=y%2; width-=width%2; height-=height%2
+        if width <= 0 or height <= 0: raise ValueError("C420 crop is smaller than one chroma sample")
+    if x < left or x+width > left+eye_width or y < 0 or y+height > eye_height: raise ValueError("rounded crop crosses stereo seam")
+    return {"eye_x":x-left,"stereo_x":x,"y":y,"width":width,"height":height,"chroma_aligned":chroma=="420"}
 
 def crop_eye(planes,crop):
     validate_crops([crop]); result=[]
@@ -160,16 +174,11 @@ def crop_eye(planes,crop):
 
 def crop_y4m(planes, info:Y4MInfo, crop):
     """Crop one eye using luma coordinates, then map exactly to C420 planes."""
-    validate_crops([crop]); y_h, y_w2 = planes[0].shape; y_w = y_w2 // 2
+    validate_crops([crop], resolved="resolved_pixels" in crop); y_h, y_w2 = planes[0].shape; y_w = y_w2 // 2
+    resolved_crop=resolve_crop_pixels({key:crop[key] for key in ("name","eye","x","y","w","h")},y_w,y_h,info.chroma)
+    if "resolved_pixels" in crop and crop["resolved_pixels"] != resolved_crop: raise ValueError("frozen crop pixels drifted")
+    x,top,width,height=(resolved_crop[key] for key in ("stereo_x","y","width","height"))
     left = 0 if crop["eye"] == "left" else y_w
-    x = left + round(crop["x"] * y_w); top = round(crop["y"] * y_h)
-    width = max(1, round(crop["w"] * y_w)); height = max(1, round(crop["h"] * y_h))
-    # C420 scoring needs chroma-aligned luma coordinates. Round inward, never
-    # across an eye boundary; the normalized crop remains fixed for every cell.
-    if info.chroma == "420":
-        x -= x % 2; top -= top % 2; width -= width % 2; height -= height % 2
-        if width <= 0 or height <= 0: raise ValueError("C420 crop is smaller than one chroma sample")
-    if x < left or x + width > left + y_w or top < 0 or top + height > y_h: raise ValueError("rounded crop crosses stereo seam")
     result=[]
     for index,p in enumerate(planes):
         factor=2 if info.chroma=="420" and index else 1
@@ -194,16 +203,19 @@ def _crop_height(crop, eye_height, chroma):
     height=max(1,round(crop["h"]*eye_height))
     return max(2,height-(height%2)) if chroma=="420" else height
 
-def build_plan(source:Path,vertical_pixels_per_degree:float,*,horizontal_pixels_per_degree:float|None=None,projection_evidence:str,crop_evidence:str|None=None,fixture:bool=False,fps:int=FPS,wavelets=WAVELETS,rates_mbps=RATES_MBPS,geometries=GEOMETRIES,display_eye=DISPLAY_EYE,crops=DEFAULT_CROPS)->dict:
+def build_plan(source:Path,vertical_pixels_per_degree:float,*,horizontal_pixels_per_degree:float|None=None,projection_evidence:str,crop_evidence:str|None=None,fixture:bool=False,fps:int=FPS,wavelets=WAVELETS,rates_mbps=RATES_MBPS,geometries=GEOMETRIES,display_eye=DISPLAY_EYE,crops=None)->dict:
     if not isinstance(vertical_pixels_per_degree,(int,float)) or not math.isfinite(vertical_pixels_per_degree) or vertical_pixels_per_degree<=0: raise ValueError("vertical_pixels_per_degree must be finite and positive")
     if horizontal_pixels_per_degree is not None and (not isinstance(horizontal_pixels_per_degree,(int,float)) or not math.isfinite(horizontal_pixels_per_degree) or horizontal_pixels_per_degree<=0): raise ValueError("horizontal_pixels_per_degree must be finite and positive")
     if not isinstance(projection_evidence,str) or not projection_evidence.strip(): raise ValueError("projection_evidence must name logged projection measurement")
     if not fixture and (not isinstance(crop_evidence,str) or not crop_evidence.strip()): raise ValueError("production plan requires semantic crop evidence")
+    if crops is None and not fixture: raise ValueError("production plan requires caller-selected crops")
+    if crops is None: crops=DEFAULT_CROPS
     info=inspect_y4m(source)
     if (info.fps_num,info.fps_den) not in ((72,1),(90,1)): raise ValueError("source dump header must be F72:1 or F90:1")
     if (info.width//2,info.height)!=tuple(display_eye): raise ValueError("source dump must be logged presentation input")
     if not fixture and info.frames != 90: raise ValueError("production frame bank requires exactly 90 source frames")
-    clean_crops=validate_crops(crops)
+    input_crops=validate_crops(crops)
+    clean_crops=[{**crop,"resolved_pixels":resolve_crop_pixels(crop,display_eye[0],display_eye[1],info.chroma)} for crop in input_crops]
     cells=[]
     for wv in wavelets:
         if wv not in WAVELETS: raise ValueError(f"unsupported wavelet {wv}")
@@ -212,7 +224,7 @@ def build_plan(source:Path,vertical_pixels_per_degree:float,*,horizontal_pixels_
                 cap=cap_bytes(int(rate),fps); cells.append({"wavelet":wv,"rate_mbps":int(rate),"fps":fps,"eye_width":int(ew),"eye_height":int(eh),"stereo_width":int(ew)*2,"encoded_chroma":info.chroma,"cap_bytes":cap,"bits_per_pixel":bpp(cap,int(ew),int(eh))})
     display_hvs=hvs_calibration_for_vertical_ppd(float(vertical_pixels_per_degree),int(display_eye[1]))
     codec_hvs=[hvs_calibration_for_vertical_ppd(float(vertical_pixels_per_degree)*(cell["eye_height"]/display_eye[1]),cell["eye_height"]) for cell in cells]
-    crop_hvs=[hvs_calibration_for_vertical_ppd(float(vertical_pixels_per_degree),_crop_height(crop,display_eye[1],info.chroma)) for crop in clean_crops]
+    crop_hvs=[hvs_calibration_for_vertical_ppd(float(vertical_pixels_per_degree),crop["resolved_pixels"]["height"]) for crop in clean_crops]
     hvs={"source_formula":"ppd=height*height_factor*pi/180","adapter":"pyrowave_psnr_hvs_ppd_scorer","display":display_hvs,"codec_cells":codec_hvs,"crops":crop_hvs}
     projection={"vertical_pixels_per_degree":float(vertical_pixels_per_degree),"horizontal_pixels_per_degree":None if horizontal_pixels_per_degree is None else float(horizontal_pixels_per_degree),"hvs_axis":"vertical"}
     return {"schema":SCHEMA,"kind":"pyrowave_frame_bank","fixture_only":bool(fixture),"source":{"sha256":sha256_file(source),"geometry":[info.width,info.height],"frames":info.frames,"header_fps":[info.fps_num,info.fps_den],"target_fps":fps,"chroma":info.chroma,"color_range":info.color_range,"frame_identity":frame_records(source)},"presentation_eye":list(display_eye),"projection":projection,"projection_evidence":projection_evidence.strip(),"crop_evidence":"fixture" if fixture else crop_evidence.strip(),"hvs_calibration":hvs,"resize":{"scope":"per_eye","filter":"lanczos3","seam_crossing":False},"crops":clean_crops,"cells":cells,"required_metrics":["psnr_y","psnr_cb","psnr_cr","ssim","vmaf","psnr_hvs_m_h"]}
@@ -223,10 +235,11 @@ def validate_plan(plan):
     if src.get("chroma") not in ("420","444") or src.get("color_range") not in ("FULL","LIMITED"): raise ValueError("source format/range is unsupported")
     if not isinstance(ids,list) or len(ids)!=src.get("frames") or [x.get("source_frame") for x in ids]!=list(range(len(ids))): raise ValueError("source frame identities must be ordered and contiguous")
     if not isinstance(src.get("sha256"),str) or len(src["sha256"])!=64: raise ValueError("source hash is missing")
-    clean_crops=validate_crops(plan.get("crops",[]))
+    clean_crops=validate_crops(plan.get("crops",[]),resolved=True)
     if plan.get("fixture_only") is not True:
         if src.get("frames") != 90: raise ValueError("production frame bank requires exactly 90 source frames")
         if not isinstance(plan.get("crop_evidence"),str) or not plan["crop_evidence"].strip(): raise ValueError("production plan requires semantic crop evidence")
+        if plan.get("crops") == list(DEFAULT_CROPS): raise ValueError("production plan requires caller-selected crops")
     if plan.get("resize") != {"scope":"per_eye","filter":"lanczos3","seam_crossing":False}: raise ValueError("resize provenance does not match implementation")
     if not isinstance(src.get("geometry"),list) or len(src["geometry"]) != 2 or not all(isinstance(v,int) and v > 0 for v in src["geometry"]): raise ValueError("source geometry is invalid")
     if src.get("target_fps") != FPS or src.get("header_fps") not in ([72,1],[90,1]): raise ValueError("source frame-rate provenance is invalid")
@@ -247,7 +260,12 @@ def validate_plan(plan):
         if c.get("cap_bytes")!=cap_bytes(c.get("rate_mbps"),c.get("fps")): raise ValueError("cell cap math does not match its rate and frame rate")
         if c.get("stereo_width")!=c.get("eye_width",0)*2: raise ValueError("cell stereo geometry is not two separate eyes")
     expected_codec=[hvs_calibration_for_vertical_ppd(vertical*(cell["eye_height"]/plan["presentation_eye"][1]),cell["eye_height"]) for cell in plan["cells"]]
-    expected_crops=[hvs_calibration_for_vertical_ppd(vertical,_crop_height(crop,plan["presentation_eye"][1],src["chroma"])) for crop in clean_crops]
+    expected_crops=[]
+    for crop in clean_crops:
+        source_crop={key:crop[key] for key in ("name","eye","x","y","w","h")}
+        expected_pixels=resolve_crop_pixels(source_crop,plan["presentation_eye"][0],plan["presentation_eye"][1],src["chroma"])
+        if crop.get("resolved_pixels") != expected_pixels: raise ValueError("frozen crop pixels drifted")
+        expected_crops.append(hvs_calibration_for_vertical_ppd(vertical,expected_pixels["height"]))
     if calibration.get("codec_cells") != expected_codec or calibration.get("crops") != expected_crops: raise ValueError("HVS calibration drifted")
     return plan
 
@@ -395,7 +413,7 @@ def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,
     if sha256_file(source)!=plan["source"]["sha256"]: raise ValueError("source dump hash differs from frozen plan")
     source_info=inspect_y4m(source)
     if source_info.frames!=plan["source"]["frames"]: raise ValueError("source dump frame count differs from frozen plan")
-    private_out.mkdir(parents=True,exist_ok=True); result={"schema":SCHEMA,"kind":"pyrowave_frame_bank_result","frozen_plan_sha256":hashlib.sha256(raw_plan).hexdigest(),"source_sha256_start":sha256_file(source),"source_sha256_end":None,"tool_provenance_start":initial,"tool_provenance_end":None,"projection":plan["projection"],"projection_evidence":plan["projection_evidence"],"cells":[],"complete":False,"failure_reasons":[]}
+    private_out.mkdir(parents=True,exist_ok=True); result={"schema":SCHEMA,"kind":"pyrowave_frame_bank_result","frozen_plan_sha256":hashlib.sha256(raw_plan).hexdigest(),"source_sha256_start":sha256_file(source),"source_sha256_end":None,"tool_provenance_start":initial,"tool_provenance_end":None,"projection":plan["projection"],"projection_evidence":plan["projection_evidence"],"crop_definitions":plan["crops"],"cells":[],"complete":False,"failure_reasons":[]}
     for index,cell in enumerate(plan["cells"]):
         directory=private_out/f"cell-{index:02d}-{cell['wavelet']}-{cell['rate_mbps']}-{cell['eye_width']}x{cell['eye_height']}";directory.mkdir(parents=True,exist_ok=True); ref=directory/f"reference-c{cell['encoded_chroma']}.y4m";wave=directory/"encoded.wave";decoded=directory/f"decoded-c{cell['encoded_chroma']}.y4m"; row=dict(cell)
         try:
@@ -444,11 +462,18 @@ def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,
 
 def sanitized_report(result):
     keep=("wavelet","rate_mbps","fps","eye_width","eye_height","encoded_chroma","cap_bytes","bits_per_pixel","actual_container_bytes","codec_only","displayed","crops","error")
-    return {"schema":SCHEMA,"kind":"pyrowave_frame_bank_sanitized","complete":result.get("complete") is True,"failure_reasons":list(result.get("failure_reasons",[])),"frozen_plan_sha256":result.get("frozen_plan_sha256"),"source_sha256":result.get("source_sha256_end"),"tool_provenance":result.get("tool_provenance_end"),"projection":result.get("projection"),"cells":[{k:r.get(k) for k in keep} for r in result.get("cells",[])],"optical_latency_ms":None,"display_fps":None}
+    return {"schema":SCHEMA,"kind":"pyrowave_frame_bank_sanitized","complete":result.get("complete") is True,"failure_reasons":list(result.get("failure_reasons",[])),"frozen_plan_sha256":result.get("frozen_plan_sha256"),"source_sha256":result.get("source_sha256_end"),"tool_provenance":result.get("tool_provenance_end"),"projection":result.get("projection"),"crop_definitions":result.get("crop_definitions"),"cells":[{k:r.get(k) for k in keep} for r in result.get("cells",[])],"optical_latency_ms":None,"display_fps":None}
+def parse_crops_argument(value:str):
+    try:
+        raw=Path(value[1:]).read_text(encoding="utf-8") if value.startswith("@") else value
+        parsed=json.loads(raw)
+    except (OSError, ValueError, json.JSONDecodeError) as exc: raise ValueError("--crops must be a JSON array or @JSON-file") from exc
+    return parsed
+
 def _main_plan(a):
-    p=build_plan(Path(a.source),a.vertical_pixels_per_degree,horizontal_pixels_per_degree=a.horizontal_pixels_per_degree,projection_evidence=a.projection_evidence,crop_evidence=a.crop_evidence);Path(a.out).write_text(json.dumps(p,indent=2),encoding="utf-8");print(f"wrote frozen plan with {len(p['cells'])} cells; no codec/scorer was run");return 0
+    p=build_plan(Path(a.source),a.vertical_pixels_per_degree,horizontal_pixels_per_degree=a.horizontal_pixels_per_degree,projection_evidence=a.projection_evidence,crop_evidence=a.crop_evidence,crops=parse_crops_argument(a.crops));Path(a.out).write_text(json.dumps(p,indent=2),encoding="utf-8");print(f"wrote frozen plan with {len(p['cells'])} cells; no codec/scorer was run");return 0
 def _main_run(a):
     tools={"encode":a.encode,"decode":a.decode,"ffmpeg":a.ffmpeg,"psnr_hvs_m_h":a.psnr_hvs_m_h};r=run_plan(Path(a.plan),Path(a.source),Path(a.private_out),tools,Path(a.window),arm=None if not a.arm else Path(a.arm),command_timeout_s=a.command_timeout_s,keep_artifacts=a.keep_artifacts);report=sanitized_report(r);Path(a.report).write_text(json.dumps(report,indent=2),encoding="utf-8");print(f"wrote sanitized report: complete={report['complete']}");return 0 if report["complete"] else 2
 def main(argv=None):
-    p=argparse.ArgumentParser(description=__doc__);s=p.add_subparsers(dest="command",required=True);a=s.add_parser("plan");a.add_argument("--source",required=True);a.add_argument("--vertical-pixels-per-degree",type=float,required=True);a.add_argument("--horizontal-pixels-per-degree",type=float);a.add_argument("--projection-evidence",required=True);a.add_argument("--crop-evidence",required=True);a.add_argument("--out",required=True);r=s.add_parser("run");r.add_argument("--plan",required=True);r.add_argument("--source",required=True);r.add_argument("--private-out",required=True);r.add_argument("--report",required=True);r.add_argument("--window",required=True);r.add_argument("--arm");r.add_argument("--encode",required=True);r.add_argument("--decode",required=True);r.add_argument("--ffmpeg",required=True);r.add_argument("--psnr-hvs-m-h",required=True);r.add_argument("--command-timeout-s",type=float,default=900);r.add_argument("--keep-artifacts",action="store_true");x=p.parse_args(argv);return _main_plan(x) if x.command=="plan" else _main_run(x)
+    p=argparse.ArgumentParser(description=__doc__);s=p.add_subparsers(dest="command",required=True);a=s.add_parser("plan");a.add_argument("--source",required=True);a.add_argument("--vertical-pixels-per-degree",type=float,required=True);a.add_argument("--horizontal-pixels-per-degree",type=float);a.add_argument("--projection-evidence",required=True);a.add_argument("--crop-evidence",required=True);a.add_argument("--crops",required=True,help="JSON crop array or @JSON-file; production never uses defaults");a.add_argument("--out",required=True);r=s.add_parser("run");r.add_argument("--plan",required=True);r.add_argument("--source",required=True);r.add_argument("--private-out",required=True);r.add_argument("--report",required=True);r.add_argument("--window",required=True);r.add_argument("--arm");r.add_argument("--encode",required=True);r.add_argument("--decode",required=True);r.add_argument("--ffmpeg",required=True);r.add_argument("--psnr-hvs-m-h",required=True);r.add_argument("--command-timeout-s",type=float,default=900);r.add_argument("--keep-artifacts",action="store_true");x=p.parse_args(argv);return _main_plan(x) if x.command=="plan" else _main_run(x)
 if __name__=="__main__": raise SystemExit(main())
