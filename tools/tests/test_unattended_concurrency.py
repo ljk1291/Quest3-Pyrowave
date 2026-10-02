@@ -26,11 +26,11 @@ def test_late_cleanup_preserves_final_state(tmp_path):
 
 
 def test_crashed_process_holder_releases_os_lock(tmp_path):
-    import multiprocessing, os
+    import subprocess, sys
     state=tmp_path/'state.json'; u.atomic_write(state,{})
-    def die(path):
-        with u.state_lock(path): os._exit(0)
-    child=multiprocessing.Process(target=die,args=(state,)); child.start(); child.join(2); assert child.exitcode==0
+    code="from tools.quest3.unattended import state_lock; import os,sys;\nwith state_lock(sys.argv[1]): os._exit(0)"
+    child=subprocess.run([sys.executable,'-c',code,str(state)],timeout=3)
+    assert child.returncode==0
     with u.state_lock(state,timeout_s=.5): pass
 
 def test_two_concurrent_writers_are_serialized(tmp_path):
@@ -47,5 +47,5 @@ def test_restore_exception_publishes_failure(monkeypatch,tmp_path):
         def adb_run(self,*a): raise RuntimeError('device gone')
         def vr_connected(self): return False
     monkeypatch.setattr(u,'managed_properties',lambda:())
-    with __import__('pytest').raises(Exception): u.restore(state,H())
-    assert u.json_read(state)['restoration']['status']=='restore_failed'
+    result=u.restore(state,H())
+    assert result['status']=='restore_failed' and u.json_read(state)['restoration']['status']=='restore_failed'
