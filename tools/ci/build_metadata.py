@@ -15,6 +15,11 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+CI_TOOLS = Path(__file__).resolve().parent
+if str(CI_TOOLS) not in sys.path:
+    sys.path.insert(0, str(CI_TOOLS))
+from source_lock import load as load_source_lock
+
 IDENTITY_KEYS = ("protocol_version", "client_package_id", "application_version", "server_version", "repository_commit",
                  "sources_lock_sha256", "dependency_revisions", "shader_hashes")
 SCHEMA_VERSION = 1
@@ -58,7 +63,8 @@ def shaders(root):
 def create(args):
     output = Path(args.output)
     lock = REPO / "sources.lock.json"
-    fork = json.loads((REPO / "fork.json").read_text(encoding="utf-8"))
+    fork = load_fork_identity()
+    lock_data = load_source_lock()
     artifacts = {}
     for path in sorted(output.iterdir()):
         if path.is_file() and path.name not in ("BUILD-METADATA.json", "SHA256SUMS.txt"):
@@ -72,7 +78,7 @@ def create(args):
         "protocol_version": fork["protocol_version"],
         "client_package_id": fork["client_package_id"],
         "sources_lock_sha256": source_lock_sha256(lock),
-        "dependency_revisions": json.loads(lock.read_text(encoding="utf-8")),
+        "dependency_revisions": lock_data,
         "shader_hashes": shaders(args.pyrowave),
         "native_library_sha256": native_files(args.required_native),
         "artifact_sha256": artifacts,
@@ -91,6 +97,17 @@ def create(args):
 
 def application_version(fork):
     return f"{fork['protocol_version']}+{git_commit()[:12]}"
+
+
+def load_fork_identity():
+    fork = json.loads((REPO / "fork.json").read_text(encoding="utf-8"))
+    protocol = fork.get("protocol_version")
+    package = fork.get("client_package_id")
+    if not isinstance(protocol, str) or not re.fullmatch(r"\d+\.\d+\.\d+-[A-Za-z0-9][A-Za-z0-9.-]*", protocol):
+        raise SystemExit("fork.json: protocol_version is invalid")
+    if not isinstance(package, str) or not re.fullmatch(r"[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+", package):
+        raise SystemExit("fork.json: client_package_id is invalid")
+    return fork
 
 
 def certificate(args):

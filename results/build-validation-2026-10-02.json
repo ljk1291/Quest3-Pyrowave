@@ -159,7 +159,7 @@
   },
   "hardware_acceptance": {
     "status": "short_rate_screen_completed_not_accepted",
-    "note": "Session 03 verified strict fresh selected-output counters but all 300/400/600/300 Mbps short screens failed the 90 Hz target. Session 04 profiled the decoder and captured unobstructed qualitative images on a newer matching build, without an optimization or acceptance claim. Metro, endurance, recovery, quantitative image quality, manual motion review, optical latency and display FPS remain unmeasured."
+    "note": "Session 03 bitrate screens failed 90 Hz. Session 04 profiled the decoder. Session 05 recommended-AHB off/on/off/on improved fresh selected outputs from 55-56/s to 82-83/s, with all diagnostic gates passing, but all 90 Hz rate screens still failed. Separate screenshot reviews are qualitative only. Metro, endurance, recovery, quantitative image quality, manual motion review, optical latency and display FPS remain unmeasured."
   },
   "decoder_profiling_pair": {
     "run_id": 37038811141,
@@ -238,6 +238,41 @@
     "hardware_status": "owner_authorized_afk_diagnostic_only",
     "session_04_evidence": "decoder-profile-2026-10-02.json",
     "godlike90_accepted": false,
-    "raw_source_lock_identity_limitation": "dependency_revisions is the raw sources.lock.json snapshot. Its redundant fork.protocol_version remains .1; build_metadata.py and stamp_alvr_version.py use fork.json for actual protocol .2. Preserve this historical record; remove duplicate identity on the next native build."
+    "raw_source_lock_identity_limitation": "dependency_revisions is the raw sources.lock.json snapshot. Its redundant fork.protocol_version remains .1; build_metadata.py and stamp_alvr_version.py use fork.json for actual protocol .2. Preserve this historical record; remove duplicate identity on the next native build.",
+    "session_05_evidence": [
+      "allocation-screen-2026-10-02.json",
+      "optimal-ahb-screen-2026-10-02.json"
+    ],
+    "session_05": {
+      "hardware_status": "owner_authorized_finite_afk_diagnostic_only",
+      "minimal_usage_fresh_outputs_per_s": [
+        56.080813138360625,
+        55.79876961883273,
+        56.000926333403164
+      ],
+      "recommended_ahb_off_on_off_on_fresh_outputs_per_s": [
+        55.99794233348547,
+        82.68997092203954,
+        55.2528963809511,
+        82.0165813125478
+      ],
+      "conversion_median_ms": [
+        4.9072395,
+        1.3055208,
+        5.093177,
+        1.3623437
+      ],
+      "decode_to_fence_median_ms": [
+        17.471382,
+        11.543231,
+        17.620106,
+        11.628439
+      ],
+      "all_diagnostic_evidence_gates_passed": true,
+      "all_90hz_rate_screens_passed": false,
+      "separate_qualitative_screenshot_pairs": 7,
+      "restoration_verified": true,
+      "note": "Recommended AHB allocation is a reversible, repeatable improvement but not a qualified 90 Hz profile. No exact decoded-buffer image-equivalence, Metro, endurance, recovery or optical acceptance."
+    }
   }
 }

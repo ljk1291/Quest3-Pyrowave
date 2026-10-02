@@ -4,6 +4,14 @@ This fork targets sustained **90 Hz at the owner's measured Virtual Desktop Godl
 
 Development starts from [JMS1717/Quest3-Pyrowave](https://github.com/JMS1717/Quest3-Pyrowave) at `f6eae38380ecf0cb706aaa9aabc0fd66ec29cd6a`. Dependencies remain pinned in [sources.lock.json](sources.lock.json). This fork is `ljk1291/Quest3-Pyrowave`, with Android package `io.github.ljk1291.quest3pyrowave` and its own version identity. See [implementation status](docs/IMPLEMENTATION-STATUS.md) for actual validation.
 
+Latest short diagnostic: driver-recommended Android output-buffer allocation
+raised fresh selected outputs from roughly **56/s to 82/s** at 3072×3232 per eye,
+90 Hz and 300 Mbps. Reverting and repeating reproduced the change. The low-rate
+check still fails, and exact image equivalence, Metro and endurance remain
+unqualified. See the [controlled results](results/optimal-ahb-screen-2026-10-02.json)
+and [optimization plan](docs/DECODER-OPTIMIZATION-PLAN.md); this is an experimental
+Haar/direct-copy profile, not a new default.
+
 ## Start here
 
 1. [Build and install a matching pair](docs/BUILD.md). Stable builds require a persistent private signing key; temporary development signatures are labelled.

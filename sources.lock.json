@@ -11,10 +11,5 @@
     "android_aar": "openxr_loader_for_android-1.0.34.aar",
     "sha256": "c8b50603ad3b81756c6bd203ab9c9d19341326e14f6cbae87ee894137ee5e256"
   },
-  "reproducibility": "Pinned inputs and build recipe; signed APKs and ZIP metadata are not claimed byte-identical.",
-  "fork": {
-    "upstream_reference_commit": "f6eae38380ecf0cb706aaa9aabc0fd66ec29cd6a",
-    "protocol_version": "20.13.0-ljk1291.1",
-    "client_package_id": "io.github.ljk1291.quest3pyrowave"
-  }
+  "reproducibility": "Pinned inputs and build recipe; signed APKs and ZIP metadata are not claimed byte-identical."
 }

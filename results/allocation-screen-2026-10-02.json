@@ -1,0 +1,1204 @@
+{
+  "schema_version": 1,
+  "kind": "sanitized_allocation_screen",
+  "series": "minimal",
+  "date": "2026-10-02",
+  "cells": [
+    {
+      "label": "allocation-off-a",
+      "factor_property": "debug.q3pw.fragment_min_usage",
+      "factor_value": 0,
+      "status": "measured",
+      "settings": {
+        "start": {
+          "codec": "PyroWave",
+          "bitrate_mode": "ConstantMbps",
+          "target_mbps": 300,
+          "requested_hz": 90.0,
+          "negotiated_hz": 90,
+          "decode_path": "Compute",
+          "wavelet": "Haar",
+          "chroma": "420",
+          "transport": "Tcp",
+          "stream_protocol": "Tcp",
+          "hdr_enabled": false,
+          "hdr_server_override": true,
+          "enforce_server_frame_pacing": true,
+          "foveated_encoding_enabled": false,
+          "clientside_foveation_enabled": false,
+          "render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          }
+        },
+        "end": {
+          "codec": "PyroWave",
+          "bitrate_mode": "ConstantMbps",
+          "target_mbps": 300,
+          "requested_hz": 90.0,
+          "negotiated_hz": 90,
+          "decode_path": "Compute",
+          "wavelet": "Haar",
+          "chroma": "420",
+          "transport": "Tcp",
+          "stream_protocol": "Tcp",
+          "hdr_enabled": false,
+          "hdr_server_override": true,
+          "enforce_server_frame_pacing": true,
+          "foveated_encoding_enabled": false,
+          "clientside_foveation_enabled": false,
+          "render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          }
+        },
+        "unchanged": true
+      },
+      "properties": {
+        "start": {
+          "debug.q3pw.direct_eye_copy": "1",
+          "debug.q3pw.async_eye_copy": "",
+          "debug.q3pw.copy_wait_us": "",
+          "debug.q3pw.raw_srgb_copy": "",
+          "debug.q3pw.image_cache": "",
+          "debug.q3pw.frame_wait_us": "",
+          "debug.q3pw.pre_wait_poll": "",
+          "debug.q3pw.repeat_render": "",
+          "debug.q3pw.decode_workers": "",
+          "debug.q3pw.decode_handoff": "",
+          "debug.q3pw.haar_fused": "0",
+          "debug.q3pw.dequant_batch": "0",
+          "debug.q3pw.convert_compute": "0",
+          "debug.q3pw.fragment_min_usage": "0",
+          "debug.q3pw.optimal_ahb_usage": "0",
+          "debug.q3pw.loop_probe": "0",
+          "debug.q3pw.runtime_display_time": "0",
+          "debug.q3pw.pass_profile": "0",
+          "debug.q3pw.hide_performance_overlay": "1",
+          "debug.xrwired.pyro_precision": "1",
+          "debug.xrwired.early_poll": "1",
+          "debug.xrwired.perf_level": "sustained_high",
+          "debug.oculus.forceDisplayScaling": "0",
+          "debug.oculus.refreshRate": "90"
+        },
+        "end": {
+          "debug.q3pw.direct_eye_copy": "1",
+          "debug.q3pw.async_eye_copy": "",
+          "debug.q3pw.copy_wait_us": "",
+          "debug.q3pw.raw_srgb_copy": "",
+          "debug.q3pw.image_cache": "",
+          "debug.q3pw.frame_wait_us": "",
+          "debug.q3pw.pre_wait_poll": "",
+          "debug.q3pw.repeat_render": "",
+          "debug.q3pw.decode_workers": "",
+          "debug.q3pw.decode_handoff": "",
+          "debug.q3pw.haar_fused": "0",
+          "debug.q3pw.dequant_batch": "0",
+          "debug.q3pw.convert_compute": "0",
+          "debug.q3pw.fragment_min_usage": "0",
+          "debug.q3pw.optimal_ahb_usage": "0",
+          "debug.q3pw.loop_probe": "0",
+          "debug.q3pw.runtime_display_time": "0",
+          "debug.q3pw.pass_profile": "0",
+          "debug.q3pw.hide_performance_overlay": "1",
+          "debug.xrwired.pyro_precision": "1",
+          "debug.xrwired.early_poll": "1",
+          "debug.xrwired.perf_level": "sustained_high",
+          "debug.oculus.forceDisplayScaling": "0",
+          "debug.oculus.refreshRate": "90"
+        },
+        "unchanged": true
+      },
+      "build": {
+        "verified": true,
+        "application_version": "20.13.0-ljk1291.2+f2e9df5704cc",
+        "server_version": "20.13.0-ljk1291.2+f2e9df5704cc",
+        "protocol_version": "20.13.0-ljk1291.2",
+        "repository_commit": "f2e9df5704cc679513848bf6ffb63ef1695479f9",
+        "client_package_id": "io.github.ljk1291.quest3pyrowave",
+        "shader_hashes": {
+          "shaders/constants.h": "3bc9555f8399bad2bd6960536125588fd7dbc7936a7147755fc497241f04e062",
+          "shaders/dwt.comp": "f58c3f95d68a90f4621fc1999bcf9a95e1a263b80d20355b0ac20002828a90b1",
+          "shaders/dwt_common.h": "591f529143fce7efad00c0f5a5e6d9be0a714fb2d5098ac5e89242c0041ada26",
+          "shaders/dwt_quant_scale.h": "4a5e60c22785075341afa29211275857a4f3922999e0f5799131c5f4acf2c4be",
+          "shaders/dwt_swizzle.h": "0283e54d268f25375866274dd3728384c75d9783cab12787d8914588b80f0f30",
+          "shaders/idwt.comp": "e3bb1b44e1e0cb0c2137c44dc50c42f0de4b625f8505f26e96b89ea210c2c3af",
+          "shaders/idwt_haar_fused.comp": "a85ffbeb0966e22855d8c76690a7283fb6a2a5967ae5028feac81663c99be629",
+          "shaders/slangmosh.hpp": "4f84897f9d7fbb07cbc5ccba6d98bc83b85f697ca170578ba959118c84032995",
+          "shaders/slangmosh.json": "d5ea9829b89ee2ac5d16c12b34561971cfeaef5e97eec5ac47ec9a4baa3d06d5",
+          "shaders/wavelet_dequant.comp": "e588ddfdd7c3d1873b758a9d8511b80a946fccf384a7aab0b3368d4212aa1a44"
+        },
+        "native_library_sha256": {
+          "libpyroclient.so": "bd33b0fa2ac6eb600c16806f645b4704afa4144a501fed08835efa39bc6c246d",
+          "libpyrowave-shared.so": "9c5ba02ba372745f23289a5ebd9555a6b2a21a9672a3ad545143c26889c09848"
+        }
+      },
+      "native_fragment_initialization": {
+        "valid": true,
+        "requested": 0,
+        "supported": 0,
+        "fragment": 1,
+        "all_slots_minimal": true,
+        "slot_minimal": [
+          0,
+          0,
+          0
+        ],
+        "fallback_logged": false,
+        "allocation_usage_flags": null
+      },
+      "native_ahb_initialization": null,
+      "capture": {
+        "frames": 2805,
+        "requested_hz": 90.0,
+        "submission_window_s": 49.99381420004647,
+        "chart_duration_requested_s": 50,
+        "selected_output_rate_fps": 56.080813138360625,
+        "strict_selected_output_valid": true,
+        "client_fps": {
+          "p01": 44.99513828,
+          "p50": 45.001503,
+          "p95": 90.006704,
+          "p99": 90.01429399999999,
+          "max": 90.359924,
+          "n": 2805
+        },
+        "video_mbps": {
+          "p01": 274.98584719999997,
+          "p50": 302.45014,
+          "p95": 316.761956,
+          "p99": 321.4469416,
+          "max": 333.3312,
+          "n": 2805
+        }
+      },
+      "native_timing_ms": {
+        "gpu_decode_ms": {
+          "p01": 8.095261,
+          "p50": 9.0173435,
+          "p95": 9.28974,
+          "p99": 9.587812,
+          "max": 10.179895,
+          "n": 2801
+        },
+        "native_convert_ms": {
+          "p01": 4.0779686,
+          "p50": 4.957448,
+          "p95": 5.3304687,
+          "p99": 5.929219,
+          "max": 7.2685413,
+          "n": 2801
+        },
+        "decode_to_fence_ms": {
+          "p01": 16.411407,
+          "p50": 17.322138,
+          "p95": 18.455002,
+          "p99": 19.629637,
+          "max": 20.496565,
+          "n": 2801
+        },
+        "native_record_ms": {
+          "p01": 0.517083,
+          "p50": 0.634896,
+          "p95": 0.87375,
+          "p99": 1.066041,
+          "max": 1.562605,
+          "n": 2801
+        },
+        "native_wait_ms": {
+          "p01": 15.725731,
+          "p50": 16.6712,
+          "p95": 17.77672,
+          "p99": 18.871668,
+          "max": 19.686253,
+          "n": 2801
+        },
+        "eye_acquire_wait_ms": {
+          "p01": 0.0026560002,
+          "p50": 0.003334,
+          "p95": 0.006459,
+          "p99": 0.015,
+          "max": 0.557969,
+          "n": 2801
+        },
+        "eye_render_ms": {
+          "p01": 16.08042,
+          "p50": 17.087502,
+          "p95": 18.197605,
+          "p99": 19.368908,
+          "max": 20.536356,
+          "n": 2801
+        },
+        "eye_release_ms": {
+          "p01": 0.0023949998,
+          "p50": 0.004167,
+          "p95": 0.006146,
+          "p99": 0.011146001,
+          "max": 0.047136,
+          "n": 2801
+        },
+        "eye_completion_observed_ms": null
+      },
+      "gates": {
+        "configuration_start_valid": true,
+        "configuration_end_valid": true,
+        "cell_summary_valid": true,
+        "fresh_runtime_evidence": true,
+        "runtime_coverage": {
+          "status": "covered",
+          "polls": [
+            {
+              "elapsed_s": 1.0376283000223339,
+              "records": 1
+            },
+            {
+              "elapsed_s": 7.2071222999366,
+              "records": 7
+            },
+            {
+              "elapsed_s": 13.249522599973716,
+              "records": 6
+            },
+            {
+              "elapsed_s": 19.365349999978207,
+              "records": 6
+            },
+            {
+              "elapsed_s": 25.40577770001255,
+              "records": 7
+            },
+            {
+              "elapsed_s": 31.479515100014396,
+              "records": 6
+            },
+            {
+              "elapsed_s": 37.51873569993768,
+              "records": 6
+            },
+            {
+              "elapsed_s": 43.58977009996306,
+              "records": 6
+            },
+            {
+              "elapsed_s": 49.64699869998731,
+              "records": 6
+            }
+          ],
+          "max_gap_s": 6.169493999914266
+        },
+        "telemetry_complete": true,
+        "thermal_ok": true,
+        "stream_errors": [],
+        "host": {
+          "status": "observed",
+          "samples": 24,
+          "invalid_rows": 0,
+          "error_rows": 0,
+          "comfyui_running_max": 0,
+          "comfyui_pending_max": 0,
+          "gpu_utilization_percent": {
+            "min": 19.0,
+            "max": 28.0
+          },
+          "gpu_memory_used_mib": {
+            "min": 5608.0,
+            "max": 5943.0
+          },
+          "workload_isolation_ok": true
+        },
+        "chart": {
+          "status": "checked",
+          "covers_capture": true,
+          "source_eye_size": [
+            3072,
+            3232
+          ],
+          "quality_chart": true,
+          "pulse": true
+        }
+      },
+      "visual": {
+        "status": "present_qualitative_only",
+        "artifacts": [
+          {
+            "name": "headset-1.png",
+            "bytes": 8512434,
+            "sha256": "e1214b4a7eb57d51bb79475a368084cb45dc6c7de814d718d5765f59e2a0ccb1"
+          },
+          {
+            "name": "headset-2.png",
+            "bytes": 8505286,
+            "sha256": "3f901da1a374c0cdbdf3af990e900d4b1d3c06cc8485eeb8e7011282cc332d02"
+          }
+        ],
+        "screenshot_dimensions": [
+          4128,
+          2208
+        ],
+        "video_duration_s": null,
+        "video_frames": null,
+        "video_container_fps": null,
+        "review": {
+          "rate_test": false,
+          "pixel_quality_score": null,
+          "independent_optical_measurement": false,
+          "qualitative_only": true
+        },
+        "manual_review": {
+          "reviewer": "assistant_visual_inspection",
+          "reviewed_artifacts": [
+            "headset-1.png",
+            "headset-2.png"
+          ],
+          "eye_labels_visible": true,
+          "changing_counter_visible": true,
+          "dashboard_or_hud_occlusion_observed": false,
+          "obvious_new_corruption_observed": false,
+          "fine_chroma_observation": "Fine coloured text and thin coloured edges show softness/fringing across control and enabled samples; no quantitative equivalence is established.",
+          "limitations": "Qualitative compositor capture reviewed at displayed preview size; no exact source-frame alignment or decoded-buffer score, no optical FPS, motion comfort, tracking or Metro acceptance."
+        },
+        "qualitative_only": true,
+        "limitation": "Screenshots and video do not establish decoded-buffer pixel quality, display FPS, or optical performance."
+      },
+      "files": {
+        "configuration_start": true,
+        "configuration_end": true,
+        "chart": true,
+        "host": true,
+        "summary": true,
+        "native_fragment_initialization": true,
+        "native_ahb_initialization": true
+      },
+      "diagnostic_only": true,
+      "diagnostic_evidence": {
+        "diagnostic_evidence_valid": true,
+        "failure_reasons": [],
+        "not_acceptance": "A valid short allocation screen remains diagnostic only; it does not establish endurance, recovery, Metro, image-quality, display-FPS, or optical acceptance."
+      }
+    },
+    {
+      "label": "allocation-on",
+      "factor_property": "debug.q3pw.fragment_min_usage",
+      "factor_value": 1,
+      "status": "measured",
+      "settings": {
+        "start": {
+          "codec": "PyroWave",
+          "bitrate_mode": "ConstantMbps",
+          "target_mbps": 300,
+          "requested_hz": 90.0,
+          "negotiated_hz": 90,
+          "decode_path": "Compute",
+          "wavelet": "Haar",
+          "chroma": "420",
+          "transport": "Tcp",
+          "stream_protocol": "Tcp",
+          "hdr_enabled": false,
+          "hdr_server_override": true,
+          "enforce_server_frame_pacing": true,
+          "foveated_encoding_enabled": false,
+          "clientside_foveation_enabled": false,
+          "render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          }
+        },
+        "end": {
+          "codec": "PyroWave",
+          "bitrate_mode": "ConstantMbps",
+          "target_mbps": 300,
+          "requested_hz": 90.0,
+          "negotiated_hz": 90,
+          "decode_path": "Compute",
+          "wavelet": "Haar",
+          "chroma": "420",
+          "transport": "Tcp",
+          "stream_protocol": "Tcp",
+          "hdr_enabled": false,
+          "hdr_server_override": true,
+          "enforce_server_frame_pacing": true,
+          "foveated_encoding_enabled": false,
+          "clientside_foveation_enabled": false,
+          "render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          }
+        },
+        "unchanged": true
+      },
+      "properties": {
+        "start": {
+          "debug.q3pw.direct_eye_copy": "1",
+          "debug.q3pw.async_eye_copy": "",
+          "debug.q3pw.copy_wait_us": "",
+          "debug.q3pw.raw_srgb_copy": "",
+          "debug.q3pw.image_cache": "",
+          "debug.q3pw.frame_wait_us": "",
+          "debug.q3pw.pre_wait_poll": "",
+          "debug.q3pw.repeat_render": "",
+          "debug.q3pw.decode_workers": "",
+          "debug.q3pw.decode_handoff": "",
+          "debug.q3pw.haar_fused": "0",
+          "debug.q3pw.dequant_batch": "0",
+          "debug.q3pw.convert_compute": "0",
+          "debug.q3pw.fragment_min_usage": "1",
+          "debug.q3pw.optimal_ahb_usage": "0",
+          "debug.q3pw.loop_probe": "0",
+          "debug.q3pw.runtime_display_time": "0",
+          "debug.q3pw.pass_profile": "0",
+          "debug.q3pw.hide_performance_overlay": "1",
+          "debug.xrwired.pyro_precision": "1",
+          "debug.xrwired.early_poll": "1",
+          "debug.xrwired.perf_level": "sustained_high",
+          "debug.oculus.forceDisplayScaling": "0",
+          "debug.oculus.refreshRate": "90"
+        },
+        "end": {
+          "debug.q3pw.direct_eye_copy": "1",
+          "debug.q3pw.async_eye_copy": "",
+          "debug.q3pw.copy_wait_us": "",
+          "debug.q3pw.raw_srgb_copy": "",
+          "debug.q3pw.image_cache": "",
+          "debug.q3pw.frame_wait_us": "",
+          "debug.q3pw.pre_wait_poll": "",
+          "debug.q3pw.repeat_render": "",
+          "debug.q3pw.decode_workers": "",
+          "debug.q3pw.decode_handoff": "",
+          "debug.q3pw.haar_fused": "0",
+          "debug.q3pw.dequant_batch": "0",
+          "debug.q3pw.convert_compute": "0",
+          "debug.q3pw.fragment_min_usage": "1",
+          "debug.q3pw.optimal_ahb_usage": "0",
+          "debug.q3pw.loop_probe": "0",
+          "debug.q3pw.runtime_display_time": "0",
+          "debug.q3pw.pass_profile": "0",
+          "debug.q3pw.hide_performance_overlay": "1",
+          "debug.xrwired.pyro_precision": "1",
+          "debug.xrwired.early_poll": "1",
+          "debug.xrwired.perf_level": "sustained_high",
+          "debug.oculus.forceDisplayScaling": "0",
+          "debug.oculus.refreshRate": "90"
+        },
+        "unchanged": true
+      },
+      "build": {
+        "verified": true,
+        "application_version": "20.13.0-ljk1291.2+f2e9df5704cc",
+        "server_version": "20.13.0-ljk1291.2+f2e9df5704cc",
+        "protocol_version": "20.13.0-ljk1291.2",
+        "repository_commit": "f2e9df5704cc679513848bf6ffb63ef1695479f9",
+        "client_package_id": "io.github.ljk1291.quest3pyrowave",
+        "shader_hashes": {
+          "shaders/constants.h": "3bc9555f8399bad2bd6960536125588fd7dbc7936a7147755fc497241f04e062",
+          "shaders/dwt.comp": "f58c3f95d68a90f4621fc1999bcf9a95e1a263b80d20355b0ac20002828a90b1",
+          "shaders/dwt_common.h": "591f529143fce7efad00c0f5a5e6d9be0a714fb2d5098ac5e89242c0041ada26",
+          "shaders/dwt_quant_scale.h": "4a5e60c22785075341afa29211275857a4f3922999e0f5799131c5f4acf2c4be",
+          "shaders/dwt_swizzle.h": "0283e54d268f25375866274dd3728384c75d9783cab12787d8914588b80f0f30",
+          "shaders/idwt.comp": "e3bb1b44e1e0cb0c2137c44dc50c42f0de4b625f8505f26e96b89ea210c2c3af",
+          "shaders/idwt_haar_fused.comp": "a85ffbeb0966e22855d8c76690a7283fb6a2a5967ae5028feac81663c99be629",
+          "shaders/slangmosh.hpp": "4f84897f9d7fbb07cbc5ccba6d98bc83b85f697ca170578ba959118c84032995",
+          "shaders/slangmosh.json": "d5ea9829b89ee2ac5d16c12b34561971cfeaef5e97eec5ac47ec9a4baa3d06d5",
+          "shaders/wavelet_dequant.comp": "e588ddfdd7c3d1873b758a9d8511b80a946fccf384a7aab0b3368d4212aa1a44"
+        },
+        "native_library_sha256": {
+          "libpyroclient.so": "bd33b0fa2ac6eb600c16806f645b4704afa4144a501fed08835efa39bc6c246d",
+          "libpyrowave-shared.so": "9c5ba02ba372745f23289a5ebd9555a6b2a21a9672a3ad545143c26889c09848"
+        }
+      },
+      "native_fragment_initialization": {
+        "valid": true,
+        "requested": 1,
+        "supported": 1,
+        "fragment": 1,
+        "all_slots_minimal": true,
+        "slot_minimal": [
+          1,
+          1,
+          1
+        ],
+        "fallback_logged": false,
+        "allocation_usage_flags": null
+      },
+      "native_ahb_initialization": null,
+      "capture": {
+        "frames": 2790,
+        "requested_hz": 90.0,
+        "submission_window_s": 49.96676129999105,
+        "chart_duration_requested_s": 50,
+        "selected_output_rate_fps": 55.79876961883273,
+        "strict_selected_output_valid": true,
+        "client_fps": {
+          "p01": 44.99595388,
+          "p50": 45.0014,
+          "p95": 90.00607875,
+          "p99": 90.0123344,
+          "max": 90.24791,
+          "n": 2790
+        },
+        "video_mbps": {
+          "p01": 273.2249476,
+          "p50": 302.36779,
+          "p95": 319.334574,
+          "p99": 330.2978642000001,
+          "max": 363.28048,
+          "n": 2790
+        }
+      },
+      "native_timing_ms": {
+        "gpu_decode_ms": {
+          "p01": 8.092996685,
+          "p50": 9.01635425,
+          "p95": 9.4783616,
+          "p99": 9.69141796,
+          "max": 10.040521,
+          "n": 2808
+        },
+        "native_convert_ms": {
+          "p01": 4.027249298999999,
+          "p50": 4.964765549999999,
+          "p95": 5.479601370000001,
+          "p99": 5.935248973,
+          "max": 6.754479,
+          "n": 2808
+        },
+        "decode_to_fence_ms": {
+          "p01": 16.46086462,
+          "p50": 17.361538,
+          "p95": 19.15097645,
+          "p99": 19.829996909999995,
+          "max": 20.614794,
+          "n": 2808
+        },
+        "native_record_ms": {
+          "p01": 0.5229196700000001,
+          "p50": 0.6540360000000001,
+          "p95": 0.9765314500000001,
+          "p99": 1.2533148,
+          "max": 1.908229,
+          "n": 2808
+        },
+        "native_wait_ms": {
+          "p01": 15.54067876,
+          "p50": 16.686643,
+          "p95": 18.4211001,
+          "p99": 19.13421265,
+          "max": 19.866774,
+          "n": 2808
+        },
+        "eye_acquire_wait_ms": {
+          "p01": 0.00250312,
+          "p50": 0.003386,
+          "p95": 0.0059377,
+          "p99": 0.01724826000000004,
+          "max": 0.38062498,
+          "n": 2807
+        },
+        "eye_render_ms": {
+          "p01": 16.166431260000003,
+          "p50": 17.13047,
+          "p95": 18.810200599999998,
+          "p99": 19.56757344,
+          "max": 20.52042,
+          "n": 2807
+        },
+        "eye_release_ms": {
+          "p01": 0.002084,
+          "p50": 0.003959,
+          "p95": 0.006077700119999991,
+          "p99": 0.010245340000000014,
+          "max": 0.051719,
+          "n": 2807
+        },
+        "eye_completion_observed_ms": null
+      },
+      "gates": {
+        "configuration_start_valid": true,
+        "configuration_end_valid": true,
+        "cell_summary_valid": true,
+        "fresh_runtime_evidence": true,
+        "runtime_coverage": {
+          "status": "covered",
+          "polls": [
+            {
+              "elapsed_s": 1.059126100037247,
+              "records": 1
+            },
+            {
+              "elapsed_s": 7.120394499972463,
+              "records": 6
+            },
+            {
+              "elapsed_s": 13.212920899968594,
+              "records": 6
+            },
+            {
+              "elapsed_s": 19.259785800008103,
+              "records": 6
+            },
+            {
+              "elapsed_s": 25.337617599987425,
+              "records": 7
+            },
+            {
+              "elapsed_s": 31.444362699985504,
+              "records": 6
+            },
+            {
+              "elapsed_s": 37.50925920007285,
+              "records": 6
+            },
+            {
+              "elapsed_s": 43.5706799000036,
+              "records": 6
+            },
+            {
+              "elapsed_s": 49.63822770002298,
+              "records": 6
+            }
+          ],
+          "max_gap_s": 6.106745099998079
+        },
+        "telemetry_complete": true,
+        "thermal_ok": true,
+        "stream_errors": [],
+        "host": {
+          "status": "observed",
+          "samples": 24,
+          "invalid_rows": 0,
+          "error_rows": 0,
+          "comfyui_running_max": 0,
+          "comfyui_pending_max": 0,
+          "gpu_utilization_percent": {
+            "min": 18.0,
+            "max": 25.0
+          },
+          "gpu_memory_used_mib": {
+            "min": 5600.0,
+            "max": 5948.0
+          },
+          "workload_isolation_ok": true
+        },
+        "chart": {
+          "status": "checked",
+          "covers_capture": true,
+          "source_eye_size": [
+            3072,
+            3232
+          ],
+          "quality_chart": true,
+          "pulse": true
+        }
+      },
+      "visual": {
+        "status": "present_qualitative_only",
+        "artifacts": [
+          {
+            "name": "headset-1.png",
+            "bytes": 8509414,
+            "sha256": "9c26ce3b222bf40997dfbe63c21fd28a642926d5a95348dbbd2874fd9a83d4f9"
+          },
+          {
+            "name": "headset-2.png",
+            "bytes": 8538222,
+            "sha256": "0c17615786537c2a52f17276de844c7ae42da293ca017acbe0ee93b5aa2bf8bf"
+          }
+        ],
+        "screenshot_dimensions": [
+          4128,
+          2208
+        ],
+        "video_duration_s": null,
+        "video_frames": null,
+        "video_container_fps": null,
+        "review": {
+          "rate_test": false,
+          "pixel_quality_score": null,
+          "independent_optical_measurement": false,
+          "qualitative_only": true
+        },
+        "manual_review": {
+          "reviewer": "assistant_visual_inspection",
+          "reviewed_artifacts": [
+            "headset-1.png",
+            "headset-2.png"
+          ],
+          "eye_labels_visible": true,
+          "changing_counter_visible": true,
+          "dashboard_or_hud_occlusion_observed": false,
+          "obvious_new_corruption_observed": false,
+          "fine_chroma_observation": "Fine coloured text and thin coloured edges show softness/fringing across control and enabled samples; no quantitative equivalence is established.",
+          "limitations": "Qualitative compositor capture reviewed at displayed preview size; no exact source-frame alignment or decoded-buffer score, no optical FPS, motion comfort, tracking or Metro acceptance."
+        },
+        "qualitative_only": true,
+        "limitation": "Screenshots and video do not establish decoded-buffer pixel quality, display FPS, or optical performance."
+      },
+      "files": {
+        "configuration_start": true,
+        "configuration_end": true,
+        "chart": true,
+        "host": true,
+        "summary": true,
+        "native_fragment_initialization": true,
+        "native_ahb_initialization": true
+      },
+      "diagnostic_only": true,
+      "diagnostic_evidence": {
+        "diagnostic_evidence_valid": true,
+        "failure_reasons": [],
+        "not_acceptance": "A valid short allocation screen remains diagnostic only; it does not establish endurance, recovery, Metro, image-quality, display-FPS, or optical acceptance."
+      }
+    },
+    {
+      "label": "allocation-off-b",
+      "factor_property": "debug.q3pw.fragment_min_usage",
+      "factor_value": 0,
+      "status": "measured",
+      "settings": {
+        "start": {
+          "codec": "PyroWave",
+          "bitrate_mode": "ConstantMbps",
+          "target_mbps": 300,
+          "requested_hz": 90.0,
+          "negotiated_hz": 90,
+          "decode_path": "Compute",
+          "wavelet": "Haar",
+          "chroma": "420",
+          "transport": "Tcp",
+          "stream_protocol": "Tcp",
+          "hdr_enabled": false,
+          "hdr_server_override": true,
+          "enforce_server_frame_pacing": true,
+          "foveated_encoding_enabled": false,
+          "clientside_foveation_enabled": false,
+          "render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          }
+        },
+        "end": {
+          "codec": "PyroWave",
+          "bitrate_mode": "ConstantMbps",
+          "target_mbps": 300,
+          "requested_hz": 90.0,
+          "negotiated_hz": 90,
+          "decode_path": "Compute",
+          "wavelet": "Haar",
+          "chroma": "420",
+          "transport": "Tcp",
+          "stream_protocol": "Tcp",
+          "hdr_enabled": false,
+          "hdr_server_override": true,
+          "enforce_server_frame_pacing": true,
+          "foveated_encoding_enabled": false,
+          "clientside_foveation_enabled": false,
+          "render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_render_resolution": {
+            "width": 3072,
+            "height": 3232
+          },
+          "negotiated_encoded_resolution": {
+            "width": 3072,
+            "height": 3232
+          }
+        },
+        "unchanged": true
+      },
+      "properties": {
+        "start": {
+          "debug.q3pw.direct_eye_copy": "1",
+          "debug.q3pw.async_eye_copy": "",
+          "debug.q3pw.copy_wait_us": "",
+          "debug.q3pw.raw_srgb_copy": "",
+          "debug.q3pw.image_cache": "",
+          "debug.q3pw.frame_wait_us": "",
+          "debug.q3pw.pre_wait_poll": "",
+          "debug.q3pw.repeat_render": "",
+          "debug.q3pw.decode_workers": "",
+          "debug.q3pw.decode_handoff": "",
+          "debug.q3pw.haar_fused": "0",
+          "debug.q3pw.dequant_batch": "0",
+          "debug.q3pw.convert_compute": "0",
+          "debug.q3pw.fragment_min_usage": "0",
+          "debug.q3pw.optimal_ahb_usage": "0",
+          "debug.q3pw.loop_probe": "0",
+          "debug.q3pw.runtime_display_time": "0",
+          "debug.q3pw.pass_profile": "0",
+          "debug.q3pw.hide_performance_overlay": "1",
+          "debug.xrwired.pyro_precision": "1",
+          "debug.xrwired.early_poll": "1",
+          "debug.xrwired.perf_level": "sustained_high",
+          "debug.oculus.forceDisplayScaling": "0",
+          "debug.oculus.refreshRate": "90"
+        },
+        "end": {
+          "debug.q3pw.direct_eye_copy": "1",
+          "debug.q3pw.async_eye_copy": "",
+          "debug.q3pw.copy_wait_us": "",
+          "debug.q3pw.raw_srgb_copy": "",
+          "debug.q3pw.image_cache": "",
+          "debug.q3pw.frame_wait_us": "",
+          "debug.q3pw.pre_wait_poll": "",
+          "debug.q3pw.repeat_render": "",
+          "debug.q3pw.decode_workers": "",
+          "debug.q3pw.decode_handoff": "",
+          "debug.q3pw.haar_fused": "0",
+          "debug.q3pw.dequant_batch": "0",
+          "debug.q3pw.convert_compute": "0",
+          "debug.q3pw.fragment_min_usage": "0",
+          "debug.q3pw.optimal_ahb_usage": "0",
+          "debug.q3pw.loop_probe": "0",
+          "debug.q3pw.runtime_display_time": "0",
+          "debug.q3pw.pass_profile": "0",
+          "debug.q3pw.hide_performance_overlay": "1",
+          "debug.xrwired.pyro_precision": "1",
+          "debug.xrwired.early_poll": "1",
+          "debug.xrwired.perf_level": "sustained_high",
+          "debug.oculus.forceDisplayScaling": "0",
+          "debug.oculus.refreshRate": "90"
+        },
+        "unchanged": true
+      },
+      "build": {
+        "verified": true,
+        "application_version": "20.13.0-ljk1291.2+f2e9df5704cc",
+        "server_version": "20.13.0-ljk1291.2+f2e9df5704cc",
+        "protocol_version": "20.13.0-ljk1291.2",
+        "repository_commit": "f2e9df5704cc679513848bf6ffb63ef1695479f9",
+        "client_package_id": "io.github.ljk1291.quest3pyrowave",
+        "shader_hashes": {
+          "shaders/constants.h": "3bc9555f8399bad2bd6960536125588fd7dbc7936a7147755fc497241f04e062",
+          "shaders/dwt.comp": "f58c3f95d68a90f4621fc1999bcf9a95e1a263b80d20355b0ac20002828a90b1",
+          "shaders/dwt_common.h": "591f529143fce7efad00c0f5a5e6d9be0a714fb2d5098ac5e89242c0041ada26",
+          "shaders/dwt_quant_scale.h": "4a5e60c22785075341afa29211275857a4f3922999e0f5799131c5f4acf2c4be",
+          "shaders/dwt_swizzle.h": "0283e54d268f25375866274dd3728384c75d9783cab12787d8914588b80f0f30",
+          "shaders/idwt.comp": "e3bb1b44e1e0cb0c2137c44dc50c42f0de4b625f8505f26e96b89ea210c2c3af",
+          "shaders/idwt_haar_fused.comp": "a85ffbeb0966e22855d8c76690a7283fb6a2a5967ae5028feac81663c99be629",
+          "shaders/slangmosh.hpp": "4f84897f9d7fbb07cbc5ccba6d98bc83b85f697ca170578ba959118c84032995",
+          "shaders/slangmosh.json": "d5ea9829b89ee2ac5d16c12b34561971cfeaef5e97eec5ac47ec9a4baa3d06d5",
+          "shaders/wavelet_dequant.comp": "e588ddfdd7c3d1873b758a9d8511b80a946fccf384a7aab0b3368d4212aa1a44"
+        },
+        "native_library_sha256": {
+          "libpyroclient.so": "bd33b0fa2ac6eb600c16806f645b4704afa4144a501fed08835efa39bc6c246d",
+          "libpyrowave-shared.so": "9c5ba02ba372745f23289a5ebd9555a6b2a21a9672a3ad545143c26889c09848"
+        }
+      },
+      "native_fragment_initialization": {
+        "valid": true,
+        "requested": 0,
+        "supported": 0,
+        "fragment": 1,
+        "all_slots_minimal": true,
+        "slot_minimal": [
+          0,
+          0,
+          0
+        ],
+        "fallback_logged": false,
+        "allocation_usage_flags": null
+      },
+      "native_ahb_initialization": null,
+      "capture": {
+        "frames": 2801,
+        "requested_hz": 90.0,
+        "submission_window_s": 49.994698100024834,
+        "chart_duration_requested_s": 50,
+        "selected_output_rate_fps": 56.000926333403164,
+        "strict_selected_output_valid": true,
+        "client_fps": {
+          "p01": 44.995323,
+          "p50": 45.001553,
+          "p95": 90.00728,
+          "p99": 90.01401,
+          "max": 90.11,
+          "n": 2801
+        },
+        "video_mbps": {
+          "p01": 270.9059,
+          "p50": 302.65952,
+          "p95": 318.80634,
+          "p99": 329.60416,
+          "max": 445.06022,
+          "n": 2801
+        }
+      },
+      "native_timing_ms": {
+        "gpu_decode_ms": {
+          "p01": 8.1118436,
+          "p50": 9.007135,
+          "p95": 9.271666499999998,
+          "p99": 9.5644426,
+          "max": 9.785052,
+          "n": 2771
+        },
+        "native_convert_ms": {
+          "p01": 4.0827029900000005,
+          "p50": 4.9039583,
+          "p95": 5.4266404999999995,
+          "p99": 5.916874910000001,
+          "max": 6.849948,
+          "n": 2771
+        },
+        "decode_to_fence_ms": {
+          "p01": 16.3354852,
+          "p50": 17.44198,
+          "p95": 18.446512,
+          "p99": 19.568737300000002,
+          "max": 20.207659,
+          "n": 2771
+        },
+        "native_record_ms": {
+          "p01": 0.5272346,
+          "p50": 0.665782,
+          "p95": 0.9814320000000001,
+          "p99": 1.1940838,
+          "max": 1.458437,
+          "n": 2771
+        },
+        "native_wait_ms": {
+          "p01": 15.6211159,
+          "p50": 16.746408,
+          "p95": 17.7460955,
+          "p99": 18.749054100000002,
+          "max": 19.38797,
+          "n": 2771
+        },
+        "eye_acquire_wait_ms": {
+          "p01": 0.0026560002,
+          "p50": 0.003385,
+          "p95": 0.005208,
+          "p99": 0.013801999,
+          "max": 0.497812,
+          "n": 2770
+        },
+        "eye_render_ms": {
+          "p01": 16.19651825,
+          "p50": 17.0996615,
+          "p95": 18.205825049999998,
+          "p99": 19.236384559999998,
+          "max": 20.403751,
+          "n": 2770
+        },
+        "eye_release_ms": {
+          "p01": 0.002171190069,
+          "p50": 0.00385450025,
+          "p95": 0.0061455500000000005,
+          "p99": 0.009090909999999987,
+          "max": 0.19468799,
+          "n": 2770
+        },
+        "eye_completion_observed_ms": null
+      },
+      "gates": {
+        "configuration_start_valid": true,
+        "configuration_end_valid": true,
+        "cell_summary_valid": true,
+        "fresh_runtime_evidence": true,
+        "runtime_coverage": {
+          "status": "covered",
+          "polls": [
+            {
+              "elapsed_s": 1.0430887000402436,
+              "records": 1
+            },
+            {
+              "elapsed_s": 7.10624660004396,
+              "records": 7
+            },
+            {
+              "elapsed_s": 13.240169099997729,
+              "records": 6
+            },
+            {
+              "elapsed_s": 19.4301121000899,
+              "records": 6
+            },
+            {
+              "elapsed_s": 25.474882400012575,
+              "records": 6
+            },
+            {
+              "elapsed_s": 31.531318000052124,
+              "records": 6
+            },
+            {
+              "elapsed_s": 37.59117650007829,
+              "records": 7
+            },
+            {
+              "elapsed_s": 43.66187870001886,
+              "records": 6
+            },
+            {
+              "elapsed_s": 49.73356469999999,
+              "records": 6
+            }
+          ],
+          "max_gap_s": 6.189943000092171
+        },
+        "telemetry_complete": true,
+        "thermal_ok": true,
+        "stream_errors": [],
+        "host": {
+          "status": "observed",
+          "samples": 24,
+          "invalid_rows": 0,
+          "error_rows": 0,
+          "comfyui_running_max": 0,
+          "comfyui_pending_max": 0,
+          "gpu_utilization_percent": {
+            "min": 17.0,
+            "max": 28.0
+          },
+          "gpu_memory_used_mib": {
+            "min": 5608.0,
+            "max": 5941.0
+          },
+          "workload_isolation_ok": true
+        },
+        "chart": {
+          "status": "checked",
+          "covers_capture": true,
+          "source_eye_size": [
+            3072,
+            3232
+          ],
+          "quality_chart": true,
+          "pulse": true
+        }
+      },
+      "visual": {
+        "status": "present_qualitative_only",
+        "artifacts": [
+          {
+            "name": "headset-1.png",
+            "bytes": 8512157,
+            "sha256": "3f15291dcce9b8b003e3d8d71380b231ff0e382aebc7feff2564a7a5b80743c6"
+          },
+          {
+            "name": "headset-2.png",
+            "bytes": 8508982,
+            "sha256": "4ec0dd99c6b083fe4267eff8cee10609f228086eb27f913de3ee5e1bfc7d7178"
+          }
+        ],
+        "screenshot_dimensions": [
+          4128,
+          2208
+        ],
+        "video_duration_s": null,
+        "video_frames": null,
+        "video_container_fps": null,
+        "review": {
+          "rate_test": false,
+          "pixel_quality_score": null,
+          "independent_optical_measurement": false,
+          "qualitative_only": true
+        },
+        "manual_review": {
+          "reviewer": "assistant_visual_inspection",
+          "reviewed_artifacts": [
+            "headset-1.png",
+            "headset-2.png"
+          ],
+          "eye_labels_visible": true,
+          "changing_counter_visible": true,
+          "dashboard_or_hud_occlusion_observed": false,
+          "obvious_new_corruption_observed": false,
+          "fine_chroma_observation": "Fine coloured text and thin coloured edges show softness/fringing across control and enabled samples; no quantitative equivalence is established.",
+          "limitations": "Qualitative compositor capture reviewed at displayed preview size; no exact source-frame alignment or decoded-buffer score, no optical FPS, motion comfort, tracking or Metro acceptance."
+        },
+        "qualitative_only": true,
+        "limitation": "Screenshots and video do not establish decoded-buffer pixel quality, display FPS, or optical performance."
+      },
+      "files": {
+        "configuration_start": true,
+        "configuration_end": true,
+        "chart": true,
+        "host": true,
+        "summary": true,
+        "native_fragment_initialization": true,
+        "native_ahb_initialization": true
+      },
+      "diagnostic_only": true,
+      "diagnostic_evidence": {
+        "diagnostic_evidence_valid": true,
+        "failure_reasons": [],
+        "not_acceptance": "A valid short allocation screen remains diagnostic only; it does not establish endurance, recovery, Metro, image-quality, display-FPS, or optical acceptance."
+      }
+    }
+  ],
+  "cross_cell_settings_equal_except": "debug.q3pw.fragment_min_usage",
+  "cross_cell_settings_equal": true,
+  "diagnostic_comparison_evidence_valid": true,
+  "diagnostic_comparison_failure_reasons": [],
+  "restoration_complete": true,
+  "diagnostic_only": true,
+  "timing_scope": "gpu_decode_ms and native_convert_ms are consecutive Vulkan GPU timestamp intervals; record/wait/fence/eye wall timings overlap those intervals. Do not sum their percentiles into a frame total or optical latency.",
+  "limitations": "Short allocation screens do not establish acceptance, endurance, recovery, Metro quality, numerical pixel quality, display FPS, or optical performance."
+}

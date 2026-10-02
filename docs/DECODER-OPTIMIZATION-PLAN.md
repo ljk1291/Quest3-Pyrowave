@@ -2,6 +2,24 @@
 
 ## Current evidence — 2026-10-02
 
+Session 05 identified a substantial output-allocation improvement on the verified
+`f2e9df5704cc` pair. With `fragment_min_usage=1` held constant, requesting the
+driver's recommended AHardwareBuffer usage raised fresh selected outputs from
+**56.00 to 82.69/s**; reverting the request returned them to **55.25/s**.
+Conversion medians were **4.91 / 1.31 / 5.09 ms**, and decode-to-fence medians
+were **17.47 / 11.54 / 17.62 ms**. Actual allocation flags changed
+`0x300 → 0x10000300 → 0x300` for all three output slots with no fallback.
+An independent enabled repeat reached **82.02/s**, with **1.36 ms** conversion
+and **11.63 ms** decode-to-fence medians. All seven 50-second rate captures had
+matching builds, unchanged non-factor settings, covered runtime/counter evidence,
+idle sampled ComfyUI queues and passing thermal gates. Profiler and image
+capture were disabled during the rate windows. Saved system/headset settings
+and VDXR registration were restored and verified after the separate image runs.
+This is an unqualified candidate: the 90 Hz rate and low-rate screens still fail.
+The earlier minimal Vulkan image-usage experiment alone was flat at
+**56.08 / 55.80 / 56.00/s**. See the [allocation control](../results/allocation-screen-2026-10-02.json)
+and [recommended-AHB comparison](../results/optimal-ahb-screen-2026-10-02.json).
+
 The requested 300/400/600/300 Mbps sequence is complete on the verified
 `d4735d88985a` protocol `.2` pair. Strict fresh-submission rates were
 **52.95 / 54.12 / 53.42 / 55.41 per second**. Reported video bitrate rose to
@@ -27,6 +45,47 @@ AVC/HEVC decode support ([Qualcomm XR2 Gen 2 specifications](https://docs.qualco
 Android exposes hardware decoder identity through
 [MediaCodecInfo](https://developer.android.com/media/optimize/performance/codec).
 
+### Hardware decoder, CPU and hybrid options
+
+The XR2 Gen 2 video engine supports AVC/H.264, HEVC, VP9 and AV1 bitstreams;
+there is no exposed PyroWave hardware-decoder path. Feeding PyroWave packets to
+MediaCodec cannot reuse that engine. Transcoding to HEVC/AV1 would instead be a
+different codec pipeline, with another encode/decode step if done after PyroWave.
+The direct HEVC path remains our hardware-decoder control.
+
+There is no CPU reconstruction implementation in our pinned PyroWave source.
+`pyrowave_decoder_decode_cpu_buffer_synchronous()` calls GPU decode, copies the
+three GPU planes to host buffers, waits for a fence, then performs CPU copies;
+it is a GPU-readback API, not a CPU decoder. See the
+[pinned implementation](https://github.com/Themaister/pyrowave/blob/d2997ac172bdc00e29c58e3f2938acb7e94580bf/pyrowave_c.cpp).
+
+A new CPU decoder with ARM NEON is technically possible, but its performance is
+unmeasured. At 3072×3232 per eye and 90 Hz, the workload is 1.787 billion pixels/s;
+one RGBA8 output write is 7.15 GB/s, before wavelet intermediates, input reads,
+cache maintenance and presentation. These are derived byte counts, not measured
+DRAM bandwidth. A CPU-only implementation is therefore a low-priority hypothesis,
+not an assumed speedup. It must include output allocation and GPU presentation
+in its end-to-end benchmark.
+
+CPU packet ingestion/preparation and GPU reconstruction already perform different
+parts of the job. A new hybrid could move coefficient unpacking/dequantization
+to a NEON worker while leaving inverse wavelets and conversion on the GPU.
+The Quest uses shared memory, so this need not require a discrete-GPU-style PCIe
+copy; it still needs suitable buffers, cache visibility and producer/consumer
+synchronization. Expanding coefficients on the CPU may increase shared-memory
+traffic enough to cancel the gain. CPU/GPU transform splitting or overlapping
+successive frames must preserve bounded buffer ownership and latency.
+
+- [ ] If GPU allocation/fusion work is insufficient, prototype NEON coefficient
+  unpack/dequant on exact captured packets, with GPU-readback equivalence checks.
+- [ ] Measure CPU preparation, GPU wait, memory/cache cost, thermal behavior and
+  end-to-end fresh delivery in CPU/GPU off/on/off tests. Never count the current
+  `cpu_buffer_synchronous` API as a CPU-only benchmark.
+- [ ] Consider a full CPU reconstruction prototype only if the partial prototype
+  shows plausible throughput; do not assume more workers increase performance.
+
+### Latest GPU profile
+
 On the session-04 `f2e9df5704cc` protocol `.2` pair, opt-in
 `debug.q3pw.pass_profile=1` emitted valid Granite Dequant/iDWT completed-context
 means after 90 fenced completions. `debug.q3pw.hide_performance_overlay=1`
@@ -41,9 +100,9 @@ evidence](../results/decoder-profile-2026-10-02.json).
 The profile measured mean windows of **3.75 ms Dequant** and **5.00 ms iDWT**;
 the telemetry conversion median was **4.92 ms**, with **17.31 ms** median
 decode-to-fence time against the 11.11 ms interval for 90 Hz. These are different
-measurement scopes and must not be summed into an invented total. Allocation
-off/on/off is the first controlled optimization screen, targeting conversion;
-then inspect the final inverse-wavelet level for fusion with conversion.
+measurement scopes and must not be summed into an invented total. Session 05
+completed the allocation screen described above. Profile the remaining wavelet
+levels on that faster allocation before selecting a final-level fusion implementation.
 Dequantization remains substantial enough to profile its memory traffic too.
 
 ## Objective and guardrails
@@ -129,8 +188,10 @@ or gameplay quality; those remain manual Metro-review gates.
 
 ### 0. Establish a clean control
 
-- [ ] Before the next native build, remove the unused duplicate fork protocol from
-  `sources.lock.json` and enforce `fork.json` as the sole application-identity input.
+- [x] Remove the unused duplicate fork identity from `sources.lock.json` and enforce
+  `fork.json` as the sole application-identity input in new packaging. Contract
+  tests reject a lock containing application identity. This metadata-only cleanup
+  is not part of the already-built `f2e9df5704cc` test pair.
   Historical `.2` artifact records retain a raw lock snapshot containing stale `.1`
   fork metadata; actual protocol/version writers use `fork.json`. Keep old hashes
   intact and do not reinterpret that redundant value as the installed protocol.
@@ -212,13 +273,39 @@ live sequence, but lower delivery and different clocks; it is a hypothesis, not
 a promotion. The fixed fixture was effectively flat. See
 [DECODE-PIPELINE.md](DECODE-PIPELINE.md#experimental-fragment-output-usage-19).
 
-- [ ] Run allocation off/on/off: `fragment_min_usage=0/1/0` at the fixed
+- [x] Run allocation off/on/off: `fragment_min_usage=0/1/0` at the fixed
   baseline, with actual usage/allocation flags and fragment activation logged.
-- [ ] If that is correct and non-regressing, run `fragment_min_usage=1` plus
-  `optimal_ahb_usage=0/1/0`; retain both source and GPU readback image checks.
+  Session 05 found no meaningful rate or conversion gain from this flag alone.
+- [x] Run `fragment_min_usage=1` plus `optimal_ahb_usage=0/1/0` with fresh
+  native initialization evidence. Session 05 showed a reversible improvement.
+- [ ] Complete exact-frame source/decoded-buffer image equivalence checks before
+  promotion. The separate compositor screenshots are qualitative only.
 - [ ] Reject any allocation fallback, changed color/range/eye mapping, source
   lease fault or rate/tail regression. A requested vendor recommendation is not
   evidence it was used.
+
+The next comparison control keeps **both** `debug.q3pw.fragment_min_usage=1`
+and `debug.q3pw.optimal_ahb_usage=1`, with the fixed profile above at 300 Mbps.
+These are initialization options and require a client/decoder restart. Verify
+`[Q3PW_FRAGMENT_USAGE]` reports fragment conversion and all three minimal slots;
+`[Q3PW_AHB_USAGE]` must report requested/active 1, a nonzero recommendation and
+three matching allocations without fallback/retry. Record the actual flags;
+do not hard-code the recommendation for other drivers. The observed extra bit
+does not establish a particular compression/tiling mechanism.
+
+GPU decode remained about 9 ms. In the first faster cell, native recording was
+0.57 ms median and native fence wait 10.94 ms median; wait is an overlapping
+blocked-host interval, not CPU compute work. Prioritize dequant/iDWT subpass
+profiling and final-luma materialization over CPU offload or speculative import
+caching. Keep profiler captures separate from rate and screenshot captures.
+
+- [ ] Add per-level inverse-wavelet timing with bounded completed-context
+  reporting; measure the final luma level on the recommended-AHB candidate.
+- [ ] Investigate the remaining ~45 client-FPS 1% low separately from the
+  ~82 fresh-output mean. A near-90 median does not establish smooth 90 Hz.
+- [ ] Repeat 300/400/600 Mbps only after the decoder meets its frame budget,
+  or for an explicit image-quality question; the old bitrate screen found no
+  speed gain and cannot explain this isolated allocation improvement.
 
 `debug.q3pw.image_cache=1` caches at most eight retained AHB/EGL-image/external
 texture imports in `DirectEyeRenderer::cached_source_texture`. It can remove the
@@ -241,12 +328,39 @@ Vulkan reconstruction or synchronous finish.
   equivalence gate, then one fixed-profile off/on/off screen.
 - [ ] Test color-conversion fusion only with pixel/range validation. It must
   preserve 4:2:0 chroma siting, limited/full range and sRGB behavior.
+- [ ] Test converter-only relaxed precision as an independent shader variant,
+  inspired by the [Nightfall source comparison](NIGHTFALL-COMPARISON.md), with
+  exact-frame full/limited-range and chroma-edge readback checks. This does not
+  enable FP16 throughout the wavelet decoder or establish Nightfall performance.
 - [ ] Test shader workgroup shape, memory layout and barriers one change per
   matching generated-shader pair. Record dispatch count, shader hash and
   Vulkan timestamp deltas; do not use a CPU-only timing improvement as proof.
 - [ ] Test `convert_compute=1` only as an explicit fragment-conversion control,
   with the same allocation usage and quality gate. It is independent of
   wavelet Compute and is not a default candidate.
+
+The focused fusion candidate is **final luma Haar level + fragment conversion**,
+not the existing whole-transform `haar_fused` experiment. At 4:2:0, Cb/Cr finish
+at level 1; level 0 materializes only full-resolution luma before conversion
+reads it again. An opt-in PyroWave mode could leave levels 4→1 intact, expose
+the final luma coefficient view, and reconstruct those four Haar bands inside
+the RGBA fragment pass. This removes the final luma image write/read and compute
+dispatch while retaining chroma reconstruction, output allocation and safe fences.
+
+- [ ] Add the mode and compute-write→fragment-sampled visibility inside PyroWave;
+  the bridge cannot safely supply that dependency for an image it does not own.
+- [ ] Use a separate fragment pipeline; gate on Haar + 4:2:0 + compute wavelets
+  + active fragment conversion. Unsupported combinations retain the baseline.
+- [ ] Match baseline R8 luma quantization, exact Haar parity, chroma filtering,
+  range and transfer behavior before claiming equivalence. Avoid silently
+  changing precision just because the intermediate luma image disappeared.
+- [ ] Compare GPU-readback RGBA for the same encoded frames, including asymmetric
+  eye charts, full/limited range and edge geometry. Start with ≤1 channel-value
+  error and ≤0.05 dB source-PSNR loss as investigation gates, not a substitute
+  for motion/image review.
+- [ ] Regenerate/check shader headers and hashes, build a new matching signed
+  pair, then measure off/on/off. Additional fragment fetches/register pressure
+  could erase the removed memory traffic; fewer passes are not proof of a win.
 
 The following are known regressions or unqualified diagnostics. Keep them off
 in the stable profile; revisit only to answer a new profiling hypothesis:

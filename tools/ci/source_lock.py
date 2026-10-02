@@ -8,10 +8,15 @@ from pathlib import Path
 
 LOCK = Path(__file__).resolve().parents[2] / "sources.lock.json"
 COMMIT_KEYS = ("integration", "alvr", "pyrowave", "granite", "cargo_apk")
+APPLICATION_IDENTITY_KEYS = ("fork", "protocol_version", "client_package_id", "application_version", "server_version")
 
 
 def load():
     data = json.loads(LOCK.read_text(encoding="utf-8"))
+    duplicated_identity = [key for key in APPLICATION_IDENTITY_KEYS if key in data]
+    if duplicated_identity:
+        raise SystemExit("sources.lock.json must not contain application identity; fork.json is authoritative: "
+                         + ", ".join(duplicated_identity))
     for key in COMMIT_KEYS:
         commit = data[key]["commit"]
         if not re.fullmatch(r"[0-9a-f]{40}", commit):

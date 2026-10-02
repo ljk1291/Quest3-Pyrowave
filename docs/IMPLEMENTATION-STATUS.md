@@ -12,6 +12,40 @@ Target: Wi-Fi 6 / 5 GHz / 80 MHz, actual VD Godlike dimensions, 90 Hz, Metro Awa
 
 ## Evidence and remaining gates
 
+The latest owner-authorized AFK Session 05 found a repeatable AHardwareBuffer
+allocation improvement on the verified `f2e9df5704cc` pair. At the same
+3072×3232 per eye, 90 Hz, 300 Mbps Haar/direct/Compute/4:2:0/TCP profile,
+with minimal fragment usage held on, the recommended-allocation off/on/off/on
+sequence produced:
+
+| Recommended allocation | Fresh selected outputs/s | Conversion median | Decode-to-fence median |
+| --- | ---: | ---: | ---: |
+| Off | 56.00 | 4.91 ms | 17.47 ms |
+| On | 82.69 | 1.31 ms | 11.54 ms |
+| Off repeat | 55.25 | 5.09 ms | 17.62 ms |
+| On repeat | 82.02 | 1.36 ms | 11.63 ms |
+
+All four 50-second captures passed diagnostic evidence gates, with actual
+allocation flags `0x300 / 0x10000300 / 0x300 / 0x10000300` verified for all
+three slots and no fallback. Minimal Vulkan image usage alone was flat in a
+separate 0/1/0 sequence (56.08 / 55.80 / 56.00 fresh outputs/s). GPU decode
+remained about 9 ms, while conversion improved substantially. Both enabled
+captures still fail the 90 Hz rate screen and have client-FPS 1% lows around
+45; this is a promising candidate, not a promoted stable profile. See the
+[allocation control](../results/allocation-screen-2026-10-02.json),
+[recommended-AHB result](../results/optimal-ahb-screen-2026-10-02.json), and
+[updated decoder plan](DECODER-OPTIMIZATION-PLAN.md).
+
+Seven separate screenshot pairs showed LEFT/RIGHT labels and changing counters
+without obvious new allocation-dependent corruption. Fine chroma edges/text
+remain soft or fringed; the second off-control screenshot in the AHB series also
+contains small menu indicators. These compositor captures establish neither
+exact pixel equivalence nor subjective Metro/motion quality. No video capture
+or profiler ran during these rate windows. All saved ALVR setting keys, manual
+150% SteamVR scale, dashboard setting, 24 headset properties, external-driver
+inventory and VDXR registration/manifest were restored and verified; the test
+dashboard, SteamVR and client were closed.
+
 Local Python checks pass. Clean LF source reconstruction applies the ALVR/PyroWave overlays, and the codec shader manifest passes. Native compilation and headset execution remain separate gates. No Godlike/90 Hz result is claimed. The untouched upstream reference build is retained with its artifacts.
 
 The earlier supervised 72 Hz chart diagnostic is summarized in [diagnostic-2026-10-02.json](../results/diagnostic-2026-10-02.json). It confirms a clean decoder-counter window, fresh 72 Hz runtime evidence, initial image clarity, world-grid tracking, both controllers, and audio. It is explicitly unqualified: the reported submission-rate metric is 70.8319 FPS with 30 reused tracking timestamps, and it is not Metro/Godlike/90 Hz/endurance/recovery evidence. Background GPU work was not controlled during capture; the owner subsequently identified ComfyUI, and a later check found ComfyUI processes, 100% overall GPU utilization and approximately 14,600 MiB VRAM allocated. This later observation cannot establish activity at every earlier instant.
@@ -76,9 +110,11 @@ Metadata limitation: the historical `sources.lock.json` contains an unused dupli
 `fork.protocol_version` still set to `.1`. The build/version writers read `fork.json`,
 which supplies the actual `.2` protocol; the source-lock snapshot is copied verbatim
 under `dependency_revisions`. Both packaged artifacts agree, and the installed/server
-versions were verified, but that redundant field is misleading. Preserve the immutable
-artifact records; remove the duplicate identity in the next native-build revision and
-add a packaging contract check. Dependency revisions themselves are unchanged.
+versions were verified, but that redundant field is misleading. The source now removes
+the duplicate identity and packaging rejects application identity in the dependency lock.
+All 13 build-contract tests pass. This packaging cleanup is not part of the tested
+`f2e9df5704cc` native pair; its immutable artifact records are preserved. Dependency
+revisions themselves are unchanged.
 
 The earlier two supervised diagnostic sessions were shut down normally. The second session's prior manual 150% SteamVR scale, all 22 recorded headset experiment properties, and exact original external-driver inventory were restored and checked; only the test ALVR add-on was removed. The test dashboard and headset app were closed. The owner confirmed Virtual Desktop works normally after restoration, covering image, tracking, controllers and audio.
 
