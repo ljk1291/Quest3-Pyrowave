@@ -81,7 +81,6 @@ def acceptance(report, expected, selected_target_mbps=None):
     requested = expected.get("requested_hz")
     if report.get("status") != "measured": reasons.append("capture_not_measured")
     if not report.get("frames"): reasons.append("no_fresh_stream_frames")
-    if report.get("duplicate_frame_events", 0): reasons.append("duplicate_frame_events")
     observed=report.get("submission_rate_window_s")
     if not isinstance(observed,(int,float)) or isinstance(observed,bool) or observed < expected.get("minimum_duration_s", 1800): reasons.append("capture_too_short")
     if requested != 90: reasons.append("target_acceptance_requires_90hz")
@@ -111,6 +110,11 @@ def acceptance(report, expected, selected_target_mbps=None):
         if key in expected and effective.get(key) != expected[key]: reasons.append('effective_%s_mismatch' % key)
     if effective.get('foveated_encoding') is not False: reasons.append('effective_foveation_unverified')
     if not report.get("fresh_runtime_evidence"): reasons.append("missing_fresh_runtime_evidence")
+    # Tracking timestamps are reusable and are not frame IDs. Until matching
+    # native monotonic output-sequence telemetry is available, a rate screen is
+    # only a selected-submission proxy and cannot satisfy strict freshness.
+    if report.get('fresh_frame_identity_verified') is not True:
+        reasons.append('strict_fresh_frame_identity_unverified')
     if report.get('runtime_evidence_coverage',{}).get('status') != 'covered': reasons.append('runtime_evidence_coverage_incomplete')
     if not report.get("build_identity") or not report.get("build_identity_verified"):
         reasons.append("build_identity_unverified")

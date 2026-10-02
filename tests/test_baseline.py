@@ -21,6 +21,7 @@ class BaselineTests(unittest.TestCase):
         return {'status': 'measured', 'frames': 2, 'elapsed_s': 1800, 'submission_rate_window_s':1800,
                 'settings_start': settings, 'settings_end': settings,
                 'fresh_runtime_evidence': True, 'build_identity': {'server': 'x'},
+                'fresh_frame_identity_verified': True,
                 'build_identity_verified': True, 'telemetry_complete': True,
                 'benchmark_tool_provenance':{'verified':True},
                 'thermal_ok': True, 'stream_errors': [], 'controllers_ok': True, 'audio_ok':True,
@@ -53,6 +54,12 @@ class BaselineTests(unittest.TestCase):
         self.assertIn('no_fresh_stream_frames', result['failure_reasons'])
         self.assertIn('manual_confirmation_missing', result['failure_reasons'])
 
+    def test_missing_strict_fresh_identity_telemetry_fails_closed(self):
+        report=self.passing_report(); report.pop('fresh_frame_identity_verified')
+        self.assertIn('strict_fresh_frame_identity_unverified', acceptance(report, self.expected())['failure_reasons'])
+        report=self.passing_report(); report['fresh_frame_identity_verified']=False
+        self.assertIn('strict_fresh_frame_identity_unverified', acceptance(report, self.expected())['failure_reasons'])
+
     def test_workload_isolation_must_be_explicitly_confirmed(self):
         report=self.passing_report(); report.pop('no_competing_gpu_workload')
         self.assertIn('gpu_workload_isolation_unverified', acceptance(report, self.expected())['failure_reasons'])
@@ -81,9 +88,9 @@ class BaselineTests(unittest.TestCase):
         report = self.passing_report(); report['submission_rate_window_s'] = 1799
         self.assertIn('capture_too_short', acceptance(report, self.expected())['failure_reasons'])
 
-    def test_duplicate_frames_fail(self):
+    def test_tracking_timestamp_reuse_is_not_an_identity_failure(self):
         report = self.passing_report(); report['duplicate_frame_events'] = 1
-        self.assertIn('duplicate_frame_events', acceptance(report, self.expected())['failure_reasons'])
+        self.assertNotIn('duplicate_frame_events', acceptance(report, self.expected())['failure_reasons'])
 
     def test_decoder_failure_counter_fails(self):
         report = self.passing_report()

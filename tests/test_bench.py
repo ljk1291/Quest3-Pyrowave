@@ -87,12 +87,26 @@ class BenchTests(unittest.TestCase):
         self.assertAlmostEqual(r['submitted_frame_rate_fps'],60)
         self.assertFalse(r['sustained_requested_fps'])
 
-    def test_duplicate_target_timestamps_cannot_count_as_fresh_rate(self):
+    def test_reused_tracking_timestamp_is_diagnostic_not_a_rate_failure(self):
         events=[{'capture_elapsed_s':t,'event':{'event_type':{
             'id':'GraphStatistics','data':{'client_fps':90,'target_timestamp_ns':stamp}}}}
-            for t,stamp in ((0,1),(1/90,1),(2/90,2))]
+            for t,stamp in ((0,1),(1/90,1),(2/90,1))]
         report=summarise(events,90)
-        self.assertEqual(report['duplicate_frame_events'], 1)
+        self.assertEqual(report['duplicate_frame_events'], 2)
+        self.assertEqual(report['target_timestamp_reuse_events'], 2)
+        self.assertEqual(report['distinct_target_timestamp_count'], 1)
+        self.assertEqual(report['fresh_frames'], 1) # Legacy distinct-timestamp alias.
+        self.assertAlmostEqual(report['selected_submission_event_rate_fps'],90)
+        self.assertTrue(report['requested_rate_screen_passed'])
+        self.assertFalse(report['fresh_frame_identity_verified'])
+
+    def test_repeated_arrival_timestamps_do_not_fabricate_a_submission_rate(self):
+        events=[{'capture_elapsed_s':0,'event':{'event_type':{
+                    'id':'GraphStatistics','data':{'client_fps':90,'target_timestamp_ns':1}}}},
+                {'capture_elapsed_s':0,'event':{'event_type':{
+                    'id':'GraphStatistics','data':{'client_fps':90,'target_timestamp_ns':2}}}}]
+        report=summarise(events,90)
+        self.assertIsNone(report['selected_submission_event_rate_fps'])
         self.assertFalse(report['requested_rate_screen_passed'])
 
     def test_queued_copies_cannot_hide_slow_completion(self):

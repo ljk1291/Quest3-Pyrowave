@@ -190,18 +190,31 @@ def summarise(events, requested_hz=None):
     increasing=valid_graph_times and all(b>a for a,b in zip(graph_times,graph_times[1:]))
     span=graph_times[-1]-graph_times[0] if increasing else 0
     result['submitted_frame_rate_fps']=(len(graph_times)-1)/span if span>0 else None
+    # GraphStatistics is emitted after client report_submit() selects a non-null
+    # decoded buffer. Its capture-arrival rate is therefore a submission-event
+    # proxy, not a unique image/frame identifier. Tracking target timestamps are
+    # deliberately reusable by different game frames, so they cannot invalidate
+    # this rate or establish freshness by themselves.
+    result['selected_submission_event_rate_fps']=result['submitted_frame_rate_fps']
     result['submission_rate_window_s']=span if span>0 else None
     result['sustained_rate_window_min_seconds']=SUSTAINED_RATE_WINDOW_SECONDS
     result['rate_stability']=rate_stability(timed_graphs,requested_hz)
     result['rate_check_scope']='Submission and available direct-completion rate proxies. A short pass is screening only; even a long rate pass does not certify configuration, image correctness, gameplay, thermals or optical FPS.'
-    result['submission_rate_definition']='GraphStatistics events per capture-time span; submitted video frames, not repeated OpenXR layers. With async copies this is submission, not GPU completion or optical display FPS.'
+    result['submission_rate_definition']='GraphStatistics events per QPC capture-time span. Each is a selected decoded-buffer submission event under the client report_submit path, not a unique source/image identifier, GPU completion, repeated OpenXR layer count or optical display FPS.'
     result['metrics']['client_fps']=distribution([g.get('client_fps') for g in graphs])
     result['metrics']['server_fps']=distribution([g.get('server_fps') for g in graphs])
     result['metrics']['video_mbps']=distribution([g.get('bitrate_bps',0)/1e6 for g in graphs])
     raw_timestamps=[g['target_timestamp_ns'] for g in graphs if 'target_timestamp_ns' in g]
     timestamps=sorted(set(raw_timestamps))
     result['duplicate_frame_events']=max(0, len(raw_timestamps)-len(timestamps))
-    result['fresh_frames']=len(timestamps) if raw_timestamps else None
+    result['target_timestamp_reuse_events']=result['duplicate_frame_events']
+    result['distinct_target_timestamp_count']=len(timestamps) if raw_timestamps else None
+    # Compatibility only. This historic name counted distinct tracking timestamps,
+    # not fresh frames. Keep it until downstream consumers migrate.
+    result['fresh_frames']=result['distinct_target_timestamp_count']
+    result['fresh_frames_definition']='Deprecated compatibility field: distinct tracking target timestamps, not unique fresh video frames. Use selected_submission_event_rate_fps for the selected decoded-buffer submission-event rate.'
+    result['fresh_frame_identity_verified']=False
+    result['fresh_frame_identity_definition']='Unavailable: target timestamps are reusable tracking keys. Strict fresh decoded-output identity requires matching native monotonic sequence telemetry.'
     result['metrics']['frame_timestamp_gap_ms']=distribution([(b-a)/1e6 for a,b in zip(timestamps,timestamps[1:])])
     # Counter deltas; never report the last lifetime total as this capture's losses.
     result['packet_loss_delta']=None
@@ -231,11 +244,9 @@ def summarise(events, requested_hz=None):
     result['completion_rate_definition']='GPU-complete direct eye copies per telemetry-time span, only for exclusively direct windows; staging completion is unobserved. Includes configuration-forced redraws. Not optical display or unique fresh-frame FPS.'
     if requested_hz and graphs:
         fps=result['metrics']['client_fps']
-        submitted=result['submitted_frame_rate_fps']
+        submitted=result['selected_submission_event_rate_fps']
         result['requested_rate_screen_passed']=(fps is not None and submitted is not None
             and fps['p01']>=requested_hz*.98 and submitted>=requested_hz*.98)
-        if result['duplicate_frame_events']:
-            result['requested_rate_screen_passed']=False
         completed=result['completed_eye_copy_rate_fps']
         if completed is not None:
             result['requested_rate_screen_passed'] &= completed>=requested_hz*.98
