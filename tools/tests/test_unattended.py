@@ -16,8 +16,9 @@ class Fake(u.Host):
   if args==('shell','dumpsys','battery'): return self.battery
   if args==('shell','dumpsys','thermalservice'): return f'Thermal Status: {self.thermal}'
   if args==('shell','getprop'): return '[debug.q3pw.test]: [1]\n[debug.oculus.refreshRate]: [90]'
-  if len(args)==4 and args[:2]==('shell','setprop'):
-   self.properties[args[2]]=args[3]; return ''
+  if len(args)==2 and args[0]=='shell' and args[1].startswith('setprop '):
+   import shlex
+   _,key,value=shlex.split(args[1]); self.properties[key]=value; return ''
   if len(args)==3 and args[:2]==('shell','getprop'): return self.properties.get(args[2],'')
   return ''
  def idle_seconds(self): return self.idle
@@ -70,12 +71,12 @@ def test_cli_missing_arm_refuses(monkeypatch,tmp_path):
 
 def test_restore_replays_empty_managed_property(monkeypatch, tmp_path):
     source=tmp_path/'vd.json'; backup=tmp_path/'backup.json'; source.write_text('x'); backup.write_text('x')
-    state={'serial':'Q3','adb':'adb','snapshot':{'headset_properties':{'managed':{'debug.q3pw.codec':'','debug.oculus.refreshRate':'90'}},'configuration_snapshots':[{'label':'vd','exists':True,'snapshot':str(backup),'source':str(source)}]},'restoration':{'status':'pending'}}
+    state={'serial':'Q3','adb':'adb','snapshot':{'headset_properties':{'managed':{'debug.q3pw.direct_eye_copy':'','debug.oculus.refreshRate':'90'}},'configuration_snapshots':[{'label':'vd','exists':True,'snapshot':str(backup),'source':str(source)}]},'restoration':{'status':'pending'}}
     path=tmp_path/'state.json'; u.atomic_write(path,state); host=Fake()
     monkeypatch.setattr('tools.quest3.preflight.verify_snapshot',lambda r:[{'error':None,'current_matches':True}])
     assert u.restore(path,host)['status']=='restored'
-    assert ('Q3',('shell','setprop','debug.q3pw.codec','')) in host.calls
-    assert ('Q3',('shell','setprop','debug.oculus.refreshRate','90')) in host.calls
+    assert ('Q3',('shell',"setprop debug.q3pw.direct_eye_copy ''")) in host.calls
+    assert ('Q3',('shell','setprop debug.oculus.refreshRate 90')) in host.calls
 
 def test_guard_readiness_is_bound_to_new_nonce_and_pid(tmp_path):
     assert not u.wait_for_guard(tmp_path,'restorer','new',10,timeout_s=0)
@@ -89,10 +90,10 @@ def test_status_lease_fails_closed_for_guard_staleness_or_revoke(monkeypatch, tm
     now=datetime(2026,10,3,1,tzinfo=timezone.utc)
     arm=tmp_path/'arm.json'; arm.write_text(json.dumps(dict(ARM, expires_local='2026-10-04T23:59')))
     state={'window_id':'window','deadline_epoch_s':now.timestamp()+3600,'guards_ready':True,
-           'guard_pids':{'restorer':11,'monitor':12},'monitor':{'last_sample_epoch_s':now.timestamp()},
+           'guard_pids':{'restorer':11,'monitor':12},'arm_sha256':u.arm_digest(json.loads(arm.read_text())),'guard_nonce':'n','monitor':{'last_sample_epoch_s':now.timestamp()},
            'restoration':{'status':'pending'}}
     u.atomic_write(tmp_path/'state.json',state)
-    for name in ('restorer.ready','monitor.ready'): (tmp_path/name).write_text('{}')
+    for name in ('restorer.ready','monitor.ready'): u.atomic_write(tmp_path/name, {'pid':11 if name.startswith('restorer') else 12,'role':'restorer' if name.startswith('restorer') else 'monitor','nonce':'n','ready_utc':'now'})
     monkeypatch.setattr(u,'pid_alive',lambda pid: True)
     status=u.status_payload(tmp_path,arm,now)
     assert status['lease']['active']
@@ -174,10 +175,11 @@ def test_status_and_restore_are_available_after_arm_revocation(monkeypatch, tmp_
 def test_status_checks_required_allow(monkeypatch, tmp_path):
     now=datetime(2026,10,3,1,tzinfo=timezone.utc)
     arm=tmp_path/'arm.json'; arm.write_text(json.dumps(dict(ARM, expires_local='2026-10-04T23:59', allow=['chart_cells'])))
-    state={'deadline_epoch_s':now.timestamp()+3600,'guards_ready':True,'guard_pids':{'restorer':1,'monitor':2},
+    state={'deadline_epoch_s':now.timestamp()+3600,'guards_ready':True,'guard_pids':{'restorer':1,'monitor':2},'arm_sha256':u.arm_digest(json.loads(arm.read_text())),'guard_nonce':'n',
            'monitor':{'last_sample_epoch_s':now.timestamp()},'restoration':{'status':'pending'}}
     u.atomic_write(tmp_path/'state.json',state)
-    for name in ('restorer.ready','monitor.ready'): (tmp_path/name).write_text('{}')
+    for name in ('restorer.ready','monitor.ready'):
+        u.atomic_write(tmp_path/name, {'pid':1 if name.startswith('restorer') else 2,'role':'restorer' if name.startswith('restorer') else 'monitor','nonce':'n','ready_utc':'now'})
     monkeypatch.setattr(u,'pid_alive',lambda pid: True)
     assert u.status_payload(tmp_path,arm,now,require_allow='chart_cells')['lease']['active']
     assert 'action_not_allowed' in u.status_payload(tmp_path,arm,now,require_allow='frame_bank_pc')['lease']['blockers']
@@ -190,3 +192,23 @@ def test_berlin_fallback_distinguishes_repeated_fall_hour():
     assert first.fold == 0 and second.fold == 1
     assert first.utcoffset() == timedelta(hours=2)
     assert second.utcoffset() == timedelta(hours=1)
+
+
+def test_usb_charging_is_required_not_ac_or_status():
+    assert not u.parse_battery('level: 80\ntemperature: 350\nAC powered: true\nstatus: 2')['charging']
+    assert u.parse_battery('level: 80\ntemperature: 350\nUSB powered: true')['charging']
+
+def test_restore_never_copies_virtual_desktop_files(monkeypatch, tmp_path):
+    source=tmp_path/'vd.json'; backup=tmp_path/'backup.json'; source.write_text('changed'); backup.write_text('original')
+    state={'serial':'Q3','adb':'adb','snapshot':{'headset_properties':{'managed':{}},'configuration_snapshots':[{'label':'virtual_desktop_streamer','exists':True,'snapshot':str(backup),'source':str(source),'sha256':'x'}]},'restoration':{'status':'pending'}}
+    path=tmp_path/'state.json'; u.atomic_write(path,state); host=Fake()
+    monkeypatch.setattr('tools.quest3.preflight.verify_snapshot',lambda records:[{'label':'virtual_desktop_streamer','error':None,'current_matches':False}])
+    result=u.restore(path,host)
+    assert result['status']=='restore_failed' and not result['vd_hashes_match']
+    assert source.read_text()=='changed' and 'vd_verify_only:virtual_desktop_streamer' in result['steps']
+
+def test_real_experiment_property_set_is_used():
+    names=u.managed_properties()
+    assert 'debug.q3pw.fragment_min_usage' in names
+    assert 'debug.q3pw.optimal_ahb_usage' in names
+    assert 'debug.q3pw.direct_flip_y' in names

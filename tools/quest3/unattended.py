@@ -5,7 +5,7 @@ an owner-only convenience: it requires an explicit acknowledgement and is never
 called by automation. All device commands include the serial stored in the arm.
 """
 from __future__ import annotations
-import argparse, ctypes, hashlib, json, os, shutil, subprocess, sys, time, uuid
+import argparse, ctypes, hashlib, json, os, re, shlex, shutil, subprocess, sys, time, uuid, urllib.request
 from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -17,14 +17,12 @@ MIN_REMAINING = 45 * 60
 MAX_HOURS = 6
 POLL_SECONDS = 30
 PAUSE_STATUS = 3  # Android THERMAL_STATUS_SEVERE
-MANAGED_PROPERTIES = (
-    'debug.q3pw.codec', 'debug.q3pw.transport', 'debug.q3pw.bitrate_mbps',
-    'debug.q3pw.render_width', 'debug.q3pw.render_height',
-    'debug.q3pw.encoded_width', 'debug.q3pw.encoded_height',
-    'debug.q3pw.refresh_hz', 'debug.q3pw.foveation', 'debug.q3pw.adaptive_bitrate',
-    'debug.q3pw.reprojection', 'debug.q3pw.decoder_experiment',
-    'debug.oculus.refreshRate', 'debug.oculus.guardian_pause',
-)
+def managed_properties():
+    # Single source of truth for real experiment keys. These are the only
+    # properties the harness may subsequently change and therefore restore.
+    from .bench import EXPERIMENT_PROPERTIES
+    return tuple(dict.fromkeys((*EXPERIMENT_PROPERTIES, 'debug.q3pw.direct_flip_y',
+                                'debug.oculus.guardian_pause')))
 GUARD_READY_SECONDS = 5
 CHECK_FRESH_SECONDS = 5 * 60
 
@@ -165,20 +163,65 @@ class Host:
         class LASTINPUTINFO(ctypes.Structure): _fields_=[('cbSize',ctypes.c_uint),('dwTime',ctypes.c_uint)]
         info=LASTINPUTINFO(ctypes.sizeof(LASTINPUTINFO)); ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info))
         return ((ctypes.windll.kernel32.GetTickCount64() - info.dwTime) & 0xffffffff) / 1000
-    def competing_gpu(self):
-        # Deliberately conservative. The owner can replace this check in a future integration.
-        names=('ComfyUI','python.exe','blender.exe'); running=[]
-        if os.name=='nt':
-            out=self.run('tasklist','/FO','CSV','/NH',timeout=10).lower()
-            running=[n for n in names if n.lower() in out]
-        return running
+    def _tasklist(self):
+        return self.run('tasklist','/FO','CSV','/NH',timeout=10).lower() if os.name=='nt' else ''
+    def _comfy_queue(self):
+        url=os.environ.get('Q3PW_COMFY_URL','http://127.0.0.1:8192')+'/queue'
+        try:
+            with urllib.request.urlopen(url,timeout=3) as response:
+                data=json.loads(response.read().decode('utf-8'))
+            running=data.get('queue_running',[]); pending=data.get('queue_pending',[])
+            return {'endpoint':url,'known':True,'running':len(running),'pending':len(pending),'error':None}
+        except Exception as exc: return {'endpoint':url,'known':False,'running':None,'pending':None,'error':str(exc)}
+    def gpu_sample(self):
+        """Record compute contention without treating every Python/service process as GPU work."""
+        out=self._tasklist(); comfy_running='comfyui' in out
+        comfy=self._comfy_queue() if comfy_running else {'known':True,'running':0,'pending':0,'error':None}
+        conflicts=[]
+        if comfy_running and (not comfy['known'] or comfy['running'] or comfy['pending']): conflicts.append('comfy_queue_active_or_unknown')
+        apps=[]; executable=shutil.which('nvidia-smi') or shutil.which('nvidia-smi.exe')
+        if executable:
+            try:
+                rows=self.run(executable,'--query-compute-apps=pid,process_name,used_gpu_memory','--format=csv,noheader,nounits',timeout=5)
+                apps=[line.strip() for line in rows.splitlines() if line.strip() and 'No running processes' not in line]
+                # A live Comfy process is allowed only when its local queue reports idle.
+                conflicts.extend(row for row in apps if 'comfy' not in row.lower())
+            except Refusal as exc: apps=['nvidia-smi-error:'+str(exc)]; conflicts.append('gpu_compute_status_unknown')
+        else: conflicts.append('gpu_compute_status_unknown')
+        sample={'at_utc':utc_now().isoformat(),'comfy':comfy,'nvidia_compute_apps':apps,'conflicts':conflicts}
+        self.last_gpu_sample=sample; return sample
+    def competing_gpu(self): return self.gpu_sample()['conflicts']
+    def _vd_log_state(self):
+        candidates=[Path(os.environ.get('PROGRAMDATA',r'C:\ProgramData'))/'Virtual Desktop/Streamer.log',
+                    Path(os.environ.get('LOCALAPPDATA',str(Path.home()/'AppData/Local')))/'Virtual Desktop/Streamer.log']
+        lines=[]
+        for path in candidates:
+            try: lines.extend(path.read_text(encoding='utf-8',errors='replace')[-65536:].splitlines())
+            except OSError: pass
+        for line in reversed(lines):
+            low=line.lower()
+            if 'disconnected' in low or 'streaming stopped' in low: return False
+            if 'connected' in low or 'streaming started' in low: return True
+        return None
     def vr_connected(self):
         if os.name!='nt': return False
-        out=self.run('tasklist','/FO','CSV','/NH',timeout=10).lower()
-        # Any existing VR session is owner work. A test scene is only started after
-        # this gate and therefore cannot be mistaken for an idle machine.
-        return any(x in out for x in ('vrserver.exe','vrcompositor.exe','vrmonitor.exe',
-                                      'steamvr.exe','virtualdesktop.streamer.exe','alvr_server.exe'))
+        out=self._tasklist()
+        if any(x in out for x in ('vrserver.exe','vrcompositor.exe','vrmonitor.exe','steamvr.exe')): return True
+        alvr='alvr dashboard.exe' in out or 'alvr_server.exe' in out
+        if alvr:
+            try:
+                from .control import session as alvr_session
+                clients=alvr_session().get('client_connections',{})
+                return bool(clients)
+            except Exception:
+                # Dashboard exists but its actual session state cannot be read.
+                return True
+        if 'virtualdesktop.streamer.exe' in out:
+            state=self._vd_log_state()
+            # A resident streamer is acceptable only with a recent, explicit
+            # disconnected record; unknown is fail-closed.
+            return state is not False
+        return False
     def keep_awake(self, active):
         if os.name=='nt':
             flags=0x80000000 | (0x00000001 if active else 0)
@@ -194,7 +237,7 @@ def parse_battery(text):
         except (KeyError,ValueError):return None
     temperature=number('temperature')
     return {'level':number('level'),'temperature_c':None if temperature is None else temperature/10,
-            'charging': data.get('ac powered','false')=='true' or data.get('usb powered','false')=='true' or data.get('status')=='2'}
+            'charging': data.get('usb powered','false')=='true'}
 def parse_thermal(text):
     import re
     m=re.search(r'Thermal Status:\s*(\d+)',text)
@@ -204,14 +247,17 @@ def snapshot(host, serial, directory):
     """Capture only private evidence before settings change. Any read failure rejects the window."""
     directory=Path(directory); before=directory/'before'; before.mkdir(parents=True,exist_ok=False)
     from . import preflight
+    from .control import session as alvr_session
     inv,sources=preflight.inventory(); records=preflight.snapshot_files(sources,before/'configurations')
     if any(r.get('error') or not r.get('exists') for r in records): raise Refusal('incomplete PC/VD settings snapshot')
+    try: session_snapshot=alvr_session()
+    except Exception as exc: raise Refusal('matched ALVR session snapshot unavailable: '+str(exc)) from exc
     # Android getprop has no glob form. Preserve the exact old values of every
     # property this supervisor can restore; an absent value is explicitly saved.
     all_props=host.adb_run(serial,'shell','getprop')
     props={'all_filtered':[line for line in all_props.splitlines() if 'debug.q3pw.' in line or 'debug.oculus.' in line],
-           'managed':{key: host.adb_run(serial,'shell','getprop',key) for key in MANAGED_PROPERTIES}}
-    data={'schema':1,'created_utc':utc_now().isoformat(),'preflight':inv,'configuration_snapshots':records,'headset_properties':props}
+           'managed':{key: host.adb_run(serial,'shell','getprop',key) for key in managed_properties()}}
+    data={'schema':1,'created_utc':utc_now().isoformat(),'preflight':inv,'alvr_session':session_snapshot,'configuration_snapshots':records,'headset_properties':props}
     atomic_write(before/'snapshot.json',data); return data
 
 def live_preconditions(arm, host):
@@ -232,7 +278,7 @@ def live_preconditions(arm, host):
 
 def check_preconditions(arm, host, directory, now=None):
     window=arm_window(arm,now); serial=arm['headset_serial']; failures,battery,thermal=live_preconditions(arm,host)
-    report={'schema':1,'checked_utc':utc_now().isoformat(),'arm_sha256':arm_digest(arm),'window':{'deadline_utc':window['deadline'].isoformat(),'remaining_s':window['remaining_s']},'serial':serial,'failures':failures,'battery':battery,'thermal_status':thermal,'passed':not failures}
+    report={'schema':1,'checked_utc':utc_now().isoformat(),'arm_sha256':arm_digest(arm),'window':{'deadline_utc':window['deadline'].isoformat(),'remaining_s':window['remaining_s']},'serial':serial,'failures':failures,'battery':battery,'thermal_status':thermal,'gpu_sample':getattr(host,'last_gpu_sample',None),'passed':not failures}
     if not failures:
         try: report['snapshot']=snapshot(host,serial,directory)
         except Exception as exc: report['failures'].append('snapshot_incomplete:'+str(exc)); report['passed']=False
@@ -243,8 +289,9 @@ def restore(state_path, host=None):
     state_path=Path(state_path); state=json_read(state_path)
     if state.get('restoration',{}).get('status')=='restored': return state['restoration']
     host=host or Host(state.get('adb','adb')); serial=state['serial']; steps=[]
+    client_stopped=False; awake_restored=True
     try:
-        host.adb_run(serial,'shell','am','force-stop','io.github.ljk1291.quest3pyrowave'); steps.append('fork_client_stopped')
+        host.adb_run(serial,'shell','am','force-stop','io.github.ljk1291.quest3pyrowave'); client_stopped=True; steps.append('fork_client_stopped')
     except Exception as exc: steps.append('fork_client_stop_failed:'+str(exc))
     awake_state = state_path.parent / 'awake.json'
     if awake_state.is_file():
@@ -254,37 +301,46 @@ def restore(state_path, host=None):
             from .awake import restore as restore_awake
             restore_awake(awake_state); steps.append('physical_proximity_restored')
         except Exception as exc:
-            steps.append('physical_proximity_restore_failed:'+str(exc))
+            awake_restored=False; steps.append('physical_proximity_restore_failed:'+str(exc))
     # Restore each managed property, including the empty value which represents
     # an absent pre-window override. Never replay arbitrary getprop output.
     properties=state['snapshot']['headset_properties']
     for key, value in properties.get('managed', {}).items():
-        if key in MANAGED_PROPERTIES:
-            try: host.adb_run(serial,'shell','setprop',key,value); steps.append('prop:'+key)
+        if key in managed_properties():
+            try: host.adb_run(serial,'shell',f"setprop {shlex.quote(key)} {shlex.quote(value)}"); steps.append('prop:'+key)
             except Exception as exc: steps.append('prop_failed:'+key+':'+str(exc))
     if not properties.get('managed'):
         # Compatibility with early snapshots: only replay safe, explicit keys.
         import re
         for line in properties.get('all_filtered',[]):
             m=re.match(r'\[([^]]+)\]: \[([^]]*)\]',line)
-            if m and m.group(1) in MANAGED_PROPERTIES:
-                try: host.adb_run(serial,'shell','setprop',m.group(1),m.group(2)); steps.append('prop:'+m.group(1))
+            if m and m.group(1) in managed_properties():
+                try: host.adb_run(serial,'shell',f"setprop {shlex.quote(m.group(1))} {shlex.quote(m.group(2))}"); steps.append('prop:'+m.group(1))
                 except Exception as exc: steps.append('prop_failed:'+m.group(1)+':'+str(exc))
-    # Restore OpenXR registration directly when the owning selector/API is unavailable.
+    # Do not write OpenXR's registry key directly: the owning runtime selector
+    # must own that change. Record whether it already matches the snapshot.
     runtime = state['snapshot'].get('preflight',{}).get('active_openxr_runtime', {}).get('value')
     runtime_restored = runtime is None
-    if runtime and os.name == 'nt':
+    if runtime:
         try:
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Khronos\OpenXR\1', 0, winreg.KEY_SET_VALUE) as key:
-                winreg.SetValueEx(key, 'ActiveRuntime', 0, winreg.REG_SZ, runtime)
-            runtime_restored = True; steps.append('openxr_runtime')
-        except OSError as exc: steps.append('openxr_runtime_failed:'+str(exc))
-    # API-independent fallback: copies saved settings back exactly, then hashes with preflight.
+            from .preflight import registry_value
+            current=registry_value(r'SOFTWARE\Khronos\OpenXR\1','ActiveRuntime').get('value')
+            runtime_restored = current == runtime
+            steps.append('openxr_runtime_verified' if runtime_restored else 'openxr_runtime_requires_owner_selector')
+        except Exception as exc: steps.append('openxr_runtime_verify_failed:'+str(exc))
+    # Virtual Desktop files and OpenVR driver registration are never copied back.
+    # They are verification-only to preserve the owner's registration/settings.
     for record in state['snapshot']['configuration_snapshots']:
-        if record.get('exists') and record.get('snapshot'):
-            try: shutil.copyfile(record['snapshot'],record['source']); steps.append('file:'+record['label'])
-            except OSError as exc: steps.append('file_failed:'+record['label']+':'+str(exc))
+        if record.get('label') == 'steamvr_settings' and record.get('exists') and record.get('snapshot'):
+            if host.vr_connected():
+                steps.append('steamvr_settings_not_restored_active_vr')
+            else:
+                try: shutil.copyfile(record['snapshot'],record['source']); steps.append('steamvr_settings_restored')
+                except OSError as exc: steps.append('steamvr_settings_restore_failed:'+str(exc))
+        elif record.get('label','').startswith('virtual_desktop'):
+            steps.append('vd_verify_only:'+record['label'])
+        elif record.get('label') == 'openvr_paths':
+            steps.append('steamvr_drivers_verify_only')
     verification=[]
     try:
         from .preflight import verify_snapshot
@@ -299,8 +355,10 @@ def restore(state_path, host=None):
             properties_ok = properties_ok and got == wanted
         except Exception as exc:
             property_readback[key]={'expected':wanted,'error':str(exc),'matches':False}; properties_ok=False
-    ok=files_ok and runtime_restored and properties_ok
-    state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'saved_configuration_files_when_control_api_is_unavailable','vd_hashes_match':files_ok,'openxr_runtime_restored':runtime_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
+    vd_checks=[row for row in verification if str(row.get('label','')).startswith('virtual_desktop')]
+    vd_hashes_match=all(x.get('error') is None and x.get('current_matches') is True for x in vd_checks)
+    ok=files_ok and runtime_restored and properties_ok and client_stopped and awake_restored
+    state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'only_steamvr_settings_copy_when_inactive;_vd_and_driver_files_verify_only','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
     atomic_write(state_path,state); return state['restoration']
 
 def health_decision(sample, state, now):
@@ -313,7 +371,9 @@ def health_decision(sample, state, now):
         if not state.get('paused'): state.update(paused=True,paused_at=now,pauses=state.get('pauses',0)+1)
         if state['pauses']>=3: state['ended']=True; return 'end'
         return 'pause'
-    if state.get('paused') and now-state['paused_at']>=15*60 and sample.get('temperature_c',99)<=40:
+    if (state.get('paused') and now-state['paused_at']>=15*60 and sample.get('temperature_c',99)<=40 and
+            sample.get('thermal_status') is not None and sample.get('thermal_status') <= 1 and
+            sample.get('battery') is not None and sample.get('battery') >= 30):
         state['paused']=False; return 'resume'
     return 'paused' if state.get('paused') else 'run'
 
@@ -326,7 +386,8 @@ def worker(state_path, monitor=False):
         while True:
             state=json_read(state_path); now=time.time()
             if (state_path.parent/'stop').exists() or now>=state['deadline_epoch_s']:
-                restore(state_path,host); return
+                if not monitor: restore(state_path,host)
+                return
             if monitor:
                 b=parse_battery(host.adb_run(state['serial'],'shell','dumpsys','battery')); t=parse_thermal(host.adb_run(state['serial'],'shell','dumpsys','thermalservice'))
                 # The monitor owns a separate record. It never rewrites state.json,
@@ -335,7 +396,8 @@ def worker(state_path, monitor=False):
                 m=json_read(monitor_path) if monitor_path.is_file() else {'schema':1}
                 m['last_sample_epoch_s']=now
                 action=health_decision({'battery':b['level'],'temperature_c':b['temperature_c'],'thermal_status':t},m,now)
-                workload=host.competing_gpu(); m['competing_gpu']=workload
+                gpu_sample=host.gpu_sample() if hasattr(host,'gpu_sample') else {'conflicts':host.competing_gpu()}
+                workload=gpu_sample['conflicts']; m['competing_gpu']=workload; m['gpu_sample']=gpu_sample
                 pause_marker=state_path.parent/'pause'
                 if workload:
                     # A timing cell cannot remain valid once the owner's GPU work
@@ -348,12 +410,14 @@ def worker(state_path, monitor=False):
                 elif action == 'resume' and pause_marker.exists() and not workload: pause_marker.unlink()
                 m['last_action']=action; atomic_write(monitor_path,m)
                 if action=='end': (state_path.parent/'stop').write_text('thermal/battery terminal\n',encoding='utf-8'); continue
-            time.sleep(POLL_SECONDS)
+            # The deadline restorer sleeps only until its exact deadline; the
+            # monitor retains its fixed 30-second cadence.
+            time.sleep(POLL_SECONDS if monitor else max(0, min(POLL_SECONDS, state['deadline_epoch_s']-time.time())))
     finally: host.keep_awake(False)
 
 def spawn_worker(state, monitor):
     args=[sys.executable,'-m','tools.quest3.unattended','--worker',str(state),'--monitor' if monitor else '--restorer']
-    opts={'creationflags':getattr(subprocess,'CREATE_NO_WINDOW',0)} if os.name=='nt' else {'start_new_session':True}
+    opts={'creationflags':(getattr(subprocess,'CREATE_NO_WINDOW',0) | getattr(subprocess,'CREATE_NEW_PROCESS_GROUP',0) | getattr(subprocess,'DETACHED_PROCESS',0))} if os.name=='nt' else {'start_new_session':True}
     return subprocess.Popen(args,cwd=ROOT,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,**opts)
 
 def wait_for_guard(directory, name, nonce, pid, timeout_s=GUARD_READY_SECONDS):
@@ -388,10 +452,10 @@ def status_payload(directory, arm_path=ARM, now=None, require_allow=None):
     """
     directory=Path(directory); state_path=directory/'state.json'; now=now or utc_now()
     stop=(directory/'stop').is_file(); pause=(directory/'pause').is_file()
-    arm={'present':Path(arm_path).is_file(),'active':False,'reason':None}
+    arm={'present':Path(arm_path).is_file(),'active':False,'reason':None}; arm_value=None
     if arm['present']:
         try:
-            arm_value=json_read(arm_path); arm_window(arm_value,now); arm['active']=True
+            arm_value=json_read(arm_path); arm_window(arm_value,now,require_remaining=False); arm['active']=True
             arm['allowed_actions']=arm_value.get('allow',[])
         except Exception as exc: arm['reason']=str(exc); arm['allowed_actions']=[]
     else: arm['reason']='arm file missing or revoked'; arm['allowed_actions']=[]
@@ -403,14 +467,21 @@ def status_payload(directory, arm_path=ARM, now=None, require_allow=None):
     guard_pids=state.get('guard_pids',{})
     guards={}
     for role in ('restorer','monitor'):
-        pid=guard_pids.get(role); guards[role]={'ready':(directory/(role+'.ready')).is_file(),'pid':pid,'alive':pid_alive(pid)}
+        pid=guard_pids.get(role); marker=directory/(role+'.ready'); ready=False
+        try:
+            record=json_read(marker)
+            ready=(set(record)=={'pid','role','nonce','ready_utc'} and record['pid']==pid and
+                   record['role']==role and record['nonce']==state.get('guard_nonce'))
+        except (OSError, ValueError, json.JSONDecodeError): pass
+        guards[role]={'ready':ready,'pid':pid,'alive':pid_alive(pid)}
     monitor_path=directory/'monitor.json'
     monitor=json_read(monitor_path) if monitor_path.is_file() else state.get('monitor',{})
     sample=monitor.get('last_sample_epoch_s')
-    sample_fresh=isinstance(sample,(int,float)) and now.timestamp()-sample <= POLL_SECONDS*2+5
+    sample_age=now.timestamp()-sample if isinstance(sample,(int,float)) else None
+    sample_fresh=sample_age is not None and 0 <= sample_age <= POLL_SECONDS*2+5
     restored=state.get('restoration',{}).get('status') != 'pending'
     blockers=[]
-    if not arm['active']: blockers.append('arm_inactive')
+    if not arm['active'] or arm_value is None or state.get('arm_sha256') != arm_digest(arm_value): blockers.append('arm_inactive')
     if require_allow and require_allow not in arm['allowed_actions']: blockers.append('action_not_allowed')
     if now.timestamp() >= deadline: blockers.append('deadline_expired')
     if stop: blockers.append('stop_requested')
@@ -479,7 +550,7 @@ def main():
         for name in ('restorer.ready','monitor.ready','monitor.json'):
             (directory/name).unlink(missing_ok=True)
         nonce=uuid.uuid4().hex
-        state={'schema':1,'window_id':directory.name,'serial':arm['headset_serial'],'adb':'adb','deadline_epoch_s':window['deadline'].timestamp(),'snapshot':check['snapshot'],'restoration':{'status':'pending'},'guards_ready':False,'guard_pids':{},'guard_nonce':nonce}
+        state={'schema':1,'window_id':directory.name,'serial':arm['headset_serial'],'adb':'adb','deadline_epoch_s':window['deadline'].timestamp(),'snapshot':check['snapshot'],'restoration':{'status':'pending'},'guards_ready':False,'guard_pids':{},'guard_nonce':nonce,'arm_sha256':arm_digest(arm)}
         atomic_write(state_path,state)
         r=spawn_worker(state_path,False)
         if not wait_for_guard(directory,'restorer',nonce,r.pid) or not pid_alive(r.pid):
