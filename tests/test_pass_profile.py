@@ -59,6 +59,15 @@ class PassProfileTests(unittest.TestCase):
         self.assertIn("invalid_gpu_pass_samples", result["failure_reasons"])
         self.assertIn("sample_before_valid_activation", result["warnings"])
 
+    def test_mixed_valid_and_wrong_cadence_activation_fails_closed(self):
+        result = parse("\n".join((
+            ACTIVATION,
+            "[Q3PW_GPU_PASS] enabled=1 cadence_completed_frames=60 scope=granite_frame_context_mean",
+            "[Q3PW_GPU_PASS] completed_frames=90 wall_ms=1000 phase=Dequant avg_ms=1 scope=granite_frame_context_mean",
+        )))
+        self.assertFalse(result["healthy_profiling_claim"])
+        self.assertIn("invalid_gpu_pass_activation", result["failure_reasons"])
+
     def test_cli_returns_nonzero_for_unhealthy_profile(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

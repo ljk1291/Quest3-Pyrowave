@@ -33,7 +33,7 @@ All used the same chart dimensions and 90 Hz, with ComfyUI's queue idle at every
 
 New source telemetry assigns identities when decoder sources dequeue outputs and counts each selected non-null output once after render submission and both eye-image releases. It excludes repeated/stale identities and null redraws, for MediaCodec and PyroWave. Its counter is not GPU completion or optical presentation. Python acceptance requires the source marker, monotonic counters, complete capture coverage and a passing rate in every endurance window. These packet changes use protocol revision `20.13.0-ljk1291.2` to reject the incompatible earlier `.1` wire format and require a new matching APK/server pair; the live results above retain their original build/tool identities and cannot acquire new evidence retrospectively.
 
-The `.2` pair was tested in supervised Session 03 with 3072×3232-per-eye render and encoded resolution, 90 Hz, PyroWave Haar, direct eye copy, TCP transport and 4:2:0 chroma. Each short chart screen passed the build-identity, unchanged-settings, strict selected-output-counter, runtime, host-isolation and thermal gates, with no stream errors. The fresh source counter was verified in all four runs:
+The `.2` pair was tested in owner-authorized AFK Session 03 with 3072×3232-per-eye render and encoded resolution, 90 Hz, PyroWave Haar, direct eye copy, TCP transport and 4:2:0 chroma. Each short chart screen passed the build-identity, unchanged-settings, strict selected-output-counter, runtime, host-isolation and thermal gates, with no stream errors. The fresh source counter was verified in all four runs:
 
 | Profile | Selected-output events/s | 90 Hz rate screen |
 | --- | ---: | --- |
@@ -42,7 +42,24 @@ The `.2` pair was tested in supervised Session 03 with 3072×3232-per-eye render
 | `haar600` | 53.42 | Failed |
 | `haar300-b` | 55.41 | Failed |
 
-This establishes fresh selected-output telemetry on the matched `.2` build, but none of these profiles met the 90 Hz target. The short chart screens are not Metro, endurance, recovery, optical-latency or display-FPS evidence. Captured screenshots and video are qualitative only: chart overlays obscure the image, and no decoded-buffer score or manual image-quality review was collected. Separate native pass-profile work is pending a build and is not part of this tested pair.
+This establishes fresh selected-output telemetry on the matched `.2` build, but none of these profiles met the 90 Hz target. The short chart screens are not Metro, endurance, recovery, optical-latency or display-FPS evidence. Captured screenshots and video are qualitative only: chart overlays obscure the image, and no decoded-buffer score or manual image-quality review was collected. The later pass-profile work is separate from this tested pair.
+
+Owner-authorized AFK Session 04 used the verified `f2e9df5704cc` pair at the same geometry,
+300 Mbps, Haar/direct/Compute/4:2:0/TCP, with diagnostic profiling enabled and the performance
+HUD and SteamVR dashboard hidden. The short profiler interval measured approximately **3.75 ms
+dequantization** and **5.00 ms inverse-wavelet reconstruction**, as delayed Granite window means.
+A separate 25-second telemetry window inside that chart measured an 8.99 ms GPU-decode median,
+4.92 ms conversion median and 17.31 ms decode-to-fence median. Fresh selected outputs averaged
+56.35/s; this is a diagnostic, not an improvement comparison or a 90 Hz pass.
+Build/runtime, unchanged settings, telemetry and thermal checks passed, with no reported stream
+errors. See [the sanitized profile and visual evidence record](../results/decoder-profile-2026-10-02.json).
+
+Two unobstructed 4128×2208 screenshots and a 7.79-second recording were saved privately in a
+separate chart run. LEFT/RIGHT labels and counter changes were visible. Fine coloured text and
+thin edges show softness/fringing, but compositor transforms prevent isolating codec loss or
+assigning an exact pixel-quality score. Prior tracking/controller/audio confirmation is retained;
+AFK captures do not establish motion comfort or Metro quality. Saved resolution, dashboard
+setting, all 24 headset properties, driver inventory and VDXR runtime were restored and verified.
 
 ## Build validation — 2026-10-02
 
@@ -52,7 +69,16 @@ This establishes fresh selected-output telemetry on the matched `.2` build, but 
 - Stable Actions run `37016740156` then passed its contract tests, signed Android packaging, Windows native build and regression suite, and the matching-pair gate. Retained artifact checksums are recorded in [build-validation-2026-10-02.json](../results/build-validation-2026-10-02.json). The verified pair is commit `0c618b809ae47dc67b4ad91a2423579c7efbb6d0`, version `20.13.0-ljk1291.1+0c618b809ae4`, with the same stable signing certificate fingerprint.
 - Stable Actions run `37032258856` passed its contract tests, signed Android packaging, Windows native build and regression suite, and the matching-pair gate for the selected-output telemetry protocol revision. The retained pair is commit `d4735d88985a75f3605d00d88aca543327a0f090`, version `20.13.0-ljk1291.2+d4735d88985a`, with stable certificate fingerprint `4a3fe0a8d47ee67b01710df6ffdc870e91ebc5b8e7feec7c87534944ca2a44aa`; artifact IDs and hashes are in [build-validation-2026-10-02.json](../results/build-validation-2026-10-02.json).
 - The verified `0c618b809ae4` APK and matching server have streamed the controlled HEVC/PyroWave chart captures above. The earlier `cbf70c27269d` pair supplied the initial functional tracking/controller/audio checks. No Metro Awakening, Godlike-resolution, 90 Hz, endurance or recovery qualification is claimed.
-- The `.2` pair completed the supervised Session 03 bitrate screen above. It supplied valid strict selected-output evidence but no 90 Hz pass, and remains unqualified for Metro, endurance, recovery or image-quality acceptance.
+- The `.2` pair completed the owner-authorized AFK Session 03 bitrate screen above. It supplied valid strict selected-output evidence but no 90 Hz pass, and remains unqualified for Metro, endurance, recovery or image-quality acceptance.
+- Stable Actions run `37038811141` passed tests, signed Android packaging, Windows native compilation/regressions and matching-pair verification for `f2e9df5704cc679513848bf6ffb63ef1695479f9`. Both retained artifact checksums and local pair verification passed; this pair supplied the Session 04 profiler and clean image captures. The signing certificate is unchanged.
+
+Metadata limitation: the historical `sources.lock.json` contains an unused duplicate
+`fork.protocol_version` still set to `.1`. The build/version writers read `fork.json`,
+which supplies the actual `.2` protocol; the source-lock snapshot is copied verbatim
+under `dependency_revisions`. Both packaged artifacts agree, and the installed/server
+versions were verified, but that redundant field is misleading. Preserve the immutable
+artifact records; remove the duplicate identity in the next native-build revision and
+add a packaging contract check. Dependency revisions themselves are unchanged.
 
 The earlier two supervised diagnostic sessions were shut down normally. The second session's prior manual 150% SteamVR scale, all 22 recorded headset experiment properties, and exact original external-driver inventory were restored and checked; only the test ALVR add-on was removed. The test dashboard and headset app were closed. The owner confirmed Virtual Desktop works normally after restoration, covering image, tracking, controllers and audio.
 

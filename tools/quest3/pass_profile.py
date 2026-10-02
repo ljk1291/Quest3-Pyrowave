@@ -64,6 +64,11 @@ def parse(text: str) -> dict[str, Any]:
             activation_records.append(record)
             if cadence == 90 and scope == SCOPE and first_valid_activation_line is None:
                 first_valid_activation_line = number
+            elif cadence != 90 or scope != SCOPE:
+                # A mixed log may contain a valid activation followed by a
+                # different cadence/scope. Do not combine those contexts.
+                invalid_activation_records += 1
+                warnings.append("invalid_gpu_pass_activation")
         else:
             invalid_activation_records += 1
             warnings.append("invalid_gpu_pass_activation")
@@ -122,7 +127,7 @@ def parse(text: str) -> dict[str, Any]:
         "warnings": sorted(set(warnings)),
         "healthy_profiling_claim": not failures,
         "failure_reasons": failures,
-        "limitations": "Each value is a Granite completed-frame-context window mean. It is not exact-frame latency, a p95 frame time, display FPS, or optical latency.",
+        "limitations": "Each value is a delayed Granite frame-context window mean. Ninety completed submissions trigger reporting, but do not imply exactly ninety retired timestamp samples. It is not exact-frame latency, a p95 frame time, display FPS, or optical latency.",
     }
 
 

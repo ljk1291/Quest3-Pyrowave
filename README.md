@@ -2,7 +2,7 @@
 
 This fork targets sustained **90 Hz at the owner's measured Virtual Desktop Godlike dimensions** on Quest 3 over a dedicated Wi-Fi 6 router. The first game is Metro Awakening, using SteamVR's OpenXR runtime. Godlike/90 Hz is a test target, **not a demonstrated result**.
 
-Development starts from [JMS1717/Quest3-Pyrowave](https://github.com/JMS1717/Quest3-Pyrowave) at `f6eae38380ecf0cb706aaa9aabc0fd66ec29cd6a`. Dependencies remain pinned in [sources.lock.json](sources.lock.json). The intended fork is `ljk1291/Quest3-Pyrowave`, with Android package `io.github.ljk1291.quest3pyrowave` and its own version identity. See [implementation status](docs/IMPLEMENTATION-STATUS.md) for actual validation.
+Development starts from [JMS1717/Quest3-Pyrowave](https://github.com/JMS1717/Quest3-Pyrowave) at `f6eae38380ecf0cb706aaa9aabc0fd66ec29cd6a`. Dependencies remain pinned in [sources.lock.json](sources.lock.json). This fork is `ljk1291/Quest3-Pyrowave`, with Android package `io.github.ljk1291.quest3pyrowave` and its own version identity. See [implementation status](docs/IMPLEMENTATION-STATUS.md) for actual validation.
 
 ## Start here
 
@@ -16,13 +16,18 @@ For a short decoder diagnostic only, `adb shell setprop debug.q3pw.pass_profile 
 the client enables local `[Q3PW_GPU_PASS]` log lines every 90 successful GPU completions. They are
 Granite timestamp **frame-context window means** for known decoder passes, not frame-specific
 latency, display FPS or acceptance telemetry. Borrowed command buffers retire Granite contexts on
-a later decode call, so the logs can lag one context. This off-by-default probe still requires
-hardware validation before it is used to guide an optimization.
+later decode calls, so results lag by the frame-context ring. Ninety completed submissions trigger
+reporting; the means do not promise exactly ninety timestamp samples. The off-by-default probe
+was verified on the matching `f2e9df5704cc` pair in a short Quest chart diagnostic.
+It measured roughly 3.75 ms dequantization and 5.00 ms inverse-wavelet reconstruction;
+the separate conversion median was 4.92 ms. See the [sanitized profile](results/decoder-profile-2026-10-02.json).
 
 Save only the fresh diagnostic log window, then parse it with
 `python -m tools.quest3.pass_profile --log profile.log --out profile.json`.
 The offline parser rejects missing activation, invalid phase timings and native
-timestamp warnings. See the [decoder test plan and backlog](docs/DECODER-OPTIMIZATION-PLAN.md)
+timestamp warnings. Preserve current decoder activation as configuration provenance and restrict
+timing samples to the chart interval; an old activation is not a fresh timing sample.
+See the [decoder test plan and backlog](docs/DECODER-OPTIMIZATION-PLAN.md)
 for the controlled bitrate results and the next experiments.
 
 ## Baseline changes

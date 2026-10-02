@@ -71,7 +71,7 @@
     "artifact_checksums_verified": true,
     "matching_dependency_revisions": true,
     "matching_shader_hashes": true,
-    "hardware_status": "supervised_session_03_short_rate_screen_completed_not_accepted",
+    "hardware_status": "owner_authorized_afk_session_03_short_rate_screen_completed_not_accepted",
     "apk_install_verified": true,
     "server_launch_verified": true,
     "selected_output_telemetry_verified_in_hardware": true,
@@ -141,7 +141,7 @@
         "vdxr_runtime_selection": "unchanged",
         "post_session_virtual_desktop_functional_check": "pending_owner_return"
       },
-      "pending_separate_work": "Native pass-profile code is pending a build and is not part of this tested pair."
+      "pending_separate_work": "Profiling and clean compositor capture completed separately on f2e9df5704cc in session 04; no 90 Hz or image-quality acceptance."
     }
   },
   "pair_diagnostic": {
@@ -159,6 +159,85 @@
   },
   "hardware_acceptance": {
     "status": "short_rate_screen_completed_not_accepted",
-    "note": "Session 03 verified fresh selected-output telemetry on the matched .2 pair, but all four short PyroWave Haar/direct/TCP/4:2:0 screens at 3072x3232 per eye and 90 Hz were below the 90 Hz target. Metro, endurance, recovery, quantitative image quality, manual image-quality review, optical latency and display FPS remain unmeasured."
+    "note": "Session 03 verified strict fresh selected-output counters but all 300/400/600/300 Mbps short screens failed the 90 Hz target. Session 04 profiled the decoder and captured unobstructed qualitative images on a newer matching build, without an optimization or acceptance claim. Metro, endurance, recovery, quantitative image quality, manual motion review, optical latency and display FPS remain unmeasured."
+  },
+  "decoder_profiling_pair": {
+    "run_id": 37038811141,
+    "url": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37038811141",
+    "conclusion": "success",
+    "identity": {
+      "repository_commit": "f2e9df5704cc679513848bf6ffb63ef1695479f9",
+      "application_version": "20.13.0-ljk1291.2+f2e9df5704cc",
+      "protocol_version": "20.13.0-ljk1291.2",
+      "client_package_id": "io.github.ljk1291.quest3pyrowave",
+      "signing_certificate_sha256": "4a3fe0a8d47ee67b01710df6ffdc870e91ebc5b8e7feec7c87534944ca2a44aa",
+      "dependency_revisions": {
+        "alvr": {
+          "commit": "7eda092dbf0002281410a4222683ec228700cffb",
+          "url": "https://github.com/alvr-org/ALVR"
+        },
+        "android_ndk": "27.2.12479018",
+        "cargo_apk": {
+          "commit": "0fd3126dad5aa1c5f0f26cdae3410f2e5af62c60",
+          "url": "https://github.com/zarik5/cargo-apk"
+        },
+        "fork": {
+          "client_package_id": "io.github.ljk1291.quest3pyrowave",
+          "protocol_version": "20.13.0-ljk1291.1",
+          "upstream_reference_commit": "f6eae38380ecf0cb706aaa9aabc0fd66ec29cd6a"
+        },
+        "granite": {
+          "commit": "842d9d5686ba8c799a7d34a78a68f98d6aeb5a68",
+          "url": "https://github.com/Themaister/Granite"
+        },
+        "integration": {
+          "commit": "54cc8519bddceff57e159e6f39914e373b512809",
+          "url": "https://github.com/Terminal-ennui/galaxy-xr-alvr-pyrowave-444"
+        },
+        "openxr_loader": {
+          "android_aar": "openxr_loader_for_android-1.0.34.aar",
+          "release": "release-1.0.34",
+          "sha256": "c8b50603ad3b81756c6bd203ab9c9d19341326e14f6cbae87ee894137ee5e256"
+        },
+        "pyrowave": {
+          "commit": "d2997ac172bdc00e29c58e3f2938acb7e94580bf",
+          "url": "https://github.com/Themaister/pyrowave"
+        },
+        "reproducibility": "Pinned inputs and build recipe; signed APKs and ZIP metadata are not claimed byte-identical.",
+        "rust": "1.97.1"
+      },
+      "shader_hashes": {
+        "shaders/constants.h": "3bc9555f8399bad2bd6960536125588fd7dbc7936a7147755fc497241f04e062",
+        "shaders/dwt.comp": "f58c3f95d68a90f4621fc1999bcf9a95e1a263b80d20355b0ac20002828a90b1",
+        "shaders/dwt_common.h": "591f529143fce7efad00c0f5a5e6d9be0a714fb2d5098ac5e89242c0041ada26",
+        "shaders/dwt_quant_scale.h": "4a5e60c22785075341afa29211275857a4f3922999e0f5799131c5f4acf2c4be",
+        "shaders/dwt_swizzle.h": "0283e54d268f25375866274dd3728384c75d9783cab12787d8914588b80f0f30",
+        "shaders/idwt.comp": "e3bb1b44e1e0cb0c2137c44dc50c42f0de4b625f8505f26e96b89ea210c2c3af",
+        "shaders/idwt_haar_fused.comp": "a85ffbeb0966e22855d8c76690a7283fb6a2a5967ae5028feac81663c99be629",
+        "shaders/slangmosh.hpp": "4f84897f9d7fbb07cbc5ccba6d98bc83b85f697ca170578ba959118c84032995",
+        "shaders/slangmosh.json": "d5ea9829b89ee2ac5d16c12b34561971cfeaef5e97eec5ac47ec9a4baa3d06d5",
+        "shaders/wavelet_dequant.comp": "e588ddfdd7c3d1873b758a9d8511b80a946fccf384a7aab0b3368d4212aa1a44"
+      },
+      "sources_lock_sha256": "dc4cce99166cfc910b2fddc8610ce0ebebbbed63b0f469589300ebff0de0f071"
+    },
+    "artifact_download": {
+      "android": {
+        "id": 11241409494,
+        "sha256": "739a2b5eed176168e75ec974ed1a31bc4b85329b9f9d753f8d6a13317d937332"
+      },
+      "windows": {
+        "id": 11242491882,
+        "sha256": "4e87dcb8bddf2162db817dd25ca908e908098ad572e8d04a9869459f43ed1916"
+      }
+    },
+    "artifact_checksums_verified": true,
+    "matching_pair_verified": true,
+    "matching_dependency_revisions": true,
+    "matching_shader_hashes": true,
+    "apk_install_verified": true,
+    "hardware_status": "owner_authorized_afk_diagnostic_only",
+    "session_04_evidence": "decoder-profile-2026-10-02.json",
+    "godlike90_accepted": false,
+    "raw_source_lock_identity_limitation": "dependency_revisions is the raw sources.lock.json snapshot. Its redundant fork.protocol_version remains .1; build_metadata.py and stamp_alvr_version.py use fork.json for actual protocol .2. Preserve this historical record; remove duplicate identity on the next native build."
   }
 }

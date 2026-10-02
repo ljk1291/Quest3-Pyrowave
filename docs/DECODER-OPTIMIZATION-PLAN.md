@@ -11,10 +11,12 @@ the repeated 300-Mbps control was fastest. These are short AFK screens, not
 optical FPS or a 90 Hz pass. See [the sanitized results](../results/bitrate-screen-2026-10-02.json).
 
 Six screenshots and three short recordings were retained privately in separate
-QA runs. SteamVR's dashboard and the performance HUD obstruct part of the chart;
-they do not support a full-chart quality pass or numerical pixel score.
-Dashboard visibility was not independently logged during the rate captures.
-Repeat a clean control before promotion, using exact settings restoration.
+QA runs. The session-03 rate screens had dashboard/performance-HUD uncertainty.
+A later clean session-04 compositor capture had no observed SteamVR/HUD
+occlusion, retained LEFT/RIGHT labels and a changing chart counter, but showed
+softened/fringed fine chroma edges and text. It is qualitative only: compositor
+and recording transforms prevent a codec-isolated or numerical pixel-quality
+claim. Repeat a clean control before promotion, using exact settings restoration.
 
 HEVC/H.264 use the Quest's hardware video-decoding path through MediaCodec.
 PyroWave instead uploads compressed data, reconstructs wavelet planes on the
@@ -25,23 +27,35 @@ AVC/HEVC decode support ([Qualcomm XR2 Gen 2 specifications](https://docs.qualco
 Android exposes hardware decoder identity through
 [MediaCodecInfo](https://developer.android.com/media/optimize/performance/codec).
 
-Next build candidates (not present in the tested pair): opt-in
-`debug.q3pw.pass_profile=1` reports existing Granite Dequant/iDWT means after
-90 fenced completions; `debug.q3pw.hide_performance_overlay=1` initializes the
-HUD hidden for AFK image capture. Both default off, require client restart,
-and are recorded/restored by the control tools. Native validation and
-on-headset verification are separate pending gates. Profiling runs do not
-count as acceptance runs.
+On the session-04 `f2e9df5704cc` protocol `.2` pair, opt-in
+`debug.q3pw.pass_profile=1` emitted valid Granite Dequant/iDWT completed-context
+means after 90 fenced completions. `debug.q3pw.hide_performance_overlay=1`
+provided a clean AFK compositor capture. Both remain diagnostic options, default
+off, require client restart, and are recorded/restored by the control tools.
+The phase samples span 32.043 seconds inside a 51.907-second chart, including
+setup/teardown around a separate 25-second telemetry window. They report
+delayed window means rather than exact-frame timing.
+Profiling runs do not count as acceptance runs. See [the sanitized profile
+evidence](../results/decoder-profile-2026-10-02.json).
+
+The profile measured mean windows of **3.75 ms Dequant** and **5.00 ms iDWT**;
+the telemetry conversion median was **4.92 ms**, with **17.31 ms** median
+decode-to-fence time against the 11.11 ms interval for 90 Hz. These are different
+measurement scopes and must not be summed into an invented total. Allocation
+off/on/off is the first controlled optimization screen, targeting conversion;
+then inspect the final inverse-wavelet level for fusion with conversion.
+Dequantization remains substantial enough to profile its memory traffic too.
 
 ## Objective and guardrails
 
 The objective is a reproducible PyroWave candidate for **3072 x 3232 per eye,
 90 Hz, TCP, 4:2:0, SDR** on Quest 3. The target is not met by the current
-one-minute chart screens. The fastest observed cell, Haar plus synchronous
-direct eye copy at 300 Mbps, delivered 50.42 selected-submission events/s and
-a 44.99 client-FPS 1% low. Its median GPU decode, native conversion and
-decode-to-fence timings were 10.51, 5.12 and 19.59 ms respectively. See
-[the sanitized screen evidence](../results/godlike90-screen-2026-10-02.json).
+one-minute chart screens. An earlier protocol `.1` Haar/synchronous-direct
+300-Mbps diagnostic recorded 50.42 selected-submission events/s and a 44.99
+client-FPS 1% low, with median GPU decode, native conversion and
+decode-to-fence timings of 10.51, 5.12 and 19.59 ms. It is historical work
+selection evidence only, not the fastest current cell or strict fresh-output
+evidence. See [the sanitized screen evidence](../results/godlike90-screen-2026-10-02.json).
 
 Those measurements select work; they do not establish optical FPS, optical
 motion-to-photon latency, Metro quality, or a 90 Hz pass. GPU decode and native
@@ -99,10 +113,12 @@ are applicable allocation experiments; they are not decoder-wavelet toggles.
   tracking timestamp, GPU completion or optical presentation. Do not promote a
   result without it.
 
-The current public chart data pre-dates that counter. It remains useful as a
-diagnostic baseline, but cannot satisfy strict fresh-output acceptance. The
-legacy target-timestamp field is deliberately reusable by different game frames;
-timestamp duplication is diagnostic only.
+The older public `godlike90-screen` chart data pre-dates that counter. It
+remains useful as a diagnostic baseline, but cannot satisfy strict fresh-output
+acceptance. The session-03 bitrate screen is protocol `.2` and records the
+counter, but is still a short chart diagnostic rather than acceptance evidence.
+The legacy target-timestamp field is deliberately reusable by different game
+frames; timestamp duplication is diagnostic only.
 
 Previous supervised diagnostics already verified functional world-grid tracking,
 both controllers and audio. Finite AFK captures can preserve that functional
@@ -113,6 +129,11 @@ or gameplay quality; those remain manual Metro-review gates.
 
 ### 0. Establish a clean control
 
+- [ ] Before the next native build, remove the unused duplicate fork protocol from
+  `sources.lock.json` and enforce `fork.json` as the sole application-identity input.
+  Historical `.2` artifact records retain a raw lock snapshot containing stale `.1`
+  fork metadata; actual protocol/version writers use `fork.json`. Keep old hashes
+  intact and do not reinterpret that redundant value as the installed protocol.
 - [x] Validate the completed protocol `.2` matched pair's selected-output
   counter in a short direct/Haar control before comparing optimizations.
 - [ ] Repeat CDF staging versus CDF direct with *all* refresh/display properties
@@ -166,11 +187,14 @@ staging. `DirectEyeRenderer::render` in `alvr/graphics/src/direct_eye.rs`
 samples the external AHardwareBuffer into two acquired OpenXR eye FBOs and, in
 the stable mode, calls `gl.finish()` before the producer lease can be released.
 
-- [ ] Add diagnostic-only GPU timing for upload/recording, dequantization,
-  each wavelet level, final inverse transform and color conversion, followed by
-  separate CPU/wall timing for EGL image import/bind, `samplerExternalOES` eye
-  draws, `gl.finish()`, and OpenXR acquire/wait/release. Keep it outside the
-  default execution path when disabled.
+- [x] Add diagnostic-only top-level Granite Dequant and iDWT completed-context
+  means. The session-04 profile is a valid delayed-window diagnostic, not
+  exact-frame timing or a display-performance result.
+- [ ] Add distinct timestamp labels for upload/recording, each wavelet level,
+  final inverse transform and color conversion. Keep those GPU intervals
+  separate from CPU/wall timing for EGL image import/bind,
+  `samplerExternalOES` eye draws, `gl.finish()`, and OpenXR acquire/wait/release.
+  Keep all diagnostics outside the default execution path when disabled.
 - [ ] Emit whether every selected frame used direct or staging and whether a
   repeat/null redraw occurred. Instrumentation must not manufacture a fresh
   source identity.
