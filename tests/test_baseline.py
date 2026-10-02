@@ -22,6 +22,8 @@ class BaselineTests(unittest.TestCase):
                 'settings_start': settings, 'settings_end': settings,
                 'fresh_runtime_evidence': True, 'build_identity': {'server': 'x'},
                 'fresh_frame_identity_verified': True,
+                'selected_output_submission_window':{'valid':True,'rate_fps':90,'interval_s':1800,'counter_delta':162000},
+                'selected_output_endurance':{'status':'stable'},
                 'build_identity_verified': True, 'telemetry_complete': True,
                 'benchmark_tool_provenance':{'verified':True},
                 'thermal_ok': True, 'stream_errors': [], 'controllers_ok': True, 'audio_ok':True,
@@ -57,6 +59,15 @@ class BaselineTests(unittest.TestCase):
     def test_missing_strict_fresh_identity_telemetry_fails_closed(self):
         report=self.passing_report(); report.pop('fresh_frame_identity_verified')
         self.assertIn('strict_fresh_frame_identity_unverified', acceptance(report, self.expected())['failure_reasons'])
+
+    def test_selected_output_rate_and_endurance_are_required(self):
+        report=self.passing_report(); report['selected_output_submission_window']={'valid':True,'rate_fps':80}
+        report['selected_output_endurance']={'status':'pending_or_failed'}
+        reasons=acceptance(report,self.expected())['failure_reasons']
+        self.assertIn('fresh_selected_output_rate_failed',reasons)
+        self.assertIn('selected_output_endurance_unverified',reasons)
+        report=self.passing_report(); report['selected_output_submission_window']['interval_s']=1799
+        self.assertIn('selected_output_capture_too_short',acceptance(report,self.expected())['failure_reasons'])
         report=self.passing_report(); report['fresh_frame_identity_verified']=False
         self.assertIn('strict_fresh_frame_identity_unverified', acceptance(report, self.expected())['failure_reasons'])
 

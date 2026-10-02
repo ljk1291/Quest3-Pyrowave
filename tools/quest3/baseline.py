@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import math
 
 SCHEMA_VERSION = 1
 DEFAULT_EXPERIMENT = {
@@ -83,7 +84,7 @@ def acceptance(report, expected, selected_target_mbps=None):
     if not report.get("frames"): reasons.append("no_fresh_stream_frames")
     observed=report.get("submission_rate_window_s")
     if not isinstance(observed,(int,float)) or isinstance(observed,bool) or observed < expected.get("minimum_duration_s", 1800): reasons.append("capture_too_short")
-    if requested != 90: reasons.append("target_acceptance_requires_90hz")
+    if not isinstance(requested,(int,float)) or isinstance(requested,bool) or requested != 90: reasons.append("target_acceptance_requires_90hz")
     if report.get("settings_start") != report.get("settings_end"): reasons.append("settings_changed_during_capture")
     settings = report.get("settings_start") or {}
     for key in ("render_resolution", "encoded_resolution"):
@@ -115,6 +116,19 @@ def acceptance(report, expected, selected_target_mbps=None):
     # only a selected-submission proxy and cannot satisfy strict freshness.
     if report.get('fresh_frame_identity_verified') is not True:
         reasons.append('strict_fresh_frame_identity_unverified')
+    selected=report.get('selected_output_submission_window',{})
+    if not selected.get('valid'):
+        reasons.append('selected_output_counter_unverified')
+    elif (not isinstance(selected.get('rate_fps'),(int,float)) or isinstance(selected.get('rate_fps'),bool)
+            or not math.isfinite(selected['rate_fps'])
+            or not isinstance(requested,(int,float)) or isinstance(requested,bool)
+            or selected['rate_fps'] < requested*.98):
+        reasons.append('fresh_selected_output_rate_failed')
+    if (not isinstance(selected.get('interval_s'),(int,float)) or isinstance(selected.get('interval_s'),bool)
+            or selected['interval_s'] < expected.get('minimum_duration_s',1800)):
+        reasons.append('selected_output_capture_too_short')
+    if report.get('selected_output_endurance',{}).get('status') != 'stable':
+        reasons.append('selected_output_endurance_unverified')
     if report.get('runtime_evidence_coverage',{}).get('status') != 'covered': reasons.append('runtime_evidence_coverage_incomplete')
     if not report.get("build_identity") or not report.get("build_identity_verified"):
         reasons.append("build_identity_unverified")

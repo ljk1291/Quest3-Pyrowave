@@ -1,3 +1,121 @@
+diff --git a/alvr/client_core/src/c_api.rs b/alvr/client_core/src/c_api.rs
+index 80b24fc63a535f17c1d62bb29fef2245c90a8a5c..d1ef049fe0030d637b8370e3433b8e76e1fc94e3 100644
+--- a/alvr/client_core/src/c_api.rs
++++ b/alvr/client_core/src/c_api.rs
+@@ -1009,10 +1009,10 @@ pub extern "C" fn alvr_get_frame(
+     out_buffer_ptr: *mut *mut c_void,
+ ) -> bool {
+     if let Some(source) = &mut *DECODER_SOURCE.lock() {
+-        if let Some((timestamp, buffer_ptr)) = source.get_frame() {
++        if let Some(frame) = source.get_frame() {
+             unsafe {
+-                *out_timestamp_ns = timestamp.as_nanos() as u64;
+-                *out_buffer_ptr = buffer_ptr;
++                *out_timestamp_ns = frame.timestamp.as_nanos() as u64;
++                *out_buffer_ptr = frame.buffer_ptr;
+             }
+ 
+             true
+diff --git a/alvr/client_core/src/connection.rs b/alvr/client_core/src/connection.rs
+index 996268d3e60258a104a104b27d07c136e01b39d6..f375aea9c55120ec8db017a0263e375ddaad5c40 100644
+--- a/alvr/client_core/src/connection.rs
++++ b/alvr/client_core/src/connection.rs
+@@ -538,6 +538,8 @@ fn connection_pipeline(
+                                     battery_temperature_c,
+                                     battery_level: Some(battery_level),
+                                     pyrowave: crate::video_decoder::telemetry::take(),
++                                    selected_output_submissions: Some(crate::video_decoder::telemetry::selected_output_submissions()),
++                                    selected_output_submission_source: Some("selected_nonnull_post_render_release_v1".into()),
+                                 },
+                             ))
+                             .ok();
+diff --git a/alvr/client_core/src/video_decoder/mod.rs b/alvr/client_core/src/video_decoder/mod.rs
+index 30cdb623f08e3e67c21ff5798ce89092fd55cb65..ce7eeadc0a0c2fa19cbbdba3e83b75294b3445b6 100644
+--- a/alvr/client_core/src/video_decoder/mod.rs
++++ b/alvr/client_core/src/video_decoder/mod.rs
+@@ -293,6 +293,15 @@ enum SourceInner {
+ pub struct VideoDecoderSource {
+     #[cfg(target_os = "android")]
+     inner: SourceInner,
++    // Assigned only after a decoder source dequeues a fresh output. This is not a
++    // media or tracking timestamp, either of which may be reused.
++    next_selection_id: u64,
++}
++
++pub struct SelectedFrame {
++    pub selection_id: u64,
++    pub timestamp: Duration,
++    pub buffer_ptr: *mut std::ffi::c_void,
+ }
+ 
+ impl VideoDecoderSource {
+@@ -304,15 +313,25 @@ impl VideoDecoderSource {
+         }
+     }
+ 
+-    /// If a frame is available, return the timestamp and the AHardwareBuffer.
+-    pub fn get_frame(&mut self) -> Option<(Duration, *mut std::ffi::c_void)> {
++    /// If a fresh decoder output is available, assign it an identity and return it.
++    pub fn get_frame(&mut self) -> Option<SelectedFrame> {
+         #[cfg(target_os = "android")]
+         {
+-            match &mut self.inner {
++            let frame = match &mut self.inner {
+                 SourceInner::MediaCodec(source) => source.dequeue_frame(),
+                 SourceInner::PyroWave(source) => source.dequeue_frame(),
+                 SourceInner::PyroWaveUdp(source) => source.dequeue_frame(),
++            }?;
++            self.next_selection_id = self.next_selection_id.wrapping_add(1);
++            // Zero represents no output, including after an extremely unlikely wrap.
++            if self.next_selection_id == 0 {
++                self.next_selection_id = 1;
+             }
++            Some(SelectedFrame {
++                selection_id: self.next_selection_id,
++                timestamp: frame.0,
++                buffer_ptr: frame.1,
++            })
+         }
+         #[cfg(not(target_os = "android"))]
+         None
+@@ -342,6 +361,7 @@ pub fn create_decoder(
+     report_frame_decoded: impl Fn(Result<Duration>) + Send + Sync + 'static,
+     report_video_packet_received: impl Fn(Duration) + Send + Sync + 'static,
+ ) -> (VideoDecoderSink, VideoDecoderSource) {
++    telemetry::reset_selected_output_submissions();
+     #[cfg(target_os = "android")]
+     {
+         if config.codec == CodecType::PyroWave {
+@@ -368,6 +388,7 @@ pub fn create_decoder(
+                 },
+                 VideoDecoderSource {
+                     inner: SourceInner::PyroWaveUdp(source),
++                    next_selection_id: 0,
+                 },
+             );
+         }
+@@ -381,6 +402,7 @@ pub fn create_decoder(
+                 },
+                 VideoDecoderSource {
+                     inner: SourceInner::PyroWave(source),
++                    next_selection_id: 0,
+                 },
+             );
+         }
+@@ -398,11 +420,12 @@ pub fn create_decoder(
+             },
+             VideoDecoderSource {
+                 inner: SourceInner::MediaCodec(source),
++                next_selection_id: 0,
+             },
+         )
+     }
+     #[cfg(not(target_os = "android"))]
+-    (VideoDecoderSink {}, VideoDecoderSource {})
++    (VideoDecoderSink {}, VideoDecoderSource { next_selection_id: 0 })
+ }
+ 
+ #[cfg(test)]
 diff --git a/alvr/client_core/src/video_decoder/pyrowave.rs b/alvr/client_core/src/video_decoder/pyrowave.rs
 index 3c90e40d775d779b4bcb8135f46310ef55797513..86543a32360824908148eb44c5ff3c32c29dc400 100644
 --- a/alvr/client_core/src/video_decoder/pyrowave.rs
@@ -67,6 +185,161 @@ index c6c88526fd542497109c849c75f714f11e2e7cdd..5728bb84a538f2b3a363fcf77da8cf1e
                          } else {
                              let ts = Duration::from_nanos(timestamp_ns);
                              decoded.publish(ts, out as usize);
+diff --git a/alvr/client_core/src/video_decoder/telemetry.rs b/alvr/client_core/src/video_decoder/telemetry.rs
+index dfefe0008969564b5b88f363c733f0dfb0640de3..11766bb96546c5c9c5ca2b7fcee66e0353b7ca4d 100644
+--- a/alvr/client_core/src/video_decoder/telemetry.rs
++++ b/alvr/client_core/src/video_decoder/telemetry.rs
+@@ -6,6 +6,68 @@
+ use alvr_packets::PyroWaveDecodeStats;
+ use std::sync::Mutex;
+ 
++#[derive(Default)]
++struct SelectedOutputState {
++    submissions: u64,
++    last_selection_id: u64,
++}
++
++impl SelectedOutputState {
++    /// Returns true only when this is a nonzero, strictly newer source selection.
++    fn record_submission(&mut self, selection_id: u64) -> bool {
++        if selection_id == 0 || selection_id <= self.last_selection_id {
++            return false;
++        }
++        self.last_selection_id = selection_id;
++        self.submissions = self.submissions.saturating_add(1);
++        true
++    }
++}
++
++static SELECTED_OUTPUT_STATE: Mutex<SelectedOutputState> = Mutex::new(SelectedOutputState {
++    submissions: 0,
++    last_selection_id: 0,
++});
++
++pub fn reset_selected_output_submissions() {
++    *SELECTED_OUTPUT_STATE.lock().unwrap() = SelectedOutputState::default();
++}
++
++/// Record a post-render release once for each strictly newer decoder selection.
++/// Timestamp equality is deliberately irrelevant: the identity originates only
++/// when `VideoDecoderSource::get_frame()` dequeues a fresh decoder output.
++pub fn record_selected_output_submission(selection_id: u64) -> bool {
++    let mut state = SELECTED_OUTPUT_STATE.lock().unwrap();
++    state.record_submission(selection_id)
++}
++
++pub fn selected_output_submissions() -> u64 { SELECTED_OUTPUT_STATE.lock().unwrap().submissions }
++
++#[cfg(test)]
++mod selected_output_tests {
++    use super::*;
++
++    #[test]
++    fn source_identity_counts_fresh_outputs_once_without_timestamps() {
++        // Use local state: decoder-creation tests reset the production counter in
++        // parallel, and must not make this regression timing-dependent.
++        let mut state = SelectedOutputState::default();
++        // The two source dequeues may carry the same timestamp. Only their source-issued
++        // identities reach this counter, so timestamp reuse cannot affect the result.
++        let reused_timestamp = std::time::Duration::from_millis(42);
++        for (selection_id, _timestamp) in [(7, reused_timestamp), (8, reused_timestamp)] {
++            assert!(state.record_submission(selection_id));
++        }
++        assert!(!state.record_submission(8)); // repeated output
++        assert!(!state.record_submission(6)); // stale output
++        assert_eq!(state.submissions, 2);
++        state = SelectedOutputState::default();
++        assert_eq!(state.submissions, 0);
++        assert!(state.record_submission(1));
++        assert_eq!(state.submissions, 1);
++    }
++}
++
+ /// Samples kept between reports; at 90 fps a one-second window needs 90.
+ const MAX_SAMPLES: usize = 1024;
+ 
+diff --git a/alvr/client_openxr/src/stream.rs b/alvr/client_openxr/src/stream.rs
+index eb04019edefff6ebbc77744948a173d41687de19..5e35f43ce60d37c0a99a93a1efbe685c5a259509 100644
+--- a/alvr/client_openxr/src/stream.rs
++++ b/alvr/client_openxr/src/stream.rs
+@@ -511,8 +511,10 @@ impl StreamContext {
+             }
+         }
+ 
+-        let (timestamp, view_params, buffer_ptr) =
+-            if let Some((timestamp, buffer_ptr)) = frame_result {
++        let (selection_id, timestamp, view_params, buffer_ptr) =
++            if let Some(frame) = frame_result {
++                let timestamp = frame.timestamp;
++                let buffer_ptr = frame.buffer_ptr;
+                 let view_params = self.core_context.report_compositor_start(timestamp);
+ 
+                 // Avoid passing invalid timestamp to runtime
+@@ -521,9 +523,9 @@ impl StreamContext {
+ 
+                 self.last_good_view_params = view_params;
+ 
+-                (timestamp, view_params, buffer_ptr)
++                (Some(frame.selection_id), timestamp, view_params, buffer_ptr)
+             } else {
+-                (vsync_time, self.last_good_view_params, ptr::null_mut())
++                (None, vsync_time, self.last_good_view_params, ptr::null_mut())
+             };
+ 
+         // Match the inverse warp to the centre the server actually foveated this frame with.
+@@ -587,6 +589,13 @@ impl StreamContext {
+ 
+             self.swapchains[0].release_image().unwrap();
+             self.swapchains[1].release_image().unwrap();
++            if !buffer_ptr.is_null() {
++                if let Some(selection_id) = selection_id {
++                    // Count exactly one new decoded output after both eyes were rendered and
++                    // released. Reused OpenXR redraws have no source-issued identity.
++                    video_decoder::telemetry::record_selected_output_submission(selection_id);
++                }
++            }
+             if latest_only {
+                 video_decoder::telemetry::record_eye_copy(acquire_wait_ms, eye_render_ms,
+                     release_start.elapsed().as_secs_f32() * 1000.0,
+diff --git a/alvr/dashboard/src/dashboard/components/test_report.rs b/alvr/dashboard/src/dashboard/components/test_report.rs
+index d3a1d7c323e3fe3810c6366241a111b942988bd0..02d18e9a88f995012b2088b838ab7026373f1256 100644
+--- a/alvr/dashboard/src/dashboard/components/test_report.rs
++++ b/alvr/dashboard/src/dashboard/components/test_report.rs
+@@ -522,6 +522,8 @@ mod tests {
+                 fence_ms: vec![4.8, 5.0],
+                 ..Default::default()
+             }),
++            selected_output_submissions: None,
++            selected_output_submission_source: None,
+         }
+     }
+ 
+diff --git a/alvr/packets/src/lib.rs b/alvr/packets/src/lib.rs
+index 57060522d6aa0e566e0200b6838ca3cb0e2b152c..39b311dfda24ec23a99bd66357b3c4cd94722ef5 100644
+--- a/alvr/packets/src/lib.rs
++++ b/alvr/packets/src/lib.rs
+@@ -318,6 +318,12 @@ pub struct HeadsetTelemetry {
+     pub battery_temperature_c: Option<f32>,
+     pub battery_level: Option<f32>,
+     pub pyrowave: Option<PyroWaveDecodeStats>,
++    /// Cumulative fresh decoder outputs whose non-null render commands were submitted and whose
++    /// OpenXR swapchain images were released. This does not establish GPU completion or display
++    /// presentation, and is deliberately independent of reusable tracking timestamps.
++    pub selected_output_submissions: Option<u64>,
++    /// Schema marker for the strict selected-output counter contract.
++    pub selected_output_submission_source: Option<String>,
+ }
+ 
+ #[derive(Serialize, Deserialize, Clone, Default)]
+@@ -636,6 +642,8 @@ mod beta_telemetry_tests {
+                 staging_eye_copies: 200,
+                 ..Default::default()
+             }),
++            selected_output_submissions: Some(900),
++            selected_output_submission_source: Some("selected_nonnull_post_render_release_v1".into()),
+         };
+         let packet = ClientControlPacket::HeadsetTelemetry(t.clone());
+         let bytes = bincode::serialize(&packet).unwrap();
 diff --git a/alvr/server_openvr/cpp/platform/win32/CEncoder.cpp b/alvr/server_openvr/cpp/platform/win32/CEncoder.cpp
 index 2f68f660a49913b593f84749fa254d44475a4d0c..e55d914e30748c021eda7a460bf33f901d323868 100644
 --- a/alvr/server_openvr/cpp/platform/win32/CEncoder.cpp

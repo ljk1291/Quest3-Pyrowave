@@ -15,6 +15,7 @@ RATES = (72, 90, 120, 144, 207, 240)
 BITRATES = (400, 600, 800, 1000, 1500, 2000)
 SUSTAINED_RATE_WINDOW_SECONDS = 300
 ENDURANCE_WINDOW_SECONDS = 300
+SELECTED_OUTPUT_SOURCE = 'selected_nonnull_post_render_release_v1'
 EXPERIMENT_PROPERTIES = (
     'debug.q3pw.direct_eye_copy', 'debug.q3pw.async_eye_copy', 'debug.q3pw.copy_wait_us',
     'debug.q3pw.raw_srgb_copy', 'debug.q3pw.image_cache', 'debug.q3pw.frame_wait_us',
@@ -133,6 +134,54 @@ def pyrowave_counter_window(samples):
             for name,delta in deltas.items()},
             'definition':'Matching HeadsetTelemetry endpoints. Complete is producer decode completion; superseded includes pending replacement and out-of-order publication. Eye completion can include configuration redraws; staging completion is unobserved. Not unique or optical display FPS.'}
 
+def selected_output_window(samples, max_gap_s=15, capture_end_elapsed=None):
+    """Validate the native monotonic, post-render selected-output counter."""
+    if len(samples) < 2:
+        return {'valid':False,'reason':'selected_output_samples_missing','samples':len(samples)}
+    times=[]; counts=[]
+    for elapsed, count, source in samples:
+        if (not isinstance(elapsed,(int,float)) or isinstance(elapsed,bool) or not math.isfinite(elapsed) or elapsed < 0
+                or not isinstance(count,int) or isinstance(count,bool) or count < 0):
+            return {'valid':False,'reason':'selected_output_counter_invalid','samples':len(samples)}
+        if source != SELECTED_OUTPUT_SOURCE:
+            return {'valid':False,'reason':'selected_output_source_unverified','samples':len(samples)}
+        times.append(elapsed); counts.append(count)
+    if any(b<=a for a,b in zip(times,times[1:])):
+        return {'valid':False,'reason':'selected_output_time_invalid','samples':len(samples)}
+    if any(b<a for a,b in zip(counts,counts[1:])):
+        return {'valid':False,'reason':'selected_output_counter_reset','samples':len(samples)}
+    span=times[-1]-times[0]; delta=counts[-1]-counts[0]; gap=max(b-a for a,b in zip(times,times[1:]))
+    if gap>max_gap_s:
+        return {'valid':False,'reason':'selected_output_coverage_gap','samples':len(samples),'max_gap_s':gap}
+    if span<=0 or delta<=0:
+        return {'valid':False,'reason':'selected_output_no_fresh_frames','samples':len(samples),'interval_s':span,'counter_delta':delta}
+    result={'valid':True,'source':SELECTED_OUTPUT_SOURCE,'samples':len(samples),'interval_s':span,
+            'counter_delta':delta,'rate_fps':delta/span,'max_gap_s':gap,
+            'first_elapsed_s':times[0],'last_elapsed_s':times[-1]}
+    if capture_end_elapsed is not None:
+        if (not isinstance(capture_end_elapsed,(int,float)) or isinstance(capture_end_elapsed,bool)
+                or not math.isfinite(capture_end_elapsed) or capture_end_elapsed < times[-1]):
+            return dict(result,valid=False,reason='selected_output_capture_bounds_invalid')
+        result['start_gap_s']=times[0]
+        result['end_gap_s']=capture_end_elapsed-times[-1]
+        if result['start_gap_s']>max_gap_s or result['end_gap_s']>max_gap_s:
+            return dict(result,valid=False,reason='selected_output_capture_coverage_incomplete')
+    return result
+
+def selected_output_stability(samples, requested_hz, window_seconds=ENDURANCE_WINDOW_SECONDS, required_windows=6):
+    """Require a native selected-output counter rate in every five-minute window."""
+    windows=[]
+    if not samples: return {'status':'pending_or_failed','windows':windows}
+    start=samples[0][0]
+    for index in range(required_windows):
+        rows=[row for row in samples if start+index*window_seconds <= row[0] <= start+(index+1)*window_seconds]
+        check=selected_output_window(rows)
+        passed=(check.get('valid') and check.get('interval_s',0)>=window_seconds*.98
+                and check.get('rate_fps',0)>=requested_hz*.98)
+        windows.append({'index':index,'status':'passed' if passed else 'failed','rate_fps':check.get('rate_fps'),
+                        'window_s':check.get('interval_s'),'reason':check.get('reason')})
+    return {'status':'stable' if all(w['status']=='passed' for w in windows) else 'pending_or_failed','windows':windows}
+
 def rate_stability(graphs, requested_hz, window_seconds=ENDURANCE_WINDOW_SECONDS, required_windows=6):
     """Check independent five-minute submission windows for a 30-minute endurance run."""
     timed=list(graphs)
@@ -160,8 +209,8 @@ def rate_stability(graphs, requested_hz, window_seconds=ENDURANCE_WINDOW_SECONDS
             'window_seconds':window_seconds,'windows':windows}
 
 
-def summarise(events, requested_hz=None):
-    graphs=[]; summaries=[]; telemetry=[]; graph_times=[]; pyro_samples=[]
+def summarise(events, requested_hz=None, capture_end_elapsed=None):
+    graphs=[]; summaries=[]; telemetry=[]; graph_times=[]; pyro_samples=[]; selected_samples=[]
     timed_graphs=[]
     for item in events:
         event=item.get('event',item).get('event_type',{})
@@ -176,6 +225,8 @@ def summarise(events, requested_hz=None):
             elapsed=item.get('capture_elapsed_s')
             if data.get('pyrowave'):
                 pyro_samples.append((elapsed,data['pyrowave']))
+            selected_samples.append((elapsed, data.get('selected_output_submissions'),
+                                     data.get('selected_output_submission_source')))
     result={'schema_version':1,'status':'measured' if graphs else 'no_stream_frames', 'frames':len(graphs),
             'requested_hz':requested_hz, 'metrics':{}, 'headset_telemetry':telemetry,
             'optical_motion_to_photon_ms':None,
@@ -213,8 +264,12 @@ def summarise(events, requested_hz=None):
     # not fresh frames. Keep it until downstream consumers migrate.
     result['fresh_frames']=result['distinct_target_timestamp_count']
     result['fresh_frames_definition']='Deprecated compatibility field: distinct tracking target timestamps, not unique fresh video frames. Use selected_submission_event_rate_fps for the selected decoded-buffer submission-event rate.'
-    result['fresh_frame_identity_verified']=False
-    result['fresh_frame_identity_definition']='Unavailable: target timestamps are reusable tracking keys. Strict fresh decoded-output identity requires matching native monotonic sequence telemetry.'
+    selected=selected_output_window(selected_samples,capture_end_elapsed=capture_end_elapsed)
+    result['selected_output_submission_window']=selected
+    result['fresh_selected_output_rate_fps']=selected.get('rate_fps') if selected.get('valid') else None
+    result['fresh_frame_identity_verified']=selected.get('valid',False)
+    result['fresh_frame_identity_definition']='Native cumulative post-render/release selected decoder outputs, source marker required; never derived from reusable tracking timestamps.'
+    result['selected_output_endurance']=selected_output_stability(selected_samples,requested_hz) if requested_hz else {'status':'pending_or_failed','windows':[]}
     result['metrics']['frame_timestamp_gap_ms']=distribution([(b-a)/1e6 for a,b in zip(timestamps,timestamps[1:])])
     # Counter deltas; never report the last lifetime total as this capture's losses.
     result['packet_loss_delta']=None
@@ -512,7 +567,7 @@ def capture(args):
         capture_end_elapsed=clock()-begin
         stop.set();sampler.join(timeout=25)
         if ws:ws.close()
-    report=summarise(events,args.hz)
+    report=summarise(events,args.hz,capture_end_elapsed)
     try:settings_end=active_settings()
     except Exception as exc:settings_end=None;error=str(exc)
     manifest = json.loads(Path(args.build_manifest).read_text(encoding='utf-8')) if args.build_manifest else None

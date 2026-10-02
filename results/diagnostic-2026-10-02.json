@@ -119,5 +119,6 @@
       "vram_used_mib": 15359,
       "total_vram_mib": 16303
     }
-  }
+  },
+  "timestamp_metric_correction": "The legacy fresh_frame_timestamps count represents distinct tracking timestamps, and duplicate_frame_events represents tracking timestamp reuse. Neither proves fresh or duplicated decoded-frame identity."
 }

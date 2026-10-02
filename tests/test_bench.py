@@ -1,8 +1,26 @@
 import unittest
 from unittest.mock import patch
-from tools.quest3.bench import parse_capabilities,plan,summarise,distribution,pyrowave_counter_window, fresh_rate_evidence, build_identity_verified, merge_review, rate_stability, filter_runtime_evidence, measurement_clock, measurement_clock_info
+from tools.quest3.bench import parse_capabilities,plan,summarise,distribution,pyrowave_counter_window, fresh_rate_evidence, build_identity_verified, merge_review, rate_stability, filter_runtime_evidence, measurement_clock, measurement_clock_info, selected_output_window, selected_output_stability, SELECTED_OUTPUT_SOURCE
 
 class BenchTests(unittest.TestCase):
+    def test_selected_output_rejects_reset_gap_and_wrong_source(self):
+        good=[(0,0,SELECTED_OUTPUT_SOURCE),(10,900,SELECTED_OUTPUT_SOURCE)]
+        self.assertTrue(selected_output_window(good)['valid'])
+        self.assertEqual(selected_output_window([(0,2,SELECTED_OUTPUT_SOURCE),(5,1,SELECTED_OUTPUT_SOURCE)])['reason'],'selected_output_counter_reset')
+        self.assertEqual(selected_output_window([(0,0,SELECTED_OUTPUT_SOURCE),(20,100,SELECTED_OUTPUT_SOURCE)])['reason'],'selected_output_coverage_gap')
+        self.assertEqual(selected_output_window([(0,0,'wrong'),(5,100,'wrong')])['reason'],'selected_output_source_unverified')
+        self.assertEqual(selected_output_window([(-1,0,SELECTED_OUTPUT_SOURCE),(5,100,SELECTED_OUTPUT_SOURCE)])['reason'],'selected_output_counter_invalid')
+        self.assertEqual(selected_output_window([(1,0,SELECTED_OUTPUT_SOURCE),(10,810,SELECTED_OUTPUT_SOURCE)],capture_end_elapsed=30)['reason'],'selected_output_capture_coverage_incomplete')
+        self.assertTrue(selected_output_window([(1,0,SELECTED_OUTPUT_SOURCE),(10,810,SELECTED_OUTPUT_SOURCE)],capture_end_elapsed=20)['valid'])
+
+    def test_selected_output_endurance_rejects_slow_window(self):
+        # A real 1810-second capture may first report at t=1; six complete
+        # 300-second windows through t=1801 must still qualify.
+        rows=[(1+i*10, i*10*90, SELECTED_OUTPUT_SOURCE) for i in range(181)]
+        self.assertEqual(selected_output_stability(rows,90)['status'],'stable')
+        rows[120:]=[(1+i*10, 81100+(i-120)*900, SELECTED_OUTPUT_SOURCE) for i in range(120,181)]
+        self.assertEqual(selected_output_stability(rows,90)['status'],'pending_or_failed')
+
     def test_capture_clock_uses_perf_counter_not_coarse_monotonic(self):
         # Capture timing must go through the QPC-backed abstraction. On Windows,
         # monotonic may otherwise be a 15.625 ms GetTickCount64 clock.
