@@ -274,5 +274,20 @@
       "restoration_verified": true,
       "note": "Recommended AHB allocation is a reversible, repeatable improvement but not a qualified 90 Hz profile. No exact decoded-buffer image-equivalence, Metro, endurance, recovery or optical acceptance."
     }
+  },
+  "colour_range_candidate": {
+    "id": 37053223424,
+    "url": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37053223424",
+    "repository_commit": "d1c3b3d4edb354be8176ccaf5604918fe9ee4a52",
+    "workflow_event": "workflow_dispatch",
+    "tests_job": "success",
+    "android_job": "success",
+    "windows_job": "success",
+    "matching_pair_job": "success",
+    "validation_scope": "GitHub Actions job conclusions; signed workflow with existing stable-key policy",
+    "artifact_download_and_local_checksum_verification": false,
+    "installed": false,
+    "headset_validated": false,
+    "note": "PyroWave-specific bypass of legacy RGB range compression. Keep distinct from the headset-tested f2e9df5704cc pair; verify downloaded metadata, hashes and certificate before installation."
   }
 }

@@ -4,6 +4,13 @@ Reviewed [tB0nE/nightfall at `e111b5c0825ad27be28d6584007c60cac2b017ea`](https:/
 This is a source review, not a Nightfall build, installation or benchmark.
 Our comparison uses the matching `f2e9df5704cc` APK/server pair and Session 05.
 
+The wider 2026-10-02 source review rechecked Nightfall's HEAD: it remains
+`e111b5c0825ad27be28d6584007c60cac2b017ea`. There is no new code delta or
+equivalent Quest Godlike result to supersede this comparison. The
+[combined research shortlist](DECODER-RESEARCH-2026-10-02.md) places its
+asynchronous ring beside WiVRn/PyroFling, and its conversion path beside
+Nova/libplacebo, with separate ownership and image-correctness experiments.
+
 ## What differs
 
 Nightfall streams GameStream desktop/game video into an OpenXR virtual screen,

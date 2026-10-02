@@ -2,6 +2,39 @@
 
 ## Current evidence — 2026-10-02
 
+### Research reconciliation and next work
+
+The [source-pinned research shortlist](DECODER-RESEARCH-2026-10-02.md) compares
+WiVRn, upstream PyroWave/PyroFling, FFmpeg, Meta IGL, libplacebo, Nova/Polaris,
+NX Warp and Nightfall with the actual fork. It supplies source locations,
+licences, activation requirements, effort/risks and isolated correctness gates.
+The next-work order below takes priority over unfinished historical experiments:
+
+- [x] Reconcile the references with current code and earlier rejected experiments.
+- [ ] **P0:** add per-component/level dequant/iDWT profiling on the faster
+  recommended-AHB configuration; verify actual payload/shader activation and
+  measure profiler overhead separately. The older 3.75/5.00-ms split is not a
+  new profile of the ~82–83 fresh-submission/s candidate.
+- [ ] Extend the standalone first-frame replay probe into a bounded, immutable
+  multi-frame packet benchmark; preserve legacy fields while identifying exact
+  CPU/GPU/completion timing boundaries. Complete range/colour reference gates.
+- [ ] **P1:** investigate final-luma Haar reconstruction inside the existing
+  fragment conversion, preserving recommended AHB usage. This is not a retry
+  of whole-Haar fusion or compute RGBA conversion.
+- [ ] **P2:** prove direct three-plane Vulkan sampling into a final RGB target
+  offscreen; then separately assess sampler YCbCr conversion and a minimal
+  Vulkan OpenXR RGB session. Do not assume YUV swapchains or full asynchrony.
+- [ ] **P3/P4:** only with measured justification, test new fragment Haar or a
+  single dequant payload/store/branch hypothesis. Keep prior batching/FP16
+  regressions closed without a materially new hypothesis.
+- [ ] **P5:** consider a new bounded output-lease/scheduling design only if
+  profiling attributes a remaining bottleneck to completion/selection/handoff.
+
+No baseline, dependency pin or installed build changes in this research step.
+Every hardware experiment still needs explicit session scope/readiness, finite
+limits and exact settings restoration. Source review and a standalone win
+cannot promote a stable 90-Hz profile.
+
 ### First Metro subjective-quality observation
 
 The first supervised Metro Awakening observation on the verified
@@ -22,6 +55,8 @@ or decoder stage as the cause.
 The session negotiated full range, but a legacy downstream full-RGBA to
 limited-range remap remains a candidate for the dull-colour symptom. A
 codec-specific bypass is implemented in source and is not part of this tested build.
+Its signed `d1c3b3d4edb3` pair passed cloud builds/tests and matching-pair
+verification; it remains uninstalled and unvalidated on the headset.
 Validate it first with grayscale/range checks, then replay the same Metro
 checkpoint with allocation off/on at fixed 500-Mbps Haar settings. Compare Haar
 with CDF 9/7 at the same profile; use HEVC and a Virtual Desktop reference only

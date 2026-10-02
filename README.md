@@ -12,6 +12,12 @@ unqualified. See the [controlled results](results/optimal-ahb-screen-2026-10-02.
 and [optimization plan](docs/DECODER-OPTIMIZATION-PLAN.md); this is an experimental
 Haar/direct-copy profile, not a new default.
 
+The [research reconciliation and prioritized shortlist](docs/DECODER-RESEARCH-2026-10-02.md)
+compares WiVRn, PyroWave/PyroFling, FFmpeg, IGL, libplacebo, Nova/Polaris,
+NX Warp and Nightfall against those measurements. It prioritizes per-pass
+profiling on the faster allocation, final-luma fusion and Vulkan planar-to-RGB
+presentation feasibility, with source pins and image-correctness gates.
+
 ## Start here
 
 1. [Build and install a matching pair](docs/BUILD.md). Stable builds require a persistent private signing key; temporary development signatures are labelled.

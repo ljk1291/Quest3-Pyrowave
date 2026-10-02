@@ -44,7 +44,7 @@
     "not_an_acceptance_result": true
   },
   "investigation_status": {
-    "known_colour_path_candidate": "A legacy full-RGBA to limited-range remap remains enabled downstream even when this PyroWave session negotiates full range. A codec-specific bypass is implemented in source and is not in this tested build; build and headset validation remain pending.",
+    "known_colour_path_candidate": "A legacy full-RGBA to limited-range remap remains enabled downstream even when this PyroWave session negotiates full range. A codec-specific bypass at d1c3b3d4edb3 passed signed CI build/test and matching-pair validation in run 37053223424. It is not in this tested build and remains uninstalled and unvalidated on the headset.",
     "compression_cause": "unknown; do not attribute the observation to Haar, 4:2:0, bitrate, allocation usage, or the colour-path candidate without controlled replay."
   },
   "restoration": {

@@ -27,13 +27,21 @@ There is no exact source/decode frame identity or numerical quality score.
 Full range was negotiated, but a legacy downstream full-RGBA to limited-range
 remap is a candidate for the dull-colour symptom. A codec-specific bypass is
 implemented in source, with hardware-codec policy regression tests and a
-`Q3PW_COLOUR` activation log. Build and headset validation remain pending; the
-fix is not in the tested pair and does not diagnose the compression artifacts.
+`Q3PW_COLOUR` activation log. The signed `d1c3b3d4edb3` pair passed
+[cloud build/test and matching-pair validation](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37053223424).
+It remains uninstalled and unvalidated on the headset; the fix is not in the
+tested pair and does not diagnose the compression artifacts.
 The session restored all recorded settings and verified the original VDXR
 registration/manifest with zero restoration errors. The next sequence is
 grayscale/range validation of the patch, then a fixed-checkpoint allocation
 off/on replay, Haar/CDF 9/7 comparison at fixed 500 Mbps, and HEVC/VD controls
 only where needed. See [the sanitized Metro observation](../results/metro-quality-feedback-2026-10-02.json).
+
+The [source-pinned research reconciliation](DECODER-RESEARCH-2026-10-02.md)
+extends the backlog without changing implementation or baseline settings.
+It separates existing capabilities from unproven activation, preserves rejected
+experiments, and prioritizes detailed profiling, final-luma fusion and planar
+Vulkan-to-RGB presentation feasibility. No new hardware result is claimed.
 
 The latest owner-authorized AFK Session 05 found a repeatable AHardwareBuffer
 allocation improvement on the verified `f2e9df5704cc` pair. At the same
