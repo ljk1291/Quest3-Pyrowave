@@ -5,7 +5,7 @@ an owner-only convenience: it requires an explicit acknowledgement and is never
 called by automation. All device commands include the serial stored in the arm.
 """
 from __future__ import annotations
-import argparse, contextlib, ctypes, hashlib, json, os, re, shlex, shutil, subprocess, sys, tempfile, time, uuid, urllib.request
+import argparse, contextlib, ctypes, hashlib, json, os, re, shlex, shutil, subprocess, sys, tempfile, threading, time, uuid, urllib.request
 from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -72,7 +72,7 @@ _LOCK_DEPTH={}
 @contextlib.contextmanager
 def state_lock(state_path, timeout_s=5):
     """Cross-process state lock; released by the OS if a holder crashes."""
-    path=Path(state_path).with_suffix('.lock'); key=str(path.resolve()); depth=_LOCK_DEPTH.get(key,0)
+    path=Path(state_path).with_suffix('.lock'); key=(threading.get_ident(),str(path.resolve())); depth=_LOCK_DEPTH.get(key,0)
     if depth:
         _LOCK_DEPTH[key]=depth+1
         try: yield
