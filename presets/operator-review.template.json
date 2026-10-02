@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "kind": "quest3_pyrowave_operator_review",
+  "capture_id": "",
+  "reviewer": null,
+  "reviewed_at": null,
+  "controllers_ok": null,
+  "audio_ok": null,
+  "tracking_ok": null,
+  "image_ok": null,
+  "metro_clarity_ok": null,
+  "metro_motion_ok": null,
+  "manual_confirmation": null,
+  "notes": null
+}

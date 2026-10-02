@@ -1,5 +1,5 @@
 import unittest
-from tools.quest3.bench import parse_capabilities,plan,summarise,distribution,pyrowave_counter_window
+from tools.quest3.bench import parse_capabilities,plan,summarise,distribution,pyrowave_counter_window, fresh_rate_evidence, build_identity_verified, merge_review, rate_stability
 
 class BenchTests(unittest.TestCase):
     def test_unprobed_rates_are_not_declared_unsupported(self):
@@ -73,6 +73,14 @@ class BenchTests(unittest.TestCase):
         self.assertEqual(r['metrics']['client_fps']['p01'],120)
         self.assertAlmostEqual(r['submitted_frame_rate_fps'],60)
         self.assertFalse(r['sustained_requested_fps'])
+
+    def test_duplicate_target_timestamps_cannot_count_as_fresh_rate(self):
+        events=[{'capture_elapsed_s':t,'event':{'event_type':{
+            'id':'GraphStatistics','data':{'client_fps':90,'target_timestamp_ns':stamp}}}}
+            for t,stamp in ((0,1),(1/90,1),(2/90,2))]
+        report=summarise(events,90)
+        self.assertEqual(report['duplicate_frame_events'], 1)
+        self.assertFalse(report['requested_rate_screen_passed'])
 
     def test_queued_copies_cannot_hide_slow_completion(self):
         events=[{'capture_elapsed_s':t,'event':{'event_type':{
@@ -152,5 +160,50 @@ class BenchTests(unittest.TestCase):
             self.assertIsNone(r['submission_rate_window_s'])
             self.assertFalse(r['requested_rate_screen_passed'])
             self.assertFalse(r['sustained_requested_fps'])
+
+    def test_fresh_effective_rate_and_build_version_must_match(self):
+        line='[Q3PW_EFFECTIVE] requested=Some(90.0) runtime_hz=Some(90.0) period_ns=11111111'
+        self.assertTrue(fresh_rate_evidence([line], 90))
+        self.assertFalse(fresh_rate_evidence([line], 72))
+        self.assertFalse(fresh_rate_evidence(['[Q3PW_EFFECTIVE] requested=Some(90.0) runtime_hz=Some(90.0) period_ns=20000000'], 90))
+        manifest={'schema_version':1,'application_version':'20.13.0-ljk1291.1+abc','protocol_version':'x',
+            'client_package_id':'io.github.ljk1291.quest3pyrowave','repository_commit':'a','sources_lock_sha256':'a',
+            'dependency_revisions':{'a':'b'},'shader_hashes':{'a':'b'},'artifact_sha256':{'a':'b'},
+            'signing_certificate_sha256':'a'}
+        self.assertTrue(build_identity_verified(manifest, {'server_version':'20.13.0-ljk1291.1+abc'},
+            {'version':'20.13.0-ljk1291.1+abc'}))
+        self.assertFalse(build_identity_verified(manifest, {'server_version':'other'},
+            {'version':'20.13.0-ljk1291.1+abc'}))
+
+    def test_experiment_properties_record_raw_and_do_not_assume_flip_default(self):
+        from tools.quest3.bench import experiment_effective, EXPERIMENT_PROPERTIES
+        state={'property:'+name:{'value':'','error':None} for name in EXPERIMENT_PROPERTIES}
+        result=experiment_effective(state)
+        self.assertTrue(result['verified'])
+        self.assertFalse(any(result['enabled'].values()))
+        self.assertTrue(result['effective_direct_flip_y'])
+        state['property:debug.q3pw.direct_eye_copy']['value']='1'
+        self.assertTrue(experiment_effective(state)['enabled']['direct_eye_copy'])
+        state['property:debug.q3pw.direct_eye_copy']['value']=''
+        state['property:debug.oculus.forceDisplayScaling']['value']='1'
+        self.assertTrue(experiment_effective(state)['enabled']['display_scaling'])
+
+    def test_effective_wavelet_prefers_haar_over_cdf53(self):
+        from tools.quest3.bench import effective_pyrowave_config
+        self.assertEqual(effective_pyrowave_config({'pyrowave_wavelet_haar':True,
+            'pyrowave_wavelet_53':True})['wavelet'], 'Haar')
+
+    def test_review_must_be_bound_to_its_capture(self):
+        report={'capture_id':'capture-a'}
+        self.assertNotIn('image_ok', merge_review(report, {'capture_id':'other','image_ok':True}))
+        merged=merge_review(report, {'capture_id':'capture-a','image_ok':True,'controllers_ok':True,
+            'audio_ok':True,'tracking_ok':True,'manual_confirmation':True,
+            'metro_clarity_ok':True,'metro_motion_ok':True})
+        self.assertTrue(merged['image_ok'])
+        self.assertEqual(merged['operator_review']['capture_id'],'capture-a')
+
+    def test_endurance_windows_report_pending_until_all_six_are_observed(self):
+        short=[(i/90,{'client_fps':90}) for i in range(90*300+1)]
+        self.assertEqual(rate_stability(short,90)['status'],'pending_or_failed')
 
 if __name__=='__main__':unittest.main()

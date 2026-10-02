@@ -6,7 +6,7 @@ The dashboard forwards control/video TCP ports through ADB; no Meta PC runtime i
 1. Use a USB data cable and a USB 3 port. Enable Quest Developer Mode and accept USB debugging.
 2. Start our dashboard and SteamVR, then enable **Devices → Wired Connection**.
 3. This fork defaults **Connection → Wired Client Type** to Custom:
-   `io.github.jms1717.quest3pyrowave`. Older fork builds must set that explicitly.
+   `io.github.ljk1291.quest3pyrowave`. Older saved sessions must set that explicitly.
 4. Use **PyroWave transport TCP**. Restart SteamVR after changing transport.
    In the new build, a wired peer automatically forces native/server video to TCP even if
    a UDP preset was selected. The standalone UDP video socket cannot use ADB forwarding.

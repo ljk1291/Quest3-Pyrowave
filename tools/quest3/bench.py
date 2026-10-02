@@ -7,11 +7,21 @@ import re
 import subprocess
 import time
 import threading
+import uuid
 from pathlib import Path
+from .baseline import baseline_plan, acceptance
 
 RATES = (72, 90, 120, 144, 207, 240)
 BITRATES = (400, 600, 800, 1000, 1500, 2000)
 SUSTAINED_RATE_WINDOW_SECONDS = 300
+ENDURANCE_WINDOW_SECONDS = 300
+EXPERIMENT_PROPERTIES = (
+    'debug.q3pw.direct_eye_copy', 'debug.q3pw.async_eye_copy', 'debug.q3pw.copy_wait_us',
+    'debug.q3pw.raw_srgb_copy', 'debug.q3pw.image_cache', 'debug.q3pw.frame_wait_us',
+    'debug.q3pw.pre_wait_poll', 'debug.q3pw.repeat_render', 'debug.q3pw.decode_workers',
+    'debug.q3pw.decode_handoff', 'debug.q3pw.direct_flip_y',
+    'debug.oculus.forceDisplayScaling', 'debug.oculus.refreshRate',
+)
 
 def supported(requested, rates):
     return any(math.isfinite(r) and r > 0 and abs(r - requested) < .01 for r in rates)
@@ -96,17 +106,45 @@ def pyrowave_counter_window(samples):
     return {'samples':len(samples), 'interval_s':span, 'counter_deltas':deltas,
         'counter_rates_per_s':{name:delta/span if span is not None and delta is not None else None
             for name,delta in deltas.items()},
-        'definition':'Matching HeadsetTelemetry endpoints. Complete is producer decode completion; superseded includes pending replacement and out-of-order publication. Eye completion can include configuration redraws; staging completion is unobserved. Not unique or optical display FPS.'}
+            'definition':'Matching HeadsetTelemetry endpoints. Complete is producer decode completion; superseded includes pending replacement and out-of-order publication. Eye completion can include configuration redraws; staging completion is unobserved. Not unique or optical display FPS.'}
+
+def rate_stability(graphs, requested_hz, window_seconds=ENDURANCE_WINDOW_SECONDS, required_windows=6):
+    """Check independent five-minute submission windows for a 30-minute endurance run."""
+    timed=list(graphs)
+    if (not requested_hz or len(timed)<2 or any(not isinstance(t,(int,float)) or isinstance(t,bool)
+        or not math.isfinite(t) for t,_ in timed)):
+        return {'status':'missing_timed_frames','windows':[]}
+    start=timed[0][0]; buckets={}
+    for t,data in timed:
+        index=int((t-start)//window_seconds)
+        buckets.setdefault(index,[]).append((t,data))
+    windows=[]
+    for index in range(required_windows):
+        rows=buckets.get(index,[])
+        if len(rows)<2:
+            windows.append({'index':index,'status':'incomplete','submission_rate_fps':None})
+            continue
+        span=rows[-1][0]-rows[0][0]
+        rate=(len(rows)-1)/span if span>0 else None
+        fps=distribution([row.get('client_fps') for _,row in rows])
+        passed=bool(rate is not None and span>=window_seconds*.98 and fps is not None
+                    and rate>=requested_hz*.98 and fps['p01']>=requested_hz*.98)
+        windows.append({'index':index,'status':'passed' if passed else 'failed','submission_rate_fps':rate,
+                        'window_s':span,'client_fps_p01':fps['p01'] if fps else None})
+    return {'status':'stable' if all(window['status']=='passed' for window in windows) else 'pending_or_failed',
+            'window_seconds':window_seconds,'windows':windows}
 
 
 def summarise(events, requested_hz=None):
     graphs=[]; summaries=[]; telemetry=[]; graph_times=[]; pyro_samples=[]
+    timed_graphs=[]
     for item in events:
         event=item.get('event',item).get('event_type',{})
         data=event.get('data',{})
         if event.get('id')=='GraphStatistics':
             graphs.append(data)
             graph_times.append(item.get('capture_elapsed_s'))
+            timed_graphs.append((item.get('capture_elapsed_s'),data))
         if event.get('id')=='StatisticsSummary': summaries.append(data)
         if event.get('id')=='HeadsetTelemetry':
             telemetry.append(data)
@@ -129,12 +167,16 @@ def summarise(events, requested_hz=None):
     result['submitted_frame_rate_fps']=(len(graph_times)-1)/span if span>0 else None
     result['submission_rate_window_s']=span if span>0 else None
     result['sustained_rate_window_min_seconds']=SUSTAINED_RATE_WINDOW_SECONDS
+    result['rate_stability']=rate_stability(timed_graphs,requested_hz)
     result['rate_check_scope']='Submission and available direct-completion rate proxies. A short pass is screening only; even a long rate pass does not certify configuration, image correctness, gameplay, thermals or optical FPS.'
     result['submission_rate_definition']='GraphStatistics events per capture-time span; submitted video frames, not repeated OpenXR layers. With async copies this is submission, not GPU completion or optical display FPS.'
     result['metrics']['client_fps']=distribution([g.get('client_fps') for g in graphs])
     result['metrics']['server_fps']=distribution([g.get('server_fps') for g in graphs])
     result['metrics']['video_mbps']=distribution([g.get('bitrate_bps',0)/1e6 for g in graphs])
-    timestamps=sorted(set(g['target_timestamp_ns'] for g in graphs if 'target_timestamp_ns' in g))
+    raw_timestamps=[g['target_timestamp_ns'] for g in graphs if 'target_timestamp_ns' in g]
+    timestamps=sorted(set(raw_timestamps))
+    result['duplicate_frame_events']=max(0, len(raw_timestamps)-len(timestamps))
+    result['fresh_frames']=len(timestamps) if raw_timestamps else None
     result['metrics']['frame_timestamp_gap_ms']=distribution([(b-a)/1e6 for a,b in zip(timestamps,timestamps[1:])])
     # Counter deltas; never report the last lifetime total as this capture's losses.
     result['packet_loss_delta']=None
@@ -167,6 +209,8 @@ def summarise(events, requested_hz=None):
         submitted=result['submitted_frame_rate_fps']
         result['requested_rate_screen_passed']=(fps is not None and submitted is not None
             and fps['p01']>=requested_hz*.98 and submitted>=requested_hz*.98)
+        if result['duplicate_frame_events']:
+            result['requested_rate_screen_passed']=False
         completed=result['completed_eye_copy_rate_fps']
         if completed is not None:
             result['requested_rate_screen_passed'] &= completed>=requested_hz*.98
@@ -190,12 +234,50 @@ def snapshot(adb):
         'gpu_available_frequencies':'cat /sys/class/kgsl/kgsl-3d0/devfreq/available_frequencies'}.items():
         try: result[key]={'value':adb_run(adb,'shell',cmd),'error':None}
         except (RuntimeError,subprocess.TimeoutExpired) as e: result[key]={'value':None,'error':str(e)}
+    for name in EXPERIMENT_PROPERTIES:
+        key='property:' + name
+        try: result[key]={'value':adb_run(adb,'shell','getprop',name).strip(),'error':None}
+        except (RuntimeError,subprocess.TimeoutExpired) as e: result[key]={'value':None,'error':str(e)}
     return result
+
+def experiment_effective(state):
+    """Preserve raw Android properties and derive only documented source semantics."""
+    raw={name:state.get('property:'+name,{}) for name in EXPERIMENT_PROPERTIES}
+    if any(item.get('error') for item in raw.values()): return {'raw':raw,'verified':False,'enabled':None}
+    value=lambda name: raw[name].get('value') or ''
+    integer=lambda name: int(value(name)) if value(name).strip().lstrip('-').isdigit() else 0
+    enabled={
+        'direct_eye_copy':value('debug.q3pw.direct_eye_copy')=='1',
+        'async_eye_copy':value('debug.q3pw.async_eye_copy')=='1',
+        'copy_wait':integer('debug.q3pw.copy_wait_us') != 0,
+        'raw_srgb_copy':value('debug.q3pw.raw_srgb_copy')=='1',
+        'image_cache':value('debug.q3pw.image_cache')=='1',
+        'frame_wait':integer('debug.q3pw.frame_wait_us') != 0,
+        'pre_wait_poll':value('debug.q3pw.pre_wait_poll')=='1',
+        'repeat_render':value('debug.q3pw.repeat_render')=='1',
+        'decode_workers':value('debug.q3pw.decode_workers')=='2',
+        'decode_handoff':value('debug.q3pw.decode_handoff')=='1',
+        'display_scaling':(value('debug.oculus.forceDisplayScaling') == '1'
+                           or value('debug.oculus.refreshRate') != ''),
+    }
+    # direct_flip_y is recorded but not treated as an opt-in experiment: source defaults it true.
+    return {'raw':raw,'verified':True,'enabled':enabled,
+            'effective_decode_workers':2 if enabled['decode_workers'] else 1,
+            'effective_direct_flip_y':value('debug.q3pw.direct_flip_y')!='0'}
+
+def effective_pyrowave_config(config):
+    return {'enabled':config.get('pyrowave_enabled'),'transport':'Udp' if config.get('pyrowave_udp') else 'Tcp',
+            'chroma':'444' if config.get('pyrowave_chroma_444') else '420',
+            'wavelet':'Haar' if config.get('pyrowave_wavelet_haar') else ('Cdf53' if config.get('pyrowave_wavelet_53') else 'Cdf97'),
+            'decode_path':{0:'Auto',1:'Fragment',2:'Compute'}.get(config.get('pyrowave_decode_path')),
+            'foveated_encoding':config.get('enable_foveated_encoding')}
 
 def active_settings():
     from .control import session
     s=session();v=s['session_settings']['video'];o=s.get('openvr_config',{})
     mode = v['bitrate']['mode']
+    hdr=v.get('encoder_config',{}).get('hdr',{})
+    foveated=v.get('foveated_encoding',{}); client_foveated=v.get('clientside_foveation',{})
     return {'server_version':s.get('server_version'), 'codec':v['preferred_codec']['variant'],
         'bitrate_mode':mode['variant'], 'bitrate_config':mode,
         'target_mbps':mode['ConstantMbps'] if mode['variant']=='ConstantMbps' else None,
@@ -204,18 +286,87 @@ def active_settings():
         'chroma':'444' if v['pyrowave'].get('chroma_444',False) else '420',
         'transport':v['pyrowave']['transport']['variant'], 'stream_protocol':s['session_settings']['connection']['stream_protocol']['variant'],
         'configured_view_resolution':v['transcoding_view_resolution'],
+        'hdr_enabled':hdr.get('enable_hdr'),
+        'hdr_server_override':hdr.get('server_overrides_enable_hdr'),
+        'enforce_server_frame_pacing':v.get('enforce_server_frame_pacing'),
+        'foveated_encoding_enabled':foveated.get('enabled'),
+        'clientside_foveation_enabled':client_foveated.get('enabled'),
+        'encoded_resolution':absolute_resolution(v.get('transcoding_view_resolution')),
+        'render_resolution':absolute_resolution(v.get('emulated_headset_view_resolution')),
+        'negotiated_encoded_resolution':openvr_resolution(o,'target_eye_resolution_width','target_eye_resolution_height'),
+        'negotiated_render_resolution':openvr_resolution(o,'eye_resolution_width','eye_resolution_height'),
+        'negotiated_hz':o.get('refresh_rate'),
+        'effective_pyrowave':effective_pyrowave_config(o),
         'openvr':{k:o.get(k) for k in ('refresh_rate','eye_resolution_width','eye_resolution_height',
             'target_eye_resolution_width','target_eye_resolution_height','pyrowave_enabled','pyrowave_decode_path','pyrowave_wavelet_53','pyrowave_wavelet_haar','pyrowave_udp','pyrowave_chroma_444','enable_foveated_encoding')}}
 
-def runtime_evidence(adb):
-    log=adb_run(adb,'logcat','-d','-t','20000')
+def absolute_resolution(value):
+    """Normalise ALVR's optional Absolute setting without inventing a scale."""
+    if not isinstance(value, dict) or value.get('variant') != 'Absolute': return None
+    absolute=value.get('Absolute', {})
+    height=absolute.get('height')
+    if isinstance(height, dict): height=height.get('content') if height.get('set') else None
+    width=absolute.get('width')
+    return {'width':width, 'height':height} if isinstance(width,int) and isinstance(height,int) else None
+
+def openvr_resolution(config, width_key, height_key):
+    width,height=config.get(width_key),config.get(height_key)
+    return {'width':width,'height':height} if isinstance(width,int) and isinstance(height,int) else None
+
+def runtime_evidence(adb, capture_id=None):
+    log=adb_run(adb,'logcat','-d','-v','epoch','-t','20000')
     # Store only app diagnostic records, never the complete system log.
-    return [line.split(']: ',1)[-1] for line in log.splitlines()
+    lines=log.splitlines()
+    if capture_id:
+        markers=[i for i,line in enumerate(lines) if 'Q3PW_CAPTURE' in line and capture_id in line]
+        if not markers: return []
+        lines=lines[markers[-1]+1:]
+    return [line.split(']: ',1)[-1] for line in lines
         if re.search(r'\[Q3PW_(CAPS|PROBE|VERIFIED|RATE|EFFECTIVE)\]',line)]
+
+def fresh_rate_evidence(lines, requested_hz):
+    for line in reversed(lines):
+        match=re.search(r'\[Q3PW_EFFECTIVE\].*requested=Some\(([0-9.]+)\).*runtime_hz=Some\(([0-9.]+)\)',line)
+        period=re.search(r'period_ns=([0-9]+)',line)
+        expected_period=1e9/requested_hz
+        if (match and period and abs(float(match.group(1))-requested_hz)<.01
+                and abs(float(match.group(2))-requested_hz)<.01
+                and abs(float(period.group(1))-expected_period)<=expected_period*.02):
+            return True
+    return False
+
+def build_identity_verified(manifest, settings, client):
+    required=('schema_version','application_version','protocol_version','client_package_id','repository_commit',
+              'sources_lock_sha256','dependency_revisions','shader_hashes','artifact_sha256','signing_certificate_sha256')
+    if not isinstance(manifest,dict) or any(not manifest.get(key) for key in required): return False
+    version=manifest.get('application_version')
+    return bool(version and settings and client and client.get('version') == version
+                and settings.get('server_version') == version)
+
+def thermal_ok(samples):
+    """Return a decision only from readable Android thermal-service status values."""
+    statuses=[]
+    for sample in samples:
+        entry=sample.get('state',{}).get('thermals',{})
+        if entry.get('error'): return None
+        match=re.search(r'(?:thermal\s+)?status\s*:\s*(\d+)', entry.get('value',''),re.I)
+        if not match: return None
+        statuses.append(int(match.group(1)))
+    return bool(statuses) and max(statuses)<=2
+
+def merge_review(report, review):
+    """Merge only human-observable checks from a capture-bound operator attestation."""
+    if not isinstance(review,dict) or review.get('capture_id') != report.get('capture_id'):
+        return report
+    fields=('controllers_ok','audio_ok','tracking_ok','image_ok','manual_confirmation','metro_clarity_ok','metro_motion_ok')
+    report=dict(report)
+    report.update({field:review.get(field) for field in fields})
+    report['operator_review']={key:review.get(key) for key in ('capture_id','reviewer','reviewed_at','notes')}
+    return report
 
 def client_build(adb):
     try:
-        package=adb_run(adb,'shell','dumpsys','package','io.github.jms1717.quest3pyrowave')
+        package=adb_run(adb,'shell','dumpsys','package','io.github.ljk1291.quest3pyrowave')
         version=re.search(r'^\s*versionName=(\S+)',package,re.MULTILINE)
         return {'version':version.group(1) if version else None,
                 'error':None if version else 'Package version unavailable'}
@@ -225,13 +376,17 @@ def client_build(adb):
 def capture(args):
     import websocket
     root=Path(args.out);root.mkdir(parents=True,exist_ok=False)
-    start=snapshot(args.adb);build=client_build(args.adb);events=[];samples=[];error=None;ws=None
+    start=snapshot(args.adb);start_experiments=experiment_effective(start);build=client_build(args.adb);events=[];samples=[];error=None;ws=None
     try:settings_start=active_settings()
     except Exception as exc:
         report={'status':'server_unavailable','frames':0,'error':str(exc),'state_start':start,
                 'client_build':build}
         (root/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
         print(json.dumps({'status':report['status'],'out':str(root)}));return 1
+    capture_id=str(uuid.uuid4())
+    # A marker lets post-capture collection reject stale Q3PW records without
+    # clearing global logcat or changing a system setting.
+    adb_run(args.adb,'shell','log','-t','Q3PW_CAPTURE',capture_id)
     stop=threading.Event();begin_wall_ns=time.time_ns();begin=time.monotonic()
     def sample_device():
         while not stop.is_set():
@@ -255,10 +410,20 @@ def capture(args):
     report=summarise(events,args.hz)
     try:settings_end=active_settings()
     except Exception as exc:settings_end=None;error=str(exc)
+    manifest = json.loads(Path(args.build_manifest).read_text(encoding='utf-8')) if args.build_manifest else None
+    evidence=runtime_evidence(args.adb,capture_id)
+    fresh=fresh_rate_evidence(evidence,args.hz)
+    identity_ok=build_identity_verified(manifest,settings_start,build)
     report.update({'duration_requested_s':args.seconds,'capture_started_unix_ns':begin_wall_ns,'elapsed_s':time.monotonic()-begin,
         'error':error,'state_start':start,'state_end':snapshot(args.adb),'device_samples':samples,
         'settings_start':settings_start,'settings_end':settings_end,'client_build':build,
-        'runtime_evidence':runtime_evidence(args.adb)})
+        'capture_id':capture_id, 'runtime_evidence':evidence, 'fresh_runtime_evidence':fresh,
+        'build_identity':manifest, 'build_identity_verified':identity_ok,
+        'experiment_options_start':start_experiments,
+        'telemetry_complete':len(report.get('headset_telemetry',[])) >= 2,
+        'thermal_ok':thermal_ok(samples),
+        'stream_errors':([error] if error else ([] if report['pyrowave_counter_window']['counter_deltas'].get('decode_failures') == 0 else None))})
+    report['experiment_options_end']=experiment_effective(report['state_end'])
     if settings_start!=settings_end:report['status']='settings_changed_during_capture'
     if settings_start['openvr'].get('refresh_rate')!=args.hz:report['status']='negotiated_rate_mismatch'
     if error:report['status']='capture_failed'
@@ -275,11 +440,22 @@ def main():
     c=sub.add_parser('capture');c.add_argument('--adb',default='adb');c.add_argument('--out',required=True)
     c.add_argument('--seconds',type=int,default=15);c.add_argument('--hz',type=int,required=True)
     c.add_argument('--events',default='ws://127.0.0.1:8082/api/events')
+    c.add_argument('--build-manifest',help='matching CI build-identity manifest; recorded but not trusted without runtime marker')
+    c=sub.add_parser('baseline-plan');c.add_argument('--out',required=True);c.add_argument('--render-width',type=int,required=True);c.add_argument('--render-height',type=int,required=True)
+    c.add_argument('--encoded-width',type=int,required=True);c.add_argument('--encoded-height',type=int,required=True);c.add_argument('--repeats',type=int,default=3)
+    c=sub.add_parser('accept');c.add_argument('--report',required=True);c.add_argument('--expected',required=True);c.add_argument('--out',required=True)
+    c.add_argument('--mbps',type=int,help='selected target profile bitrate; required for a baseline-plan acceptance')
+    c.add_argument('--review',help='operator attestation JSON bound to report capture_id')
     c=sub.add_parser('summarise');c.add_argument('events');c.add_argument('--out',required=True)
     a=p.parse_args()
     if a.command=='capture': return capture(a)
     if a.command=='capabilities': data=parse_capabilities(adb_run(a.adb,'shell','logcat -d -t 20000'))
     elif a.command=='plan': data=plan(json.loads(Path(a.capabilities).read_text()),a.repeats,seconds=a.seconds)
+    elif a.command=='baseline-plan': data=baseline_plan({'width':a.render_width,'height':a.render_height},{'width':a.encoded_width,'height':a.encoded_height},a.repeats)
+    elif a.command=='accept':
+        report=json.loads(Path(a.report).read_text())
+        if a.review: report=merge_review(report,json.loads(Path(a.review).read_text()))
+        data=acceptance(report,json.loads(Path(a.expected).read_text()),a.mbps)
     else: data=summarise([json.loads(line) for line in Path(a.events).read_text().splitlines()])
     Path(a.out).write_text(json.dumps(data,indent=2),encoding='utf-8');print(a.out);return 0
 

@@ -2,6 +2,7 @@
 // the Adreno 740; the harness stays as the record and the scoring tool.
 #include "pyroclient.h"
 #include "decode_path.h"
+#include "gpu_failure_policy.h"
 
 #include <android/hardware_buffer.h>
 #include <android/log.h>
@@ -9,6 +10,7 @@
 #include <vulkan/vulkan_android.h>
 
 #include <chrono>
+#include <atomic>
 #include <sys/system_properties.h>
 #include <cstdio>
 #include <cstring>
@@ -23,6 +25,15 @@
 #define TAG "pyroclient"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
+
+// A device-loss/timeout can leave externally visible AHardwareBuffers owned by the GPU. Do not
+// let ALVR's reconnect loop create another decoder on that process/device; Android activity
+// restart is the only supported recovery for this terminal condition.
+static std::atomic_bool g_terminal_gpu_failure { false };
+static void mark_terminal(GpuSubmissionState &state) {
+    state.terminal_failure();
+    g_terminal_gpu_failure.store(true);
+}
 
 #define VK_TRY(x)                                                                            \
     do {                                                                                     \
@@ -132,6 +143,10 @@ struct pyroclient {
     VkFence fence = VK_NULL_HANDLE;
     VkQueryPool queries = VK_NULL_HANDLE;
     bool planes_initialised = false;
+    // Once vkQueueSubmit succeeds, command-buffer, fence and output-slot ownership belongs to
+    // the GPU until the fence completes. A timeout/device loss is terminal for this decoder;
+    // do not reset or destroy those objects underneath potentially pending work.
+    GpuSubmissionState submission_state;
 
     bool create_device();
     bool create_planes();
@@ -525,11 +540,20 @@ static void image_barrier(VkCommandBuffer cmd, VkImage img, VkImageLayout from, 
 
 bool pyroclient::record_and_submit(Slot &s, pyroclient_frame_info *info) {
     const auto t0 = std::chrono::steady_clock::now();
-    VK_TRY(vkResetFences(device, 1, &fence));
-    VK_TRY(vkResetCommandBuffer(cmd, 0));
+    if (!submission_state.can_submit()) return false;
+    auto record_vk = [&](const char* operation, VkResult result) {
+        if (result == VK_SUCCESS) return true;
+        LOGE("%s failed: %d", operation, int(result));
+        // Even before vkQueueSubmit, a device-loss/recording failure makes the native decoder
+        // untrustworthy. Latch it so neither a reset nor a new submission can reuse it.
+        mark_terminal(submission_state);
+        return false;
+    };
+    if (!record_vk("vkResetFences", vkResetFences(device, 1, &fence))) return false;
+    if (!record_vk("vkResetCommandBuffer", vkResetCommandBuffer(cmd, 0))) return false;
     VkCommandBufferBeginInfo bi = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    VK_TRY(vkBeginCommandBuffer(cmd, &bi));
+    if (!record_vk("vkBeginCommandBuffer", vkBeginCommandBuffer(cmd, &bi))) return false;
 
     const VkPipelineStageFlags writeStages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
     const VkAccessFlags writeAccess = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT;
@@ -545,7 +569,11 @@ bool pyroclient::record_and_submit(Slot &s, pyroclient_frame_info *info) {
     pyrowave_device_set_command_buffer(pyro, cmd);
     pyrowave_result dr = pyrowave_decoder_decode_gpu_buffer(decoder, nullptr, nullptr, &buffers);
     pyrowave_device_set_command_buffer(pyro, VK_NULL_HANDLE);
-    if (dr != PYROWAVE_SUCCESS) { LOGE("decode_gpu_buffer: %d", (int)dr); return false; }
+    if (dr != PYROWAVE_SUCCESS) {
+        LOGE("decode_gpu_buffer: %d", (int)dr);
+        mark_terminal(submission_state);
+        return false;
+    }
     vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries, 1);
 
     for (int i = 0; i < 3; i++)
@@ -606,22 +634,43 @@ bool pyroclient::record_and_submit(Slot &s, pyroclient_frame_info *info) {
     image_barrier(cmd, s.image, outLayout, VK_IMAGE_LAYOUT_GENERAL, outAccess, 0,
                   outStage, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, family, VK_QUEUE_FAMILY_FOREIGN_EXT);
 
-    VK_TRY(vkEndCommandBuffer(cmd));
+    if (!record_vk("vkEndCommandBuffer", vkEndCommandBuffer(cmd))) return false;
     VkSubmitInfo si = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
     si.commandBufferCount = 1; si.pCommandBuffers = &cmd;
     const auto t_submit = std::chrono::steady_clock::now();
-    VK_TRY(vkQueueSubmit(queue, 1, &si, fence));
-    VK_TRY(vkWaitForFences(device, 1, &fence, VK_TRUE, 1000ull * 1000 * 1000));
+    VkResult submit = vkQueueSubmit(queue, 1, &si, fence);
+    if (submit != VK_SUCCESS) {
+        LOGE("vkQueueSubmit failed: %d", int(submit));
+        // A failed submission has no usable fence/ownership contract. Conservatively poison the
+        // instance even when the driver did not classify it as VK_ERROR_DEVICE_LOST.
+        mark_terminal(submission_state);
+        return false;
+    }
+    submission_state.submitted();
+    VkResult waited = vkWaitForFences(device, 1, &fence, VK_TRUE, 1000ull * 1000 * 1000);
+    if (waited != VK_SUCCESS) {
+        LOGE("vkWaitForFences failed/timed out: %d", int(waited));
+        // VK_TIMEOUT leaves submitted commands potentially executing. Device loss has the same
+        // lifecycle rule: abandon this instance and let the stream/session recreate it.
+        mark_terminal(submission_state);
+        return false;
+    }
+    submission_state.completed();
 
     const auto t_fence = std::chrono::steady_clock::now();
     if (info) {
         info->record_ms = std::chrono::duration<double, std::milli>(t_submit - t0).count();
         info->wait_ms = std::chrono::duration<double, std::milli>(t_fence - t_submit).count();
         uint64_t t[3] = {};
-        if (vkGetQueryPoolResults(device, queries, 0, 3, sizeof t, t, sizeof(uint64_t),
-                                  VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS) {
+        VkResult query_result = vkGetQueryPoolResults(device, queries, 0, 3, sizeof t, t, sizeof(uint64_t),
+                                                       VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+        if (query_result == VK_SUCCESS) {
             info->decode_ms = double(t[1] - t[0]) * ns_per_tick / 1e6;
             info->convert_ms = double(t[2] - t[1]) * ns_per_tick / 1e6;
+        } else {
+            LOGE("vkGetQueryPoolResults failed: %d", int(query_result));
+            mark_terminal(submission_state);
+            return false;
         }
         info->total_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     }
@@ -629,6 +678,13 @@ bool pyroclient::record_and_submit(Slot &s, pyroclient_frame_info *info) {
 }
 
 void pyroclient::destroy() {
+    if (submission_state.retain_resources()) {
+        // No unbounded vkDeviceWaitIdle here. On a timeout/device loss it can itself never
+        // return, and freeing a command buffer/fence/AHB that the GPU may still reference is
+        // invalid. Intentionally retain this terminal instance until process/session reset.
+        LOGE("retaining terminal decoder instance; recreate the streaming session");
+        return;
+    }
     if (device) vkDeviceWaitIdle(device);
     if (decoder) pyrowave_decoder_destroy(decoder);
     for (Slot &s : ring) {
@@ -670,6 +726,10 @@ extern "C" pyroclient *pyroclient_create(uint32_t width, uint32_t height, int ch
 }
 
 extern "C" pyroclient *pyroclient_create_ex(uint32_t width, uint32_t height, int chroma444, int full_range, uint32_t ring_size, int wavelet, int decode_path) {
+    if (g_terminal_gpu_failure.load()) {
+        LOGE("previous terminal GPU failure; restart the Android app before reconnecting");
+        return nullptr;
+    }
     if (!width || !height || (!chroma444 && ((width | height) & 1))) { LOGE("bad geometry %ux%u", width, height); return nullptr; }
     if (wavelet != 97 && wavelet != 53 && wavelet != 2) { LOGE("bad wavelet %d (97, 53 or 2=Haar)", wavelet); return nullptr; }
     char fused_prop[PROP_VALUE_MAX] = {};
@@ -779,8 +839,8 @@ extern "C" int pyroclient_decode(pyroclient *c, AHardwareBuffer **out, pyroclien
 }
 
 extern "C" int pyroclient_decode_guarded(pyroclient *c, AHardwareBuffer **out, pyroclient_frame_info *info,
-                                       AHardwareBuffer *protected_a, AHardwareBuffer *protected_b) {
-    if (!c || !out) return -1;
+                                          AHardwareBuffer *protected_a, AHardwareBuffer *protected_b) {
+    if (!c || !out || !c->submission_state.can_submit()) return -1;
     *out = nullptr;
     // Partial reconstruction requires pristine low-frequency bands. The old UDP caller
     // decoded arbitrary packet subsets, which can make the entire picture disappear.
