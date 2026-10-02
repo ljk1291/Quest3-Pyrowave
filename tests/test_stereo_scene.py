@@ -47,6 +47,23 @@ class StereoScenePixelTests(unittest.TestCase):
         self.assertEqual((rx.min(), ry.min(), rx.max(), ry.max()), (590, 854, 1490, 1354))
         self.assertEqual((sx.min(), sy.min(), sx.max(), sy.max()), (1180, 1708, 2980, 2708))
 
+    def test_normalized_eyes_keep_independent_local_boundaries(self):
+        # Stereo submission takes two independent per-eye textures. Their panel placements
+        # may differ with asymmetric frusta, but neither can spill or be scaled through a seam.
+        left_projection = (-1.4, 1.0, -1.1, 1.1)
+        right_projection = (-1.0, 1.4, -1.1, 1.1)
+        left = scene.normalized_eye_pattern(3072, 3232, 'LEFT', (32, 32, 200), left_projection)
+        right = scene.normalized_eye_pattern(3072, 3232, 'RIGHT', (200, 64, 32), right_projection)
+        self.assertEqual(left.shape, (3232, 3072, 3))
+        self.assertEqual(right.shape, (3232, 3072, 3))
+        for image, color in ((left, (32, 32, 200)), (right, (200, 64, 32))):
+            panel = (image == color).all(axis=2)
+            y, x = panel.nonzero()
+            self.assertGreater(x.min(), 0)
+            self.assertLess(x.max(), image.shape[1] - 1)
+            self.assertGreater(y.min(), 0)
+            self.assertLess(y.max(), image.shape[0] - 1)
+
 
 class StereoSceneCliTests(unittest.TestCase):
     def parser(self):

@@ -184,6 +184,7 @@ def main():
     import glfw
     import openvr
     from OpenGL import GL
+    cv2, np = render_modules()
     parser = build_parser()
     args = validate_args(parser, parser.parse_args())
     root = Path(args.out); root.mkdir(parents=True, exist_ok=True)
