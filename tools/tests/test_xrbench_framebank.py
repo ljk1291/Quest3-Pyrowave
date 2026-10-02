@@ -187,6 +187,17 @@ class FrameBankTests(unittest.TestCase):
                 self.assertEqual(calls[1][1:], [str(out/"cell-00-haar-300-4x4"/"encoded.wave"),str(out/"cell-00-haar-300-4x4"/"decoded-c420.y4m")]);self.assertEqual(fb.sanitized_report(result)["cells"][0]["codec_only"]["psnr_y"],math.inf)
             finally: shutil.rmtree(out,ignore_errors=True)
 
+    def test_pinned_hvs_cli_arguments_and_calibration_contract(self):
+        class Guard:
+            def __init__(self): self.argv=None
+            def run(self,argv,**kwargs):
+                self.argv=argv
+                return 0, "PixelsPerDegree = 23.600000 || HeightFactor = 0.41837265 || PSNR-HVS-M-H: (Y) 31.2 dB", ""
+        guard=Guard()
+        score=fb._score_hvs_m_h(Path("pyrowave-psnr-hvs-m"),Path("reference.y4m"),Path("distorted.y4m"),90,23.6,3232,guard,Path.cwd(),{},1)
+        self.assertEqual(guard.argv,["pyrowave-psnr-hvs-m","--reference","reference.y4m","--distorted","distorted.y4m","--frames","90","--pixels-per-degree","23.6"])
+        self.assertAlmostEqual(score["value"],31.2)
+
     def test_sanitized_report_omits_private_identity(self):
         public=fb.sanitized_report({"complete":False,"failure_reasons":["cell_failed"],"cells":[{"wavelet":"haar","source_frame_identity":["private"],"error":"cell_failed"}]})
         self.assertNotIn("source_frame_identity",public["cells"][0]);self.assertFalse(public["complete"])
