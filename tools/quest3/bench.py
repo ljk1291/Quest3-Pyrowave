@@ -21,6 +21,10 @@ EXPERIMENT_PROPERTIES = (
     'debug.q3pw.pre_wait_poll', 'debug.q3pw.repeat_render', 'debug.q3pw.decode_workers',
     'debug.q3pw.decode_handoff', 'debug.q3pw.direct_flip_y',
     'debug.oculus.forceDisplayScaling', 'debug.oculus.refreshRate',
+    'debug.q3pw.haar_fused','debug.q3pw.dequant_batch','debug.q3pw.convert_compute',
+    'debug.q3pw.fragment_min_usage','debug.q3pw.optimal_ahb_usage','debug.q3pw.loop_probe',
+    'debug.q3pw.runtime_display_time','debug.xrwired.pyro_precision','debug.xrwired.early_poll',
+    'debug.xrwired.perf_level',
 )
 
 def supported(requested, rates):
@@ -243,7 +247,8 @@ def snapshot(adb):
 def experiment_effective(state):
     """Preserve raw Android properties and derive only documented source semantics."""
     raw={name:state.get('property:'+name,{}) for name in EXPERIMENT_PROPERTIES}
-    if any(item.get('error') for item in raw.values()): return {'raw':raw,'verified':False,'enabled':None}
+    if any(item.get('error') or item.get('value') is None for item in raw.values()):
+        return {'raw':raw,'verified':False,'enabled':None}
     value=lambda name: raw[name].get('value') or ''
     integer=lambda name: int(value(name)) if value(name).strip().lstrip('-').isdigit() else 0
     enabled={
@@ -259,11 +264,21 @@ def experiment_effective(state):
         'decode_handoff':value('debug.q3pw.decode_handoff')=='1',
         'display_scaling':(value('debug.oculus.forceDisplayScaling') == '1'
                            or value('debug.oculus.refreshRate') != ''),
+        'haar_fused':value('debug.q3pw.haar_fused')=='1',
+        'dequant_batch':value('debug.q3pw.dequant_batch')=='1',
+        'convert_compute':value('debug.q3pw.convert_compute')=='1',
+        'fragment_min_usage':value('debug.q3pw.fragment_min_usage')=='1',
+        'optimal_ahb_usage':value('debug.q3pw.optimal_ahb_usage')=='1',
+        'loop_probe':value('debug.q3pw.loop_probe')=='1',
+        'runtime_display_time':value('debug.q3pw.runtime_display_time')=='1',
     }
     # direct_flip_y is recorded but not treated as an opt-in experiment: source defaults it true.
     return {'raw':raw,'verified':True,'enabled':enabled,
             'effective_decode_workers':2 if enabled['decode_workers'] else 1,
-            'effective_direct_flip_y':value('debug.q3pw.direct_flip_y')!='0'}
+            'effective_direct_flip_y':value('debug.q3pw.direct_flip_y')!='0',
+            'effective_pyro_precision':value('debug.xrwired.pyro_precision') or '1',
+            'effective_early_poll':value('debug.xrwired.early_poll')!='0',
+            'effective_perf_level':value('debug.xrwired.perf_level') or 'sustained_high'}
 
 def effective_pyrowave_config(config):
     return {'enabled':config.get('pyrowave_enabled'),'transport':'Udp' if config.get('pyrowave_udp') else 'Tcp',
@@ -293,8 +308,10 @@ def active_settings():
         'clientside_foveation_enabled':client_foveated.get('enabled'),
         'encoded_resolution':absolute_resolution(v.get('transcoding_view_resolution')),
         'render_resolution':absolute_resolution(v.get('emulated_headset_view_resolution')),
-        'negotiated_encoded_resolution':openvr_resolution(o,'target_eye_resolution_width','target_eye_resolution_height'),
-        'negotiated_render_resolution':openvr_resolution(o,'eye_resolution_width','eye_resolution_height'),
+        # ALVR connection.rs assigns stream_view_resolution to eye_resolution;
+        # target_eye_resolution is the game's recommended render target.
+        'negotiated_encoded_resolution':openvr_resolution(o,'eye_resolution_width','eye_resolution_height'),
+        'negotiated_render_resolution':openvr_resolution(o,'target_eye_resolution_width','target_eye_resolution_height'),
         'negotiated_hz':o.get('refresh_rate'),
         'effective_pyrowave':effective_pyrowave_config(o),
         'openvr':{k:o.get(k) for k in ('refresh_rate','eye_resolution_width','eye_resolution_height',
@@ -313,27 +330,53 @@ def openvr_resolution(config, width_key, height_key):
     width,height=config.get(width_key),config.get(height_key)
     return {'width':width,'height':height} if isinstance(width,int) and isinstance(height,int) else None
 
-def runtime_evidence(adb, capture_id=None):
-    log=adb_run(adb,'logcat','-d','-v','epoch','-t','20000')
-    # Store only app diagnostic records, never the complete system log.
+def _log_epoch(line):
+    match=re.match(r'\s*([0-9]+(?:\.[0-9]+)?)\s+', line)
+    return float(match.group(1)) if match else None
+
+def filter_runtime_evidence(log, capture_id=None, since_epoch=None):
+    """Keep only Q3PW diagnostics, with a durable timestamp cursor after ring rotation."""
     lines=log.splitlines()
     if capture_id:
         markers=[i for i,line in enumerate(lines) if 'Q3PW_CAPTURE' in line and capture_id in line]
         if not markers: return []
-        lines=lines[markers[-1]+1:]
-    return [line.split(']: ',1)[-1] for line in lines
-        if re.search(r'\[Q3PW_(CAPS|PROBE|VERIFIED|RATE|EFFECTIVE)\]',line)]
+        marker_line=lines[markers[-1]]
+        since_epoch=_log_epoch(marker_line) if since_epoch is None else since_epoch
+    return [line for line in lines if (since_epoch is None or (_log_epoch(line) is not None and _log_epoch(line)>=since_epoch))
+        and re.search(r'\[Q3PW_(CAPS|PROBE|VERIFIED|RATE|EFFECTIVE)\]',line)]
+
+def capture_marker_epoch(adb, capture_id):
+    log=adb_run(adb,'logcat','-d','-v','epoch','-t','20000')
+    for line in reversed(log.splitlines()):
+        if 'Q3PW_CAPTURE' in line and capture_id in line:
+            return _log_epoch(line)
+    return None
+
+def runtime_evidence(adb, capture_id=None, since_epoch=None):
+    log=adb_run(adb,'logcat','-d','-v','epoch','-t','20000')
+    return filter_runtime_evidence(log,capture_id,since_epoch)
 
 def fresh_rate_evidence(lines, requested_hz):
-    for line in reversed(lines):
-        match=re.search(r'\[Q3PW_EFFECTIVE\].*requested=Some\(([0-9.]+)\).*runtime_hz=Some\(([0-9.]+)\)',line)
+    effective=[line for line in lines if '[Q3PW_EFFECTIVE]' in line]
+    if not effective: return False
+    expected_period=1e9/requested_hz
+    for line in effective:
+        # The pinned OpenXR client logs the Result<f32> directly: Ok(...), not Some(...).
+        match=re.search(r'\[Q3PW_EFFECTIVE\].*requested=Some\(([0-9.]+)\).*runtime_hz=(?:Ok|Some)\(([0-9.]+)\)',line)
         period=re.search(r'period_ns=([0-9]+)',line)
-        expected_period=1e9/requested_hz
-        if (match and period and abs(float(match.group(1))-requested_hz)<.01
+        if not (match and period and abs(float(match.group(1))-requested_hz)<.01
                 and abs(float(match.group(2))-requested_hz)<.01
-                and abs(float(period.group(1))-expected_period)<=expected_period*.02):
-            return True
-    return False
+                and abs(float(period.group(1))-expected_period)<=expected_period*.02): return False
+    return True
+
+def runtime_coverage(polls, elapsed, max_gap_s=15):
+    """A capture must continuously collect scoped Q3PW evidence, not only a final tail."""
+    times=[p['elapsed_s'] for p in polls if p.get('records',0)>0]
+    if not times: return {'status':'incomplete','polls':polls}
+    gaps=[b-a for a,b in zip(times,times[1:])]
+    complete=(times[0]<=max_gap_s and elapsed-times[-1]<=max_gap_s and all(0<g<=max_gap_s for g in gaps))
+    return {'status':'covered' if complete else 'incomplete','polls':polls,
+            'max_gap_s':max(gaps,default=times[0])}
 
 def build_identity_verified(manifest, settings, client):
     required=('schema_version','application_version','protocol_version','client_package_id','repository_commit',
@@ -342,6 +385,16 @@ def build_identity_verified(manifest, settings, client):
     version=manifest.get('application_version')
     return bool(version and settings and client and client.get('version') == version
                 and settings.get('server_version') == version)
+
+def benchmark_tool_provenance():
+    """Identify the exact capture tool revision; dirty/untracked tool files cannot certify a run."""
+    root=Path(__file__).resolve().parents[2]
+    try:
+        commit=subprocess.run(['git','-C',str(root),'rev-parse','HEAD'],capture_output=True,text=True,timeout=10,check=True).stdout.strip()
+        status=subprocess.run(['git','-C',str(root),'status','--porcelain','--','tools/quest3'],capture_output=True,text=True,timeout=10,check=True).stdout
+        return {'repository_commit':commit,'tool_tree_dirty':bool(status.strip()),'verified':not bool(status.strip()),'error':None}
+    except (OSError,subprocess.SubprocessError) as exc:
+        return {'repository_commit':None,'tool_tree_dirty':None,'verified':False,'error':str(exc)}
 
 def thermal_ok(samples):
     """Return a decision only from readable Android thermal-service status values."""
@@ -358,7 +411,8 @@ def merge_review(report, review):
     """Merge only human-observable checks from a capture-bound operator attestation."""
     if not isinstance(review,dict) or review.get('capture_id') != report.get('capture_id'):
         return report
-    fields=('controllers_ok','audio_ok','tracking_ok','image_ok','manual_confirmation','metro_clarity_ok','metro_motion_ok')
+    fields=('controllers_ok','audio_ok','tracking_ok','image_ok','manual_confirmation','metro_clarity_ok','metro_motion_ok',
+            'no_disconnects_ok','no_crashes_ok')
     report=dict(report)
     report.update({field:review.get(field) for field in fields})
     report['operator_review']={key:review.get(key) for key in ('capture_id','reviewer','reviewed_at','notes')}
@@ -376,6 +430,7 @@ def client_build(adb):
 def capture(args):
     import websocket
     root=Path(args.out);root.mkdir(parents=True,exist_ok=False)
+    provenance=benchmark_tool_provenance()
     start=snapshot(args.adb);start_experiments=experiment_effective(start);build=client_build(args.adb);events=[];samples=[];error=None;ws=None
     try:settings_start=active_settings()
     except Exception as exc:
@@ -387,10 +442,22 @@ def capture(args):
     # A marker lets post-capture collection reject stale Q3PW records without
     # clearing global logcat or changing a system setting.
     adb_run(args.adb,'shell','log','-t','Q3PW_CAPTURE',capture_id)
+    marker_epoch=capture_marker_epoch(args.adb,capture_id)
     stop=threading.Event();begin_wall_ns=time.time_ns();begin=time.monotonic()
+    runtime_samples=[];runtime_polls=[];runtime_cursor=[marker_epoch - .001 if marker_epoch is not None else None]
     def sample_device():
         while not stop.is_set():
             samples.append({'elapsed_s':time.monotonic()-begin,'state':snapshot(args.adb)})
+            # Poll frequently enough that the log ring cannot lose a 30-minute session;
+            # retain only Q3PW records after the immutable marker timestamp.
+            if runtime_cursor[0] is not None:
+                try:
+                    batch=runtime_evidence(args.adb,since_epoch=runtime_cursor[0])
+                    fresh=[line for line in batch if (_log_epoch(line) or -1)>runtime_cursor[0]]
+                    if fresh: runtime_cursor[0]=max(_log_epoch(line) for line in fresh)
+                    runtime_samples.extend(fresh)
+                    runtime_polls.append({'elapsed_s':time.monotonic()-begin,'records':len(fresh)})
+                except (RuntimeError,subprocess.TimeoutExpired): runtime_polls.append({'elapsed_s':time.monotonic()-begin,'records':0})
             stop.wait(5)
     sampler=threading.Thread(target=sample_device,daemon=True);sampler.start()
     try:
@@ -405,20 +472,24 @@ def capture(args):
                 except websocket.WebSocketTimeoutException: pass
     except Exception as e:error=str(e)
     finally:
+        capture_end_elapsed=time.monotonic()-begin
         stop.set();sampler.join(timeout=25)
         if ws:ws.close()
     report=summarise(events,args.hz)
     try:settings_end=active_settings()
     except Exception as exc:settings_end=None;error=str(exc)
     manifest = json.loads(Path(args.build_manifest).read_text(encoding='utf-8')) if args.build_manifest else None
-    evidence=runtime_evidence(args.adb,capture_id)
+    evidence=list(dict.fromkeys(runtime_samples)) if marker_epoch is not None else []
+    coverage=runtime_coverage(runtime_polls,capture_end_elapsed)
     fresh=fresh_rate_evidence(evidence,args.hz)
     identity_ok=build_identity_verified(manifest,settings_start,build)
     report.update({'duration_requested_s':args.seconds,'capture_started_unix_ns':begin_wall_ns,'elapsed_s':time.monotonic()-begin,
         'error':error,'state_start':start,'state_end':snapshot(args.adb),'device_samples':samples,
         'settings_start':settings_start,'settings_end':settings_end,'client_build':build,
         'capture_id':capture_id, 'runtime_evidence':evidence, 'fresh_runtime_evidence':fresh,
+        'runtime_evidence_coverage':coverage,
         'build_identity':manifest, 'build_identity_verified':identity_ok,
+        'benchmark_tool_provenance':provenance,
         'experiment_options_start':start_experiments,
         'telemetry_complete':len(report.get('headset_telemetry',[])) >= 2,
         'thermal_ok':thermal_ok(samples),

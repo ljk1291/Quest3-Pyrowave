@@ -42,3 +42,5 @@ def test_lock_emitter_uses_exact_values():
 def test_toolchain_is_read_from_the_lock_by_posix_builds():
     script = (REPO / "tools/build_alvr_2013.sh").read_text()
     assert "source_lock.py" in script
+    assert "--value rust" in script
+    assert "--value android_ndk" in (REPO / "tools/build_pyrowave_android.sh").read_text()

@@ -115,9 +115,13 @@ def inventory(steamvr=None):
     runtime = Path(steamvr) if steamvr else (
         Path(steam['value']) / 'steamapps/common/SteamVR' if steam['value'] else None)
     version = None
+    build_stamp = None
     if runtime:
         try:
-            version = (runtime / 'bin/version.txt').read_text(encoding='utf-8').strip()
+            build_stamp = (runtime / 'bin/version.txt').read_text(encoding='utf-8').strip()
+            # SteamVR commonly puts a Unix build timestamp here, not its public version.
+            # Do not mislabel it as e.g. the SteamVR 2.x version shown in the runtime UI.
+            version = build_stamp if not build_stamp.isdigit() else None
         except OSError:
             pass
     active_openxr=registry_value(r'SOFTWARE\Khronos\OpenXR\1', 'ActiveRuntime')
@@ -128,6 +132,7 @@ def inventory(steamvr=None):
         'active_openxr_runtime_manifest': runtime_manifest(active_openxr['value']),
         'nvidia_driver':nvidia_driver(),
         'steamvr_version': version,
+        'steamvr_build_stamp': build_stamp,
         'steamvr_version_status': 'read' if version else 'unavailable',
         'network_adapters': {'value': None, 'error': None},
         'vr_running': None,

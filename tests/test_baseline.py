@@ -22,12 +22,17 @@ class BaselineTests(unittest.TestCase):
                 'settings_start': settings, 'settings_end': settings,
                 'fresh_runtime_evidence': True, 'build_identity': {'server': 'x'},
                 'build_identity_verified': True, 'telemetry_complete': True,
+                'benchmark_tool_provenance':{'verified':True},
                 'thermal_ok': True, 'stream_errors': [], 'controllers_ok': True, 'audio_ok':True,
                 'tracking_ok':True, 'image_ok': True, 'manual_confirmation': True,
                 'metro_clarity_ok':True, 'metro_motion_ok':True,
+                'no_disconnects_ok':True, 'no_crashes_ok':True,
                 'pyrowave_counter_window':{'counter_deltas':{'decode_failures':0,'complete':1}},
-                'experiment_options_start':{'verified':True,'enabled':{}},
-                'experiment_options_end':{'verified':True,'enabled':{}},
+                'experiment_options_start':{'verified':True,'enabled':{},'effective_pyro_precision':'1',
+                    'effective_early_poll':True,'effective_perf_level':'sustained_high'},
+                'experiment_options_end':{'verified':True,'enabled':{},'effective_pyro_precision':'1',
+                    'effective_early_poll':True,'effective_perf_level':'sustained_high'},
+                'runtime_evidence_coverage':{'status':'covered'},
                 'rate_stability':{'status':'stable'}, 'sustained_requested_fps': True}
 
     def test_plan_is_bounded_and_800_is_gated(self):

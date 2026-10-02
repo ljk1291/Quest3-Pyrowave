@@ -111,8 +111,11 @@ def acceptance(report, expected, selected_target_mbps=None):
         if key in expected and effective.get(key) != expected[key]: reasons.append('effective_%s_mismatch' % key)
     if effective.get('foveated_encoding') is not False: reasons.append('effective_foveation_unverified')
     if not report.get("fresh_runtime_evidence"): reasons.append("missing_fresh_runtime_evidence")
+    if report.get('runtime_evidence_coverage',{}).get('status') != 'covered': reasons.append('runtime_evidence_coverage_incomplete')
     if not report.get("build_identity") or not report.get("build_identity_verified"):
         reasons.append("build_identity_unverified")
+    if report.get('benchmark_tool_provenance',{}).get('verified') is not True:
+        reasons.append('benchmark_tool_provenance_unverified')
     if report.get("telemetry_complete") is not True: reasons.append("telemetry_incomplete")
     if report.get("thermal_ok") is not True: reasons.append("thermal_state_unverified")
     if report.get("stream_errors") is None: reasons.append("stream_error_status_missing")
@@ -128,6 +131,8 @@ def acceptance(report, expected, selected_target_mbps=None):
     if report.get("metro_clarity_ok") is not True: reasons.append("metro_clarity_unverified")
     if report.get("metro_motion_ok") is not True: reasons.append("metro_motion_unverified")
     if report.get("manual_confirmation") is not True: reasons.append("manual_confirmation_missing")
+    if report.get('no_disconnects_ok') is not True: reasons.append('disconnect_status_unverified')
+    if report.get('no_crashes_ok') is not True: reasons.append('crash_status_unverified')
     if not report.get("sustained_requested_fps"): reasons.append("fresh_submission_rate_failed")
     experiments_start=report.get('experiment_options_start',{})
     experiments_end=report.get('experiment_options_end',{})
@@ -135,6 +140,9 @@ def acceptance(report, expected, selected_target_mbps=None):
     if (not experiments_start.get('verified') or not experiments_end.get('verified')
             or any(experiments_start.get('enabled',{}).values()) or any(experiments_end.get('enabled',{}).values())):
         reasons.append('experiment_options_unverified_or_enabled')
+    for key,value in (('effective_pyro_precision','1'),('effective_early_poll',True),('effective_perf_level','sustained_high')):
+        if experiments_start.get(key) != value or experiments_end.get(key) != value:
+            reasons.append('native_experiment_defaults_unverified')
     if report.get("rate_stability", {}).get("status") != "stable": reasons.append("endurance_rate_stability_unverified")
     if expected.get("diagnostic_only") or (expected.get("encoded_resolution") == {"width":2080,"height":2208}):
         reasons.append("diagnostic_resolution_cannot_pass_target")

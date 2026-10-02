@@ -8,7 +8,7 @@ workspace_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$workspace_dir/tools/lib/xrwired_env.sh"
 pyrowave_dir="$inputs_dir/research/pyrowave"
 if python3 -c 'import sys' >/dev/null 2>&1; then python_cmd=python3; else python_cmd=python; fi
-rust_toolchain=$("$python_cmd" "$workspace_dir/tools/ci/source_lock.py" | sed -n "s/^RUST_TOOLCHAIN='\(.*\)'$/\1/p")
+rust_toolchain=$("$python_cmd" "$workspace_dir/tools/ci/source_lock.py" --value rust)
 [ -n "$rust_toolchain" ] || { echo "could not read Rust toolchain from sources.lock.json" >&2; exit 1; }
 alvr_dir="$inputs_dir/research/ALVR-20.13.0"
 

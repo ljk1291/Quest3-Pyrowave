@@ -11,6 +11,12 @@ from .bench import supported
 API='http://127.0.0.1:8082/api/dashboard-request'
 EVENTS='ws://127.0.0.1:8082/api/events'
 CLIENT_PACKAGE_ID=json.loads((Path(__file__).resolve().parents[2] / 'fork.json').read_text(encoding='utf-8'))['client_package_id']
+EXPERIMENT_PROPERTIES=('debug.oculus.forceDisplayScaling','debug.oculus.refreshRate','debug.q3pw.direct_eye_copy',
+    'debug.q3pw.async_eye_copy','debug.q3pw.copy_wait_us','debug.q3pw.raw_srgb_copy','debug.q3pw.image_cache',
+    'debug.q3pw.frame_wait_us','debug.q3pw.pre_wait_poll','debug.q3pw.repeat_render','debug.q3pw.decode_workers',
+    'debug.q3pw.decode_handoff','debug.q3pw.haar_fused','debug.q3pw.dequant_batch','debug.q3pw.convert_compute',
+    'debug.q3pw.fragment_min_usage','debug.q3pw.optimal_ahb_usage','debug.q3pw.loop_probe',
+    'debug.q3pw.runtime_display_time','debug.xrwired.pyro_precision','debug.xrwired.early_poll','debug.xrwired.perf_level')
 
 def windows_process_running(executable):
     """Read the process snapshot directly; tasklist can hang during SteamVR shutdown."""
@@ -67,7 +73,7 @@ def set_values(values):
 def adb_property_snapshot(adb):
     """Read only the two display-scaling experiment properties; no defaults inferred."""
     result={}
-    for name in ('debug.oculus.forceDisplayScaling','debug.oculus.refreshRate'):
+    for name in EXPERIMENT_PROPERTIES:
         run=subprocess.run([adb,'shell','getprop',name],capture_output=True,text=True,timeout=20)
         result[name]={'value':run.stdout.strip() if not run.returncode else None,
                       'error':None if not run.returncode else (run.stderr.strip() or run.stdout.strip())}
@@ -87,6 +93,11 @@ def experiment_properties(adb, disable=False, disable_experiments=False):
             ('debug.q3pw.image_cache',''),('debug.q3pw.frame_wait_us',''),
             ('debug.q3pw.pre_wait_poll',''),('debug.q3pw.repeat_render',''),
             ('debug.q3pw.decode_workers',''),('debug.q3pw.decode_handoff',''),
+            ('debug.q3pw.haar_fused','0'),('debug.q3pw.dequant_batch','0'),
+            ('debug.q3pw.convert_compute','0'),('debug.q3pw.fragment_min_usage','0'),
+            ('debug.q3pw.optimal_ahb_usage','0'),('debug.q3pw.loop_probe','0'),
+            ('debug.q3pw.runtime_display_time','0'),('debug.xrwired.pyro_precision','1'),
+            ('debug.xrwired.early_poll','1'),('debug.xrwired.perf_level','sustained_high'),
         ))
     if changes:
         for name,value in changes:

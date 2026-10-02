@@ -1,5 +1,5 @@
 import unittest
-from tools.quest3.bench import parse_capabilities,plan,summarise,distribution,pyrowave_counter_window, fresh_rate_evidence, build_identity_verified, merge_review, rate_stability
+from tools.quest3.bench import parse_capabilities,plan,summarise,distribution,pyrowave_counter_window, fresh_rate_evidence, build_identity_verified, merge_review, rate_stability, filter_runtime_evidence
 
 class BenchTests(unittest.TestCase):
     def test_unprobed_rates_are_not_declared_unsupported(self):
@@ -162,10 +162,11 @@ class BenchTests(unittest.TestCase):
             self.assertFalse(r['sustained_requested_fps'])
 
     def test_fresh_effective_rate_and_build_version_must_match(self):
-        line='[Q3PW_EFFECTIVE] requested=Some(90.0) runtime_hz=Some(90.0) period_ns=11111111'
+        line='[Q3PW_EFFECTIVE] requested=Some(90.0) runtime_hz=Ok(90.0) period_ns=11111111'
         self.assertTrue(fresh_rate_evidence([line], 90))
         self.assertFalse(fresh_rate_evidence([line], 72))
         self.assertFalse(fresh_rate_evidence(['[Q3PW_EFFECTIVE] requested=Some(90.0) runtime_hz=Some(90.0) period_ns=20000000'], 90))
+        self.assertFalse(fresh_rate_evidence([line, '[Q3PW_EFFECTIVE] requested=Some(90.0) runtime_hz=Some(72.0) period_ns=13888888'], 90))
         manifest={'schema_version':1,'application_version':'20.13.0-ljk1291.1+abc','protocol_version':'x',
             'client_package_id':'io.github.ljk1291.quest3pyrowave','repository_commit':'a','sources_lock_sha256':'a',
             'dependency_revisions':{'a':'b'},'shader_hashes':{'a':'b'},'artifact_sha256':{'a':'b'},
@@ -192,6 +193,39 @@ class BenchTests(unittest.TestCase):
         from tools.quest3.bench import effective_pyrowave_config
         self.assertEqual(effective_pyrowave_config({'pyrowave_wavelet_haar':True,
             'pyrowave_wavelet_53':True})['wavelet'], 'Haar')
+
+    def test_timestamp_cursor_survives_marker_rotation_without_raw_logs(self):
+        log='1710000005.1 1 1 E App: [Q3PW_EFFECTIVE] requested=Some(90.0) runtime_hz=Some(90.0) period_ns=11111111\n'
+        self.assertEqual(len(filter_runtime_evidence(log, since_epoch=1710000000.0)),1)
+        self.assertEqual(filter_runtime_evidence(log, capture_id='gone'),[])
+
+    def test_runtime_coverage_rejects_missing_or_gapped_polls(self):
+        from tools.quest3.bench import runtime_coverage
+        self.assertEqual(runtime_coverage([{'elapsed_s':1,'records':1},{'elapsed_s':7,'records':1}],10)['status'],'covered')
+        self.assertEqual(runtime_coverage([{'elapsed_s':1,'records':1},{'elapsed_s':20,'records':1}],25)['status'],'incomplete')
+        self.assertEqual(runtime_coverage([{'elapsed_s':0.1,'records':0},{'elapsed_s':5,'records':1}],10)['status'],'covered')
+        self.assertEqual(runtime_coverage([{'elapsed_s':5,'records':1},{'elapsed_s':10,'records':0}],30)['status'],'incomplete')
+
+    def test_missing_property_readback_cannot_certify_defaults(self):
+        from tools.quest3.bench import experiment_effective
+        self.assertFalse(experiment_effective({})['verified'])
+
+    def test_negotiated_render_and_stream_dimensions_are_not_reversed(self):
+        from unittest.mock import patch
+        from tools.quest3.bench import active_settings
+        session={'session_settings':{'video':{
+            'bitrate':{'mode':{'variant':'ConstantMbps','ConstantMbps':400}},
+            'preferred_codec':{'variant':'PyroWave'},'preferred_fps':90,
+            'pyrowave':{'decode_path':{'variant':'Compute'},'wavelet':{'variant':'Cdf97'},'transport':{'variant':'Tcp'}},
+            'transcoding_view_resolution':{'variant':'Absolute','Absolute':{'width':3200,'height':{'set':True,'content':3200}}},
+            'emulated_headset_view_resolution':{'variant':'Absolute','Absolute':{'width':4000,'height':{'set':True,'content':4000}}}},
+            'connection':{'stream_protocol':{'variant':'Tcp'}}},
+            'openvr_config':{'eye_resolution_width':3200,'eye_resolution_height':3200,
+                             'target_eye_resolution_width':4000,'target_eye_resolution_height':4000}}
+        with patch('tools.quest3.control.session',return_value=session):
+            settings=active_settings()
+        self.assertEqual(settings['encoded_resolution'],settings['negotiated_encoded_resolution'])
+        self.assertEqual(settings['render_resolution'],settings['negotiated_render_resolution'])
 
     def test_review_must_be_bound_to_its_capture(self):
         report={'capture_id':'capture-a'}
