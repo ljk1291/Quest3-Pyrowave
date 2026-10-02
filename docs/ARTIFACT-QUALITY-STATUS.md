@@ -63,3 +63,37 @@ Take the first unblocked item. Items marked ∥ are independent.
   progress. No arm file exists, so no unattended hardware action is authorized;
   the Metro frame bank is also awaiting its supervised owner dump. These do not
   block source/CPU work. CI/PR evidence will follow; the goal remains active.
+
+- 2026-10-03, checkpoint WO-9 and supervised capture attempt:
+  [WO-9 PR](https://github.com/ljk1291/Quest3-Pyrowave/pull/2) merged into
+  `codex/artifact-quality` after its [full CI run](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37069418425)
+  passed. [WO-3 PR](https://github.com/ljk1291/Quest3-Pyrowave/pull/3) is building.
+  The owner had five minutes; the existing signed d1 pair was verified and used
+  under a 270-second independent rollback guard. ComfyUI initially blocked setup,
+  then became idle. The owner reported a disconnect after Metro launched; no
+  checkpoint or source frames were captured. Stored negotiated settings had
+  been checked, but a fresh stream had not, so this is an invalid quality/rate
+  attempt. The retained timeout entry was Session 07's, not a newly proved
+  encoder fault. All saved files, driver inventory, headset properties and VD
+  hashes matched after rollback. [Sanitized result](../results/supervised-framebank-attempt-2026-10-03.json).
+  Next supervised capture must prove Streaming and changing selected-output
+  telemetry before Metro. WO-0/1/2/4/5 source review continues; no arm file exists.
+  Metro dump and headset judgement remain owner tasks; source work is unblocked.
+
+- 2026-10-03, checkpoint supervised Metro source capture:
+  The owner confirmed the checkpoint scene was visible. The unchanged signed
+  d1 pair saved **90 complete native encoder-input frames** at 6144×3232 stereo,
+  8-bit 4:2:0, full range, with the Godlike-sized / Haar / 500 Mbps / requested
+  90 Hz profile. A fresh client `Streaming` state was verified before Metro
+  launched; the saved client entry was temporarily trusted and restored.
+  The independent 270-second guard ended the session and verified all saved
+  files, headset properties, runtime registration and VD hashes. The dump has
+  89 distinct raw-frame hashes, contiguous encoder indices, and two repeated
+  or decreasing display timestamps. Preserve its file order for same-input
+  comparisons; the dump is **not** evidence of fresh 90 Hz or optical FPS.
+  [Sanitized capture record](../results/metro-source-capture-2026-10-03.json).
+  WO-1 now accepts the actual native C420 format rather than forcing 4:4:4.
+  Fixed crops and projection evidence still need freezing, and GPU scoring
+  remains queued for a valid owner-armed `frame_bank_pc` window after WO-0.
+  No arm file exists and no further hardware test is running. Source work is
+  unblocked; no optimization or stable-rate profile has been promoted.
