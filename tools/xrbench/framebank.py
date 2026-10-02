@@ -251,8 +251,20 @@ def validate_plan(plan):
     if calibration.get("codec_cells") != expected_codec or calibration.get("crops") != expected_crops: raise ValueError("HVS calibration drifted")
     return plan
 
+class _OwnedPcJobRegistry:
+    """Lazy WO-0 bridge; importing it is deferred until a real child starts."""
+    def register(self, state_path:Path, pid:int, arm_path:Path|None):
+        from tools.quest3 import unattended
+        state=unattended.json_read(state_path); host=unattended.Host(state.get("adb","adb"))
+        identity=host.process_identity(pid)
+        return unattended.register_owned_pc_job(state_path,pid,identity["path"],identity["started_epoch_s"],arm_path=arm_path or unattended.ARM,host=host)
+    def unregister(self, state_path:Path, pid:int):
+        from tools.quest3 import unattended
+        return unattended.unregister_owned_pc_job(state_path,pid)
+
 class WindowGuard:
-    def __init__(self,window:Path,arm:Path|None=None,status_command:Sequence[str]|None=None,clock:Callable[[],float]=time.time): self.window=Path(window);self.arm=None if arm is None else Path(arm);self.command=list(status_command or [sys.executable,"-m","tools.quest3.unattended","status"]);self.clock=clock
+    def __init__(self,window:Path,arm:Path|None=None,status_command:Sequence[str]|None=None,clock:Callable[[],float]=time.time,job_registry=None):
+        self.window=Path(window);self.arm=None if arm is None else Path(arm);self.command=list(status_command or [sys.executable,"-m","tools.quest3.unattended","status"]);self.clock=clock;self.job_registry=job_registry or _OwnedPcJobRegistry();self.owned_jobs=[]
     def status(self):
         cmd=[*self.command,"--window",str(self.window),"--require-allow","frame_bank_pc"]+([] if self.arm is None else ["--arm",str(self.arm)])
         try: r=subprocess.run(cmd,capture_output=True,text=True,timeout=10,check=False)
@@ -271,8 +283,13 @@ class WindowGuard:
         # Disk-backed logs prevent a chatty child from blocking on undrained PIPEs.
         with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as output:
             proc=subprocess.Popen(list(argv),cwd=str(cwd),env=env,stdout=output,stderr=output,text=True)
+            registered=False
             deadline=time.monotonic()+timeout_s
             try:
+                # The monitor excludes only the exact WO-0-owned process identity.
+                # A registration refusal terminates this child and fails the cell.
+                self.job_registry.register(self.window/"state.json",proc.pid,self.arm); registered=True
+                self.owned_jobs.append({"argv_sha256":hashlib.sha256("\0".join(map(str,argv)).encode()).hexdigest(),"pid":proc.pid})
                 while proc.poll() is None:
                     if time.monotonic()>=deadline: raise TimeoutError("subprocess timeout")
                     self.status(); time.sleep(.5)
@@ -283,6 +300,12 @@ class WindowGuard:
                     try: proc.wait(timeout=10)
                     except subprocess.TimeoutExpired: proc.kill();proc.wait()
                 raise
+            finally:
+                if registered:
+                    try: self.job_registry.unregister(self.window/"state.json",proc.pid)
+                    except Exception:
+                        if proc.poll() is None: proc.terminate()
+                        raise PermissionError("WO-0 owned PC job could not be unregistered")
             output.seek(0); text=output.read()[-8192:]
         return proc.returncode,text,""
 

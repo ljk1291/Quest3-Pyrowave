@@ -112,25 +112,49 @@ class FrameBankTests(unittest.TestCase):
 
     def test_guard_polls_and_terminates_when_lease_is_revoked(self):
         class Proc:
-            def __init__(self): self.calls=0;self.terminated=False
+            def __init__(self): self.calls=0;self.terminated=False;self.pid=123
             def poll(self): self.calls+=1;return None
             def terminate(self): self.terminated=True
             def wait(self,timeout=None): return 0
             def kill(self): pass
             def communicate(self): return "",""
+        class Registry:
+            def register(self,*args): return {"pid":args[1]}
+            def unregister(self,*args): return None
         proc=Proc()
         with mock.patch("xrbench.framebank.subprocess.Popen",return_value=proc),mock.patch.object(fb.WindowGuard,"status",side_effect=[lease(), PermissionError("revoked")]),mock.patch("xrbench.framebank.time.sleep"):
-            with self.assertRaises(PermissionError):fb.WindowGuard(Path("window")).run(["fake"],cwd=Path.cwd(),env={},timeout_s=1)
+            with self.assertRaises(PermissionError):fb.WindowGuard(Path("window"),job_registry=Registry()).run(["fake"],cwd=Path.cwd(),env={},timeout_s=1)
+        self.assertTrue(proc.terminated)
+
+    def test_guard_refuses_unregistered_child_and_terminates_it(self):
+        class Proc:
+            pid=123
+            def poll(self): return None
+            def terminate(self): self.terminated=True
+            def wait(self,timeout=None): return 0
+            def kill(self): pass
+        class Registry:
+            def register(self,*args): raise PermissionError("identity unproven")
+            def unregister(self,*args): raise AssertionError("must not unregister")
+        proc=Proc();proc.terminated=False
+        with mock.patch("xrbench.framebank.subprocess.Popen",return_value=proc),mock.patch.object(fb.WindowGuard,"status",return_value=lease()):
+            with self.assertRaises(PermissionError): fb.WindowGuard(Path("window"),job_registry=Registry()).run(["fake"],cwd=Path.cwd(),env={},timeout_s=1)
         self.assertTrue(proc.terminated)
 
     def test_guard_uses_disk_backed_output_and_checks_lease_after_exit(self):
         class Proc:
             returncode=0
+            pid=123
             def poll(self): return 0
             def communicate(self): return "",""
-        proc=Proc()
+        class Registry:
+            def __init__(self): self.calls=[]
+            def register(self,*args): self.calls.append(("register",args)); return {"pid":args[1]}
+            def unregister(self,*args): self.calls.append(("unregister",args))
+        registry=Registry(); proc=Proc()
         with mock.patch("xrbench.framebank.subprocess.Popen",return_value=proc) as spawned, mock.patch.object(fb.WindowGuard,"status",side_effect=[lease(),lease()]):
-            self.assertEqual(fb.WindowGuard(Path("window")).run(["fake"],cwd=Path.cwd(),env={},timeout_s=1)[0],0)
+            guard=fb.WindowGuard(Path("window"),job_registry=registry);self.assertEqual(guard.run(["fake"],cwd=Path.cwd(),env={},timeout_s=1)[0],0)
+        self.assertEqual([x[0] for x in registry.calls],["register","unregister"]);self.assertEqual(len(guard.owned_jobs),1)
         self.assertIsNot(spawned.call_args.kwargs["stdout"],__import__("subprocess").PIPE)
         self.assertIsNot(spawned.call_args.kwargs["stderr"],__import__("subprocess").PIPE)
 

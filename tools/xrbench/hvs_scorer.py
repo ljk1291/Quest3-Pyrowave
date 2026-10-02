@@ -47,7 +47,10 @@ def verify_patch(source:Path) -> dict:
     source=Path(source); psnr=source/"psnr.cpp"
     if sha256_file(psnr) not in (BASE_PSNR_SHA256, WORKTREE_BASE_PSNR_SHA256): raise ValueError("source psnr.cpp does not match pinned PyroWave d2997ac base")
     with tempfile.TemporaryDirectory() as temporary:
-        staged=Path(temporary)/"source"; shutil.copytree(source,staged,ignore=shutil.ignore_patterns(".git","build*"))
+        # Patch validation needs only its declared preimage. Do not copy the
+        # Granite tree just to test a one-file scorer patch.
+        staged=Path(temporary)/"source"; staged.mkdir()
+        shutil.copyfile(psnr, staged/"psnr.cpp")
         forward=_git_apply(staged,check=True)
         if forward.returncode: raise ValueError("scorer patch does not apply cleanly")
         applied=_git_apply(staged,check=False)
@@ -70,11 +73,14 @@ def prepare_source(source:Path, output:Path) -> dict:
 def main(argv=None) -> int:
     parser=argparse.ArgumentParser(description=__doc__); sub=parser.add_subparsers(dest="command",required=True)
     verify=sub.add_parser("verify-patch"); verify.add_argument("--source",required=True); verify.add_argument("--out")
-    prepare=sub.add_parser("prepare-source"); prepare.add_argument("--source",required=True); prepare.add_argument("--out",required=True)
+    prepare=sub.add_parser("prepare-source"); prepare.add_argument("--source",required=True); prepare.add_argument("--out",required=True); prepare.add_argument("--manifest-out")
     args=parser.parse_args(argv)
-    record=verify_patch(Path(args.source)) if args.command=="verify-patch" else prepare_source(Path(args.source),Path(args.out))
+    if args.command=="verify-patch":
+        record=verify_patch(Path(args.source)); output=args.out
+    else:
+        record=prepare_source(Path(args.source),Path(args.out)); output=args.manifest_out
     payload=json.dumps(record,indent=2)+"\n"
-    if getattr(args,"out",None): Path(args.out).write_text(payload,encoding="utf-8")
+    if output: Path(output).write_text(payload,encoding="utf-8")
     else: print(payload,end="")
     return 0
 if __name__=="__main__": raise SystemExit(main())

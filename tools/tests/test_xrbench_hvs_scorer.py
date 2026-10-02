@@ -25,6 +25,14 @@ class HvsScorerTests(unittest.TestCase):
             self.assertEqual(hs.sha256_file(prepared/'psnr.cpp'), hs.PATCHED_PSNR_SHA256)
             self.assertTrue((prepared/'PYROWAVE-HVS-PPD-SCORER.json').is_file())
 
+    def test_prepare_cli_does_not_write_json_to_source_directory(self):
+        fixture=Path(__file__).parent/'fixtures'/'pyrowave-d2997ac-psnr.cpp'
+        with tempfile.TemporaryDirectory() as temp:
+            source=Path(temp)/'source';source.mkdir();shutil.copyfile(fixture,source/'psnr.cpp')
+            output=Path(temp)/'prepared'
+            self.assertEqual(hs.main(['prepare-source','--source',str(source),'--out',str(output)]),0)
+            self.assertTrue((output/'PYROWAVE-HVS-PPD-SCORER.json').is_file())
+
 
 if __name__ == '__main__': unittest.main()
 

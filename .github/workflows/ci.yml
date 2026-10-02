@@ -24,7 +24,7 @@ jobs:
       - run: python3 -m unittest discover -s tests -v
       - name: Geometry-control contract tests
         run: python3 -m unittest tools.tests.test_resolution -v
-      - run: python3 -m unittest tools.tests.test_xrbench_framebank -v
+      - run: python3 -m unittest tools.tests.test_xrbench_framebank tools.tests.test_xrbench_hvs_scorer -v
       - run: g++ -std=c++17 -Wall -Werror tools/pyroclient/decode_path_test.cpp -o /tmp/decode-path && /tmp/decode-path
       - run: g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/pass_profile_test.cpp -o /tmp/pass-profile && /tmp/pass-profile
       - name: GPU failure-policy state-machine test
@@ -206,6 +206,13 @@ jobs:
         run: |
           call tools\windows\build_pyrowave_pc.cmd interop || exit /b 1
           call tools\windows\build_streamer.cmd || exit /b 1
+      - name: Build isolated frame-bank HVS scorer
+        shell: pwsh
+        run: |
+          python -m tools.xrbench.hvs_scorer prepare-source --source "$env:XRWIRED_INPUTS/research/pyrowave" --out "$env:XRWIRED_INPUTS/research/pyrowave-hvs-scorer" --manifest-out "$env:XRWIRED_INPUTS/research/pyrowave-hvs-scorer-manifest.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmd /c tools\windows\build_pyrowave_hvs_scorer.cmd
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Frame assembly and preset regression tests
         shell: pwsh
         run: |
@@ -231,6 +238,13 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory out | Out-Null
+          $source = "$env:XRWIRED_INPUTS/research/pyrowave-hvs-scorer"
+          $binary = "$source/build-hvs-scorer/Release/pyrowave-psnr-hvs-m.exe"
+          if (!(Test-Path $binary) -or !(Test-Path "$source/PYROWAVE-HVS-PPD-SCORER.json")) { throw 'HVS scorer artifact or source provenance is missing' }
+          Copy-Item $binary out/pyrowave-psnr-hvs-m.exe
+          Copy-Item "$source/PYROWAVE-HVS-PPD-SCORER.json" out/HVS-SCORER-SOURCE.json
+          $meta = @{ schema = 1; kind = 'pyrowave_hvs_scorer_build'; binary_sha256 = (Get-FileHash $binary).Hash.ToLower(); psnr_cpp_sha256 = (Get-FileHash "$source/psnr.cpp").Hash.ToLower(); source_manifest_sha256 = (Get-FileHash "$source/PYROWAVE-HVS-PPD-SCORER.json").Hash.ToLower() } | ConvertTo-Json
+          Set-Content out/HVS-SCORER-BUILD-METADATA.json $meta
           python tools/ci/package_licenses.py "$env:XRWIRED_INPUTS/research" "$env:XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_streamer_windows/LICENSES"
           Copy-Item tools/windows/quality-shaders.json out/WINDOWS-COMPOSITION-SHADERS.json
           Copy-Item tools/windows/quality-shaders.json "$env:XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_streamer_windows/WINDOWS-COMPOSITION-SHADERS.json"
