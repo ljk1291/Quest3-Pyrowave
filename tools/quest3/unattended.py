@@ -5,7 +5,7 @@ an owner-only convenience: it requires an explicit acknowledgement and is never
 called by automation. All device commands include the serial stored in the arm.
 """
 from __future__ import annotations
-import argparse, ctypes, hashlib, json, os, re, shlex, shutil, subprocess, sys, tempfile, time, uuid, urllib.request
+import argparse, contextlib, ctypes, hashlib, json, os, re, shlex, shutil, subprocess, sys, tempfile, time, uuid, urllib.request
 from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -68,6 +68,36 @@ def timezone_for(name):
         raise Refusal('timezone data unavailable for '+str(name))
 
 def utc_now(): return datetime.now(timezone.utc)
+_LOCK_DEPTH={}
+@contextlib.contextmanager
+def state_lock(state_path, timeout_s=5):
+    """Cross-process state lock; released by the OS if a holder crashes."""
+    path=Path(state_path).with_suffix('.lock'); key=str(path.resolve()); depth=_LOCK_DEPTH.get(key,0)
+    if depth:
+        _LOCK_DEPTH[key]=depth+1
+        try: yield
+        finally: _LOCK_DEPTH[key]-=1
+        return
+    path.parent.mkdir(parents=True,exist_ok=True); stream=open(path,'a+b'); deadline=time.monotonic()+timeout_s
+    while True:
+        try:
+            if os.name=='nt':
+                import msvcrt; stream.seek(0); msvcrt.locking(msvcrt.LK_NBLCK,1)
+            else:
+                import fcntl; fcntl.flock(stream.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+            break
+        except OSError:
+            if time.monotonic()>=deadline: stream.close(); raise Refusal('state lock timeout')
+            time.sleep(.05)
+    _LOCK_DEPTH[key]=1
+    try: yield
+    finally:
+        _LOCK_DEPTH.pop(key,None)
+        try:
+            if os.name=='nt': stream.seek(0); msvcrt.locking(msvcrt.LK_UNLCK,1)
+            else: fcntl.flock(stream.fileno(),fcntl.LOCK_UN)
+        finally: stream.close()
+
 def json_read(path): return json.loads(Path(path).read_text(encoding='utf-8'))
 def arm_digest(arm): return hashlib.sha256(json.dumps(arm,sort_keys=True,separators=(',',':')).encode()).hexdigest()
 def atomic_write(path, value):
