@@ -66,7 +66,7 @@ ALVR provides a SteamVR driver. PC OpenXR games run through **SteamVR's OpenXR r
 
 Run `python -m unittest discover -s tests -v` for Python tooling. CI adds build contracts, native GPU-policy and software GLES checks, Rust checks, Android/Windows compilation and artifact verification. See [BUILD.md](docs/BUILD.md).
 
-[README.upstream.md](README.upstream.md) preserves the reviewed upstream README. Historical results and research documents describe upstream hardware/sessions; they are not results for this owner's RTX 5080, router or Godlike target. Historical unattended-testing instructions do not authorize unattended testing here.
+[README.upstream.md](README.upstream.md) preserves the reviewed upstream README. Historical results and research documents describe upstream hardware/sessions; they are not results for this owner's RTX 5080, router or Godlike target. Historical unattended-testing instructions do not authorize unattended testing here; this fork's own bounded authorization is in [AGENTS.md](AGENTS.md) and [docs/UNATTENDED.md](docs/UNATTENDED.md).
 
 ## Credits and licences
 
