@@ -5,7 +5,7 @@ an owner-only convenience: it requires an explicit acknowledgement and is never
 called by automation. All device commands include the serial stored in the arm.
 """
 from __future__ import annotations
-import argparse, ctypes, hashlib, json, os, re, shlex, shutil, subprocess, sys, time, uuid, urllib.request
+import argparse, ctypes, hashlib, json, os, re, shlex, shutil, subprocess, sys, tempfile, time, uuid, urllib.request
 from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -72,8 +72,8 @@ def json_read(path): return json.loads(Path(path).read_text(encoding='utf-8'))
 def arm_digest(arm): return hashlib.sha256(json.dumps(arm,sort_keys=True,separators=(',',':')).encode()).hexdigest()
 def atomic_write(path, value):
     path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(path.suffix + '.tmp')
-    temp.write_text(json.dumps(value, indent=2, sort_keys=True), encoding='utf-8')
+    with tempfile.NamedTemporaryFile('w',encoding='utf-8',dir=path.parent,prefix=path.name+'.',suffix='.tmp',delete=False) as stream:
+        stream.write(json.dumps(value, indent=2, sort_keys=True)); temp=Path(stream.name)
     temp.replace(path)
 
 def local_dt(value, zone):
@@ -362,6 +362,8 @@ def restore(state_path, host=None):
     for record in state.get('owned_pc_jobs',[]):
         try: host.stop_owned_runtime(record); job_results.append({'pid':record['pid'],'stopped':True})
         except Exception as exc: jobs_ok=False; job_results.append({'pid':record['pid'],'stopped':False,'error':str(exc)})
+    if host.vr_connected() and not state.get('owned_runtime'):
+        owned_ok=False; steps.append('unclaimed_vr_runtime_present')
     alvr_restored=not any(row.get('kind')=='alvr' for row in state.get('changes',[]))
     if not alvr_restored and owned_ok:
         try:
@@ -451,6 +453,13 @@ def restore(state_path, host=None):
     ok=files_ok and runtime_restored and properties_ok and client_stopped and awake_restored and owned_ok and alvr_restored and steamvr_restored and driver_restored and jobs_ok
     state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'pc_configuration_verify_only;_owner_selector_or_dashboard_must_restore_drift','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'owned_runtime':owned_results,'owned_runtime_stopped':owned_ok,'alvr_restored':alvr_restored,'steamvr_restored':steamvr_restored,'driver_restored':driver_restored,'owned_pc_jobs':job_results,'owned_pc_jobs_stopped':jobs_ok,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
     atomic_write(state_path,state); lock.unlink(missing_ok=True); return state['restoration']
+
+def terminal_fault_decision(state, fault):
+    """A second terminal codec/connection fault ends device work and requests restore."""
+    faults=state.setdefault('terminal_faults',[]); faults.append({'fault':fault,'at_utc':utc_now().isoformat()})
+    if len(faults) >= 2:
+        state['ended']=True; return 'restore'
+    return 'recover'
 
 def health_decision(sample, state, now):
     """Pure monitor transition. Third pause ends window; resume needs 15 min and <=40C."""
@@ -565,7 +574,7 @@ def mutable_state(state_path, arm_path=ARM):
     state_path=Path(state_path); status=status_payload(state_path.parent,arm_path)
     if not status['lease']['active']: raise Refusal('lease is not active: '+','.join(status['lease']['blockers']))
     state=json_read(state_path)
-    if state.get('restoring') or state.get('restoration',{}).get('status') != 'pending': raise Refusal('rollback has begun')
+    if (state_path.parent/'restoration.lock').exists() or state.get('restoring') or state.get('restoration',{}).get('status') != 'pending': raise Refusal('rollback has begun')
     if not state.get('owned_runtime'): raise Refusal('claimed runtime ownership required before mutation')
     return state
 

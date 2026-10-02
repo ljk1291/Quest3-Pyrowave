@@ -269,3 +269,14 @@ def test_monitor_excludes_only_exact_owned_job():
     state={'guard_nonce':'n','owned_pc_jobs':[{'pid':7,'path':'C:/job.exe','started_epoch_s':5,'nonce':'n'}]}
     sample={'conflicts':['7, job.exe, 100','8, owner.exe, 100']}
     assert u.exclude_owned_compute_jobs(state,H(),sample)['conflicts']==['8, owner.exe, 100']
+
+
+def test_second_terminal_fault_requests_restore():
+    state={}; assert u.terminal_fault_decision(state,'decoder')=='recover'
+    assert u.terminal_fault_decision(state,'encoder')=='restore' and state['ended']
+
+def test_mutation_refuses_restoration_lock(monkeypatch,tmp_path):
+    path=tmp_path/'state.json'; u.atomic_write(path,{'restoration':{'status':'pending'},'owned_runtime':[{}]})
+    (tmp_path/'restoration.lock').write_text('{}')
+    monkeypatch.setattr(u,'status_payload',lambda *args,**kwargs:{'lease':{'active':True,'blockers':[]}})
+    with pytest.raises(u.Refusal): u.mutable_state(path)
