@@ -212,3 +212,25 @@ def test_real_experiment_property_set_is_used():
     assert 'debug.q3pw.fragment_min_usage' in names
     assert 'debug.q3pw.optimal_ahb_usage' in names
     assert 'debug.q3pw.direct_flip_y' in names
+
+
+def test_ownership_record_requires_exact_identity_and_nonce(tmp_path):
+    class OwnedHost:
+        def process_identity(self,pid): return {'pid':pid,'path':'C:/q3pw/ALVR Dashboard.exe','started_epoch_s':10.0}
+    state={'guards_ready':True,'guard_nonce':'n','restoration':{'status':'pending'}}
+    path=tmp_path/'state.json'; u.atomic_write(path,state)
+    record={'role':'dashboard','pid':1,'path':'C:/q3pw/ALVR Dashboard.exe','started_epoch_s':10.0,'nonce':'n'}
+    assert u.record_owned_runtime(path,record,OwnedHost())['role']=='dashboard'
+    bad=dict(record,pid=2)
+    with pytest.raises(u.Refusal): u.record_owned_runtime(path,bad,OwnedHost())
+
+def test_restore_does_not_stop_unproved_owned_runtime(monkeypatch,tmp_path):
+    class OwnedHost(Fake):
+        def stop_owned_runtime(self,record): raise u.Refusal('ownership changed')
+    state={'serial':'Q3','snapshot':{'headset_properties':{'managed':{}},'configuration_snapshots':[]},
+           'owned_runtime':[{'role':'dashboard','pid':1,'path':'C:/q3pw/ALVR Dashboard.exe','started_epoch_s':1,'nonce':'n'}],
+           'restoration':{'status':'pending'}}
+    path=tmp_path/'state.json'; u.atomic_write(path,state); host=OwnedHost()
+    monkeypatch.setattr('tools.quest3.preflight.verify_snapshot',lambda records: [])
+    result=u.restore(path,host)
+    assert result['status']=='restore_failed' and result['owned_runtime_stopped'] is False

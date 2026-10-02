@@ -222,6 +222,25 @@ class Host:
             # disconnected record; unknown is fail-closed.
             return state is not False
         return False
+    def process_identity(self, pid):
+        if os.name != 'nt': raise Refusal('Windows process identity is required')
+        script=("$p=Get-Process -Id %d -ErrorAction Stop; "
+                "@{pid=$p.Id;path=$p.Path;started_epoch_s=([DateTimeOffset]$p.StartTime.ToUniversalTime()).ToUnixTimeMilliseconds()/1000.0}|ConvertTo-Json -Compress") % int(pid)
+        try:
+            value=json.loads(self.run('powershell','-NoProfile','-NonInteractive','-Command',script,timeout=10))
+            if not value.get('path'): raise ValueError('process path unavailable')
+            return value
+        except (ValueError, TypeError, Refusal) as exc: raise Refusal('process identity unavailable: '+str(exc))
+    def stop_owned_runtime(self, record):
+        """Gracefully close, then force only the already verified owned PID."""
+        actual=self.process_identity(record['pid'])
+        if not ownership_matches(record,actual,record['nonce']): raise Refusal('runtime ownership changed; no stop issued')
+        if os.name != 'nt': raise Refusal('Windows process stop is required')
+        script=("$p=Get-Process -Id %d -ErrorAction Stop; $null=$p.CloseMainWindow(); "
+                "if(-not $p.WaitForExit(5000)){Stop-Process -Id $p.Id -Force -ErrorAction Stop; $null=$p.WaitForExit(10000)}; "
+                "if(Get-Process -Id %d -ErrorAction SilentlyContinue){exit 1}") % (record['pid'],record['pid'])
+        self.run('powershell','-NoProfile','-NonInteractive','-Command',script,timeout=20)
+        return True
     def keep_awake(self, active):
         if os.name=='nt':
             flags=0x80000000 | (0x00000001 if active else 0)
@@ -293,6 +312,10 @@ def restore(state_path, host=None):
     try:
         host.adb_run(serial,'shell','am','force-stop','io.github.ljk1291.quest3pyrowave'); client_stopped=True; steps.append('fork_client_stopped')
     except Exception as exc: steps.append('fork_client_stop_failed:'+str(exc))
+    owned_results=[]; owned_ok=True
+    for record in state.get('owned_runtime',[]):
+        try: host.stop_owned_runtime(record); owned_results.append({'role':record.get('role'),'stopped':True})
+        except Exception as exc: owned_ok=False; owned_results.append({'role':record.get('role'),'stopped':False,'error':str(exc)})
     awake_state = state_path.parent / 'awake.json'
     if awake_state.is_file():
         try:
@@ -356,8 +379,8 @@ def restore(state_path, host=None):
             property_readback[key]={'expected':wanted,'error':str(exc),'matches':False}; properties_ok=False
     vd_checks=[row for row in verification if str(row.get('label','')).startswith('virtual_desktop')]
     vd_hashes_match=all(x.get('error') is None and x.get('current_matches') is True for x in vd_checks)
-    ok=files_ok and runtime_restored and properties_ok and client_stopped and awake_restored
-    state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'pc_configuration_verify_only;_owner_selector_or_dashboard_must_restore_drift','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
+    ok=files_ok and runtime_restored and properties_ok and client_stopped and awake_restored and owned_ok
+    state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'pc_configuration_verify_only;_owner_selector_or_dashboard_must_restore_drift','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'owned_runtime':owned_results,'owned_runtime_stopped':owned_ok,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
     atomic_write(state_path,state); return state['restoration']
 
 def health_decision(sample, state, now):
@@ -431,6 +454,25 @@ def wait_for_guard(directory, name, nonce, pid, timeout_s=GUARD_READY_SECONDS):
             except (OSError, ValueError, json.JSONDecodeError): pass
         time.sleep(.05)
     return False
+
+def ownership_matches(record, actual, nonce):
+    """Require exact PID, normalized executable path, start time and window nonce."""
+    try:
+        return (record.get('nonce') == nonce and record.get('pid') == actual.get('pid') and
+                Path(record['path']).resolve().as_posix().casefold() == Path(actual['path']).resolve().as_posix().casefold() and
+                abs(float(record['started_epoch_s']) - float(actual['started_epoch_s'])) < .001)
+    except (KeyError, TypeError, ValueError, OSError): return False
+
+def record_owned_runtime(state_path, record, host=None):
+    """Persist a verified ownership record before any ALVR/SteamVR mutation."""
+    state_path=Path(state_path); state=json_read(state_path); host=host or Host(state.get('adb','adb'))
+    if state.get('restoration',{}).get('status') != 'pending' or not state.get('guards_ready'): raise Refusal('window not mutable')
+    actual=host.process_identity(record.get('pid'))
+    if not ownership_matches(record,actual,state.get('guard_nonce')): raise Refusal('runtime ownership cannot be proved')
+    owned=state.setdefault('owned_runtime',[])
+    if any(item.get('role') == record.get('role') for item in owned): raise Refusal('runtime role already recorded')
+    owned.append({key:record[key] for key in ('role','pid','path','started_epoch_s','nonce')})
+    atomic_write(state_path,state); return owned[-1]
 
 def pid_alive(pid):
     if not isinstance(pid, int) or pid <= 0: return False
@@ -507,6 +549,7 @@ def main():
     a=sub.add_parser('arm'); a.add_argument('--file',type=Path,required=True); a.add_argument('--owner-confirm',action='store_true')
     for name in ('check','start','status','stop','restore'):
         x=sub.add_parser(name); x.add_argument('--arm',type=Path,default=ARM); x.add_argument('--window',type=Path); x.add_argument('--require-allow')
+    claim=sub.add_parser('claim-runtime'); claim.add_argument('--window',type=Path,required=True); claim.add_argument('--role',choices=('dashboard','steamvr'),required=True); claim.add_argument('--pid',type=int,required=True); claim.add_argument('--path',required=True); claim.add_argument('--started-epoch-s',type=float,required=True)
     p.add_argument('--worker',type=Path,help=argparse.SUPPRESS); p.add_argument('--monitor',action='store_true',help=argparse.SUPPRESS); p.add_argument('--restorer',action='store_true',help=argparse.SUPPRESS)
     args=p.parse_args()
     if args.worker: worker(args.worker,args.monitor); return
@@ -515,6 +558,14 @@ def main():
         arm=json_read(args.file); validate_arm_definition(arm); PRIVATE.mkdir(parents=True,exist_ok=True)
         if ARM.exists(): p.error('refusing to overwrite existing owner arm file')
         shutil.copyfile(args.file,ARM); print(json.dumps({'armed':str(ARM)})); return
+    if args.cmd=='claim-runtime':
+        state_path=Path(args.window)/'state.json'
+        if not state_path.is_file(): p.error('window state missing')
+        state=json_read(state_path)
+        record={'role':args.role,'pid':args.pid,'path':args.path,'started_epoch_s':args.started_epoch_s,'nonce':state.get('guard_nonce')}
+        try: print(json.dumps(record_owned_runtime(state_path,record),indent=2))
+        except Refusal as exc: p.error(str(exc))
+        return
     if not args.window: p.error('--window is required')
     directory=Path(args.window)
     state_path=directory/'state.json'
