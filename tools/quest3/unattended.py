@@ -573,6 +573,31 @@ def restore_recorded_steamvr(state):
     return all((_path_present(actual,row['key']) == row['before_present'] and
                 (not row['before_present'] or _path_get(actual,row['key']) == row['before_value'])) for row in rows)
 
+def driver_membership(vrpaths, fork_driver):
+    values=json_read(vrpaths).get('external_drivers',[])
+    needle=Path(fork_driver).resolve().as_posix().casefold()
+    return any(Path(item).resolve().as_posix().casefold()==needle for item in values), values
+
+def record_driver_change(state_path, vrpaths, fork_driver, expected_present, arm_path=ARM):
+    present, all_before=driver_membership(vrpaths,fork_driver)
+    row=record_change(state_path,'fork_driver',str(Path(fork_driver).resolve()),present,all_before,bool(expected_present),arm_path)
+    return row
+
+def restore_recorded_driver(state, vrpathreg):
+    rows=[row for row in state.get('changes',[]) if row.get('kind')=='fork_driver']
+    if not rows:return True
+    record=next((row for row in state['snapshot']['configuration_snapshots'] if row.get('label')=='openvr_paths'),None)
+    if not record or not record.get('source'): raise Refusal('OpenVR driver inventory unavailable')
+    for row in rows:
+        present,_=driver_membership(record['source'],row['key'])
+        if present != row['before_present']:
+            command='adddriver' if row['before_present'] else 'removedriver'
+            subprocess.run([str(vrpathreg),command,row['key']],check=True,capture_output=True,timeout=20)
+    _,current=driver_membership(record['source'],rows[0]['key'])
+    wanted=rows[0]['before_value']
+    norm=lambda values:sorted(Path(x).resolve().as_posix().casefold() for x in values)
+    return norm(current)==norm(wanted)
+
 def pid_alive(pid):
     if not isinstance(pid, int) or pid <= 0: return False
     try:
