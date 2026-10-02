@@ -44,6 +44,106 @@
     "apk_install_verified": true,
     "updated_pair_stream_tested": false
   },
+  "selected_output_telemetry_candidate": {
+    "id": 37032258856,
+    "repository_commit": "d4735d88985a75f3605d00d88aca543327a0f090",
+    "tests_job": "success",
+    "android_job": "success",
+    "windows_job": "success",
+    "matching_pair_job": "success",
+    "application_version": "20.13.0-ljk1291.2+d4735d88985a",
+    "server_version": "20.13.0-ljk1291.2+d4735d88985a",
+    "protocol_version": "20.13.0-ljk1291.2",
+    "client_package_id": "io.github.ljk1291.quest3pyrowave",
+    "apk_signing_kind": "stable",
+    "apk_signing_certificate_sha256": "4a3fe0a8d47ee67b01710df6ffdc870e91ebc5b8e7feec7c87534944ca2a44aa",
+    "canonical_sources_lock_sha256": "dc4cce99166cfc910b2fddc8610ce0ebebbbed63b0f469589300ebff0de0f071",
+    "artifact_download": {
+      "android": {
+        "id": 11238242883,
+        "sha256": "8728c8e37c08d657cfe48d39c84736db94ed4ac90d47fec394d50b5801fee63c"
+      },
+      "windows": {
+        "id": 11238548977,
+        "sha256": "f65aefc2b2d553d9c25f07bb4d35ff5e4cddc4a63a5640ebc1970bb374b5494e"
+      }
+    },
+    "artifact_checksums_verified": true,
+    "matching_dependency_revisions": true,
+    "matching_shader_hashes": true,
+    "hardware_status": "supervised_session_03_short_rate_screen_completed_not_accepted",
+    "apk_install_verified": true,
+    "server_launch_verified": true,
+    "selected_output_telemetry_verified_in_hardware": true,
+    "session_03": {
+      "source": "results/local/session-03/summary-draft.json",
+      "kind": "sanitized_bitrate_screen",
+      "configuration": {
+        "render_resolution_per_eye": "3072x3232",
+        "encoded_resolution_per_eye": "3072x3232",
+        "requested_and_negotiated_refresh_hz": 90,
+        "codec": "PyroWave",
+        "wavelet": "Haar",
+        "direct_eye_copy": true,
+        "transport": "TCP",
+        "chroma": "4:2:0"
+      },
+      "runs": [
+        {
+          "label": "haar300-a-retry",
+          "target_mbps": 300,
+          "fresh_selected_output_rate_fps": 52.95,
+          "rate_screen_passed": false
+        },
+        {
+          "label": "haar400",
+          "target_mbps": 400,
+          "fresh_selected_output_rate_fps": 54.12,
+          "rate_screen_passed": false
+        },
+        {
+          "label": "haar600",
+          "target_mbps": 600,
+          "fresh_selected_output_rate_fps": 53.42,
+          "rate_screen_passed": false
+        },
+        {
+          "label": "haar300-b",
+          "target_mbps": 300,
+          "fresh_selected_output_rate_fps": 55.41,
+          "rate_screen_passed": false
+        }
+      ],
+      "per_run_gates_passed": [
+        "build_identity",
+        "settings_unchanged",
+        "strict_selected_output_counter",
+        "runtime_coverage",
+        "host_isolation",
+        "thermal"
+      ],
+      "stream_errors": [],
+      "result": "No short screen met the 90 Hz rate target.",
+      "image_quality_evidence": {
+        "status": "not_collected",
+        "note": "Compositor screenshots and video are qualitative only; chart overlays obscure the source and there is no decoded-buffer score or manual image-quality review."
+      },
+      "scope_limitations": [
+        "Not Metro Awakening evidence.",
+        "Not an endurance or recovery result.",
+        "Not optical latency or display-FPS evidence."
+      ],
+      "restoration": {
+        "resolution": "restored",
+        "driver_registration": "restored",
+        "recorded_headset_properties_restored": 22,
+        "steamvr_and_test_dashboard": "closed",
+        "vdxr_runtime_selection": "unchanged",
+        "post_session_virtual_desktop_functional_check": "pending_owner_return"
+      },
+      "pending_separate_work": "Native pass-profile code is pending a build and is not part of this tested pair."
+    }
+  },
   "pair_diagnostic": {
     "status": "failed_gate_diagnostic_only",
     "only_identity_mismatch": "sources_lock_sha256",
@@ -58,7 +158,7 @@
     "canonical_lf_hash_fix_ready": true
   },
   "hardware_acceptance": {
-    "status": "unknown",
-    "note": "No streaming, gameplay, 90 Hz, Godlike-resolution, endurance, recovery, or operator-acceptance claim is made by this build validation."
+    "status": "short_rate_screen_completed_not_accepted",
+    "note": "Session 03 verified fresh selected-output telemetry on the matched .2 pair, but all four short PyroWave Haar/direct/TCP/4:2:0 screens at 3072x3232 per eye and 90 Hz were below the 90 Hz target. Metro, endurance, recovery, quantitative image quality, manual image-quality review, optical latency and display FPS remain unmeasured."
   }
 }

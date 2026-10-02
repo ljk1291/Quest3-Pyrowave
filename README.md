@@ -12,6 +12,13 @@ Development starts from [JMS1717/Quest3-Pyrowave](https://github.com/JMS1717/Que
 
 The initial PyroWave profile is **TCP, 4:2:0, Compute, CDF 9/7, SDR, fixed bitrate, synchronous presentation**. Foveation, adaptive bitrate, frame synthesis and optional decoder/copy experiments are excluded from target qualification. Lower resolution is diagnostic only. HEVC at 200 Mbps in this same fork is the codec control; VD Godlike/90 Hz is the user-experience reference.
 
+For a short decoder diagnostic only, `adb shell setprop debug.q3pw.pass_profile 1` before restarting
+the client enables local `[Q3PW_GPU_PASS]` log lines every 90 successful GPU completions. They are
+Granite timestamp **frame-context window means** for known decoder passes, not frame-specific
+latency, display FPS or acceptance telemetry. Borrowed command buffers retire Granite contexts on
+a later decode call, so the logs can lag one context. This off-by-default probe still requires
+hardware validation before it is used to guide an optimization.
+
 ## Baseline changes
 
 - Authoritative source pins, fork identity, matching build metadata, artifact checksums, shader verification and APK certificate fingerprints.

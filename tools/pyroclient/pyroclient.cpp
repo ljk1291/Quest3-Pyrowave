@@ -3,6 +3,7 @@
 #include "pyroclient.h"
 #include "decode_path.h"
 #include "gpu_failure_policy.h"
+#include "pass_profile.h"
 
 #include <android/hardware_buffer.h>
 #include <android/log.h>
@@ -143,6 +144,14 @@ struct pyroclient {
     VkFence fence = VK_NULL_HANDLE;
     VkQueryPool queries = VK_NULL_HANDLE;
     bool planes_initialised = false;
+    // This is deliberately local diagnostic output, rather than streamed telemetry. Granite's
+    // timestamp log is a frame-context aggregate, not a per-frame completion measurement.
+    bool pass_profile_enabled = false;
+    PassProfileCadence pass_profile_cadence;
+    uint32_t pass_profile_window_frames = 0;
+    uint32_t pass_profile_valid_labels = 0;
+    uint64_t pass_profile_window_ms = 0;
+    std::chrono::steady_clock::time_point pass_profile_window_start{};
     // Once vkQueueSubmit succeeds, command-buffer, fence and output-slot ownership belongs to
     // the GPU until the fence completes. A timeout/device loss is terminal for this decoder;
     // do not reset or destroy those objects underneath potentially pending work.
@@ -154,8 +163,50 @@ struct pyroclient {
     bool create_fragment_convert();
     bool create_slot(Slot &s);
     bool record_and_submit(Slot &s, pyroclient_frame_info *info);
+    void record_pass_profile_completion();
     void destroy();
 };
+
+static void pass_profile_message(void *userdata, const char *message) {
+    auto *client = static_cast<pyroclient *>(userdata);
+    if (!client || !message) return;
+
+    PassProfileSample sample;
+    if (!parse_pass_profile_sample(message, &sample)) {
+        // pyrowave_device_report_performance_stats also emits non-timing diagnostics. Avoid
+        // classifying those, or malformed timestamp text, as a valid timing result.
+        return;
+    }
+
+    ++client->pass_profile_valid_labels;
+    LOGI("[Q3PW_GPU_PASS] completed_frames=%u wall_ms=%llu phase=%s avg_ms=%.3f scope=granite_frame_context_mean",
+         client->pass_profile_window_frames,
+         static_cast<unsigned long long>(client->pass_profile_window_ms),
+         pass_profile_phase_name(sample.phase), sample.milliseconds);
+}
+
+void pyroclient::record_pass_profile_completion() {
+    if (!pass_profile_enabled || !submission_state.can_submit() || !pyro) return;
+    // 90 completed submissions is approximately one second at the target refresh. Counting
+    // completions (rather than calls or packet arrivals) keeps a slow decoder's window honest.
+    if (!pass_profile_cadence.record_completed_frame()) return;
+
+    const auto now = std::chrono::steady_clock::now();
+    pass_profile_window_frames = PassProfileCadence::completed_frame_window;
+    pass_profile_window_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        now - pass_profile_window_start).count());
+    pass_profile_valid_labels = 0;
+
+    // decode_gpu_buffer() advances Granite's frame context before recording each borrowed
+    // command buffer. This post-fence report therefore observes retired contexts; it is a
+    // completed-work window mean and intentionally not associated with this exact frame.
+    pyrowave_device_report_performance_stats(pyro, pass_profile_message, this, true);
+    if (pass_profile_valid_labels == 0) {
+        LOGE("[Q3PW_GPU_PASS] no valid Granite timestamp labels; window completed_frames=%u wall_ms=%llu",
+             pass_profile_window_frames, static_cast<unsigned long long>(pass_profile_window_ms));
+    }
+    pass_profile_window_start = now;
+}
 
 bool pyroclient::create_device() {
     app_info = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
@@ -232,6 +283,14 @@ bool pyroclient::create_device() {
     pi.instance_create_info = &instance_info;
     pi.device_create_info = &device_info;
     PW_TRY(pyrowave_create_device(&pi, &pyro));
+    char pass_profile_prop[PROP_VALUE_MAX] = {};
+    pass_profile_enabled = __system_property_get("debug.q3pw.pass_profile", pass_profile_prop) > 0 &&
+                           !strcmp(pass_profile_prop, "1");
+    pass_profile_cadence.set_enabled(pass_profile_enabled);
+    if (pass_profile_enabled) {
+        pass_profile_window_start = std::chrono::steady_clock::now();
+        LOGI("[Q3PW_GPU_PASS] enabled=1 cadence_completed_frames=90 scope=granite_frame_context_mean");
+    }
     // The dashboard's headset decode path arrives as a hint; the research property
     // debug.xrwired.decode_path = fragment|compute still overrides it (Experiment 1 A/B'd the two
     // on identical bytes), and CDF 5/3 exists only in the compute shaders. Read once, here.
@@ -674,6 +733,9 @@ bool pyroclient::record_and_submit(Slot &s, pyroclient_frame_info *info) {
         }
         info->total_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     }
+    // Keep this after the bounded fence wait and any raw query error handling. A terminal
+    // decoder never reports profile samples or resets Granite's timestamp accumulator.
+    record_pass_profile_completion();
     return true;
 }
 

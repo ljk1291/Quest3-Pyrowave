@@ -133,3 +133,12 @@ class BaselineTests(unittest.TestCase):
         report=self.passing_report()
         self.assertIn('selected_target_bitrate_missing', acceptance(report, dict(self.expected(), mbps=None))['failure_reasons'])
         self.assertIn('target_bitrate_mismatch', acceptance(report, dict(self.expected(), mbps=600))['failure_reasons'])
+
+    def test_profiling_and_clean_capture_modes_cannot_pass_baseline_acceptance(self):
+        for diagnostic in ('pass_profile', 'hide_performance_overlay'):
+            with self.subTest(diagnostic=diagnostic):
+                report=self.passing_report()
+                for endpoint in ('experiment_options_start', 'experiment_options_end'):
+                    report[endpoint]['enabled']={diagnostic:True}
+                reasons=acceptance(report, self.expected())['failure_reasons']
+                self.assertIn('experiment_options_unverified_or_enabled', reasons)

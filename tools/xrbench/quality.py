@@ -5,7 +5,11 @@ A quality cell records two things for the same frames: the encoded stream the he
 `<cell>/quality/source.y4m` + `.frames.csv`). Frames are paired by target timestamp, the tapped ones
 are decoded with PyroWave's PC decoder (bit-identical to the headset within one code value), and
 the decode is scored against the source with the harness's ffmpeg scorer (PSNR, SSIM, PSNR-HVS,
-VMAF). The result is `<cell>/quality.json`, which `xrbench.matrix` picks up.
+VMAF). A target timestamp is accepted only when it is positive and occurs exactly once in each
+*raw* input; reusable or ambiguous timestamps fail the cell rather than selecting an arbitrary
+last frame. This deliberately rejects UDP packet fragments unless a future tap records a separate
+unique frame identity. The result is
+`<cell>/quality.json`, which `xrbench.matrix` picks up.
 
 This measures what the codec delivered for the frames that arrived, at the encoded resolution. It
 does not include transport loss (a dropped frame is not scored) or the display path.
@@ -24,7 +28,6 @@ from pathlib import Path
 from . import bitstream
 from . import paths
 from . import pyrowave_wave
-from . import rdmatrix
 
 DEFAULT_DECODER = paths.CODE.parents[1] / "research" / "pyrowave" / "build-pc" / "Release" / "pyrowave-decode.exe"
 
@@ -36,17 +39,35 @@ def read_sidecar(path):
                 for r in csv.DictReader(f)]
 
 
-def match(dump_frames, tap_rows):
-    """Pair each dumped frame with the tapped frame of the same target timestamp.
-    Returns ([(dump_index, tap_row), ...] in dump order, [dump indices with no tapped frame])."""
-    by_ts = {r["pts_ns"]: r for r in tap_rows}
+def match(dump_frames, tap_rows, *, include_ambiguity=False):
+    """Pair dumped frames with tapped frames only when target timestamps are one-to-one.
+
+    Tracking target timestamps are reusable, so they are insufficient as a frame identity
+    when either input repeats one. By default this preserves the original two-value return
+    shape: ``(pairs, missing_dump_indices)``. ``include_ambiguity=True`` adds a third
+    dictionary whose timestamp lists identify repeated or non-positive dump and tap timestamps.
+    Callers that score quality must reject the whole cell when any list is non-empty.
+    """
+    dump_by_ts, tap_by_ts = {}, {}
+    for frame in dump_frames:
+        dump_by_ts.setdefault(frame["ts"], []).append(frame)
+    for row in tap_rows:
+        tap_by_ts.setdefault(row["pts_ns"], []).append(row)
+    ambiguity = {
+        "dump_target_timestamps": sorted(ts for ts, frames in dump_by_ts.items() if len(frames) > 1),
+        "tap_target_timestamps": sorted(ts for ts, rows in tap_by_ts.items() if len(rows) > 1),
+        "nonpositive_dump_timestamps": sorted(ts for ts in dump_by_ts if ts <= 0),
+        "nonpositive_tap_timestamps": sorted(ts for ts in tap_by_ts if ts <= 0),
+    }
     pairs, missing = [], []
     for f in dump_frames:
-        row = by_ts.get(f["ts"])
-        if row is None:
+        frames, rows = dump_by_ts[f["ts"]], tap_by_ts.get(f["ts"], [])
+        if f["ts"] <= 0 or len(frames) != 1 or len(rows) != 1:
             missing.append(f["index"])
         else:
-            pairs.append((f["index"], row))
+            pairs.append((f["index"], rows[0]))
+    if include_ambiguity:
+        return pairs, missing, ambiguity
     return pairs, missing
 
 
@@ -140,10 +161,22 @@ def score_cell(cell, decoder=DEFAULT_DECODER, ffmpeg="ffmpeg"):
         return None
     work = cell / "quality"
     dump_frames = read_sidecar(sidecar)
-    rows = pyrowave_wave.merge_packets(bitstream.read_index(idx))
-    pairs, missing = match(dump_frames, rows)
+    # Validate raw tap rows *before* merge_packets(). UDP fragments share a PTS
+    # and merge_packets intentionally coalesces them, which would otherwise hide
+    # an ambiguous timestamp behind one synthetic row.
+    raw_rows = bitstream.read_index(idx)
+    pairs, missing, ambiguity = match(dump_frames, raw_rows, include_ambiguity=True)
     result = {"frames": 0, "dumped": len(dump_frames), "missing_from_tap": missing}
-    if pairs:
+    ambiguous = [value for values in ambiguity.values() for value in values]
+    if ambiguous:
+        result.update({
+            "ambiguous_target_timestamps": ambiguity,
+            "error": "ambiguous or non-identity target timestamp; exact source-frame identity is required for quality scoring",
+        })
+    elif pairs:
+        # Matching/ambiguity checks should remain usable without the optional
+        # OpenCV dependency used by the external quality scorer.
+        from . import rdmatrix
         w, h = tap_dimensions(idx)
         wave, decoded, reference = work / "tapped.wave", work / "decoded.y4m", work / "reference.y4m"
         write_wave(payload, [r for _, r in pairs], wave, w, h)

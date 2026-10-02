@@ -708,3 +708,31 @@ index 861f726c74e38cec9058513ab412ceb08ae2e8bf..b54c2e722b9df8499013802466c7afa4
  }
  
  /// This is the SteamVR/OpenVR entry point
+diff --git a/alvr/client_openxr/src/performance.rs b/alvr/client_openxr/src/performance.rs
+--- a/alvr/client_openxr/src/performance.rs
++++ b/alvr/client_openxr/src/performance.rs
+@@ -35,6 +35,15 @@ impl PerformanceOverlay {
+         context: Rc<GraphicsContext>,
+         interactions: Arc<RwLock<InteractionContext>>,
+     ) -> xr::Result<Self> {
++        // Read once at client startup. The opt-in is for clean, unattended
++        // screenshot/video QA; it neither changes stream settings nor disables
++        // the existing two-thumbstick chord to show diagnostics later.
++        let initial_visible = crate::extra_extensions::perf_settings::system_property(
++            "debug.q3pw.hide_performance_overlay",
++        ) != "1";
++        alvr_common::info!("[Q3PW_OVERLAY] initial_visible={initial_visible}");
++        let mut toggle = OverlayToggle::default();
++        toggle.visible = initial_visible;
+         context.make_current();
+         let space =
+             session.create_reference_space(xr::ReferenceSpaceType::VIEW, xr::Posef::IDENTITY)?;
+@@ -62,7 +71,7 @@ impl PerformanceOverlay {
+             space,
+             swapchain,
+             renderer,
+-            toggle: OverlayToggle::default(),
++            toggle,
+             next_update: Instant::now(),
+             header: "Connecting".into(),
+         })

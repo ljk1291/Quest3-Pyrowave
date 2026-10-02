@@ -17,7 +17,8 @@ EXPERIMENT_PROPERTIES=('debug.oculus.forceDisplayScaling','debug.oculus.refreshR
     'debug.q3pw.frame_wait_us','debug.q3pw.pre_wait_poll','debug.q3pw.repeat_render','debug.q3pw.decode_workers',
     'debug.q3pw.decode_handoff','debug.q3pw.haar_fused','debug.q3pw.dequant_batch','debug.q3pw.convert_compute',
     'debug.q3pw.fragment_min_usage','debug.q3pw.optimal_ahb_usage','debug.q3pw.loop_probe',
-    'debug.q3pw.runtime_display_time','debug.xrwired.pyro_precision','debug.xrwired.early_poll','debug.xrwired.perf_level')
+    'debug.q3pw.runtime_display_time','debug.q3pw.pass_profile','debug.q3pw.hide_performance_overlay',
+    'debug.xrwired.pyro_precision','debug.xrwired.early_poll','debug.xrwired.perf_level')
 
 def windows_process_running(executable):
     """Read the process snapshot directly; tasklist can hang during SteamVR shutdown."""
@@ -97,7 +98,8 @@ def experiment_properties(adb, disable=False, disable_experiments=False):
             ('debug.q3pw.haar_fused','0'),('debug.q3pw.dequant_batch','0'),
             ('debug.q3pw.convert_compute','0'),('debug.q3pw.fragment_min_usage','0'),
             ('debug.q3pw.optimal_ahb_usage','0'),('debug.q3pw.loop_probe','0'),
-            ('debug.q3pw.runtime_display_time','0'),('debug.xrwired.pyro_precision','1'),
+            ('debug.q3pw.runtime_display_time','0'),('debug.q3pw.pass_profile','0'),
+            ('debug.q3pw.hide_performance_overlay','0'),('debug.xrwired.pyro_precision','1'),
             ('debug.xrwired.early_poll','1'),('debug.xrwired.perf_level','sustained_high'),
         ))
     writes=[]

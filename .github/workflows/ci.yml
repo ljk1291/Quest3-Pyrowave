@@ -21,6 +21,7 @@ jobs:
           python3 -m pytest tools/tests/test_ci_pins.py tools/tests/test_build_metadata.py -q
       - run: python3 -m unittest discover -s tests -v
       - run: g++ -std=c++17 -Wall -Werror tools/pyroclient/decode_path_test.cpp -o /tmp/decode-path && /tmp/decode-path
+      - run: g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/pass_profile_test.cpp -o /tmp/pass-profile && /tmp/pass-profile
       - name: GPU failure-policy state-machine test
         run: g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/gpu_failure_policy_test.cpp -o /tmp/gpu-failure-policy && /tmp/gpu-failure-policy
       - name: Software GLES readback correctness (no Quest hardware)

@@ -24,7 +24,8 @@ EXPERIMENT_PROPERTIES = (
     'debug.oculus.forceDisplayScaling', 'debug.oculus.refreshRate',
     'debug.q3pw.haar_fused','debug.q3pw.dequant_batch','debug.q3pw.convert_compute',
     'debug.q3pw.fragment_min_usage','debug.q3pw.optimal_ahb_usage','debug.q3pw.loop_probe',
-    'debug.q3pw.runtime_display_time','debug.xrwired.pyro_precision','debug.xrwired.early_poll',
+    'debug.q3pw.runtime_display_time','debug.q3pw.pass_profile','debug.q3pw.hide_performance_overlay',
+    'debug.xrwired.pyro_precision','debug.xrwired.early_poll',
     'debug.xrwired.perf_level',
 )
 
@@ -365,6 +366,8 @@ def experiment_effective(state):
         'optimal_ahb_usage':value('debug.q3pw.optimal_ahb_usage')=='1',
         'loop_probe':value('debug.q3pw.loop_probe')=='1',
         'runtime_display_time':value('debug.q3pw.runtime_display_time')=='1',
+        'pass_profile':value('debug.q3pw.pass_profile')=='1',
+        'hide_performance_overlay':value('debug.q3pw.hide_performance_overlay')=='1',
     }
     # direct_flip_y is recorded but not treated as an opt-in experiment: source defaults it true.
     return {'raw':raw,'verified':True,'enabled':enabled,
