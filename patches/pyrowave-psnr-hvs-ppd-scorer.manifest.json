@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "kind": "pyrowave_psnr_hvs_ppd_scorer",
+  "upstream": {
+    "repository": "https://github.com/Themaister/pyrowave",
+    "base_revision": "d2997ac172bdc00e29c58e3f2938acb7e94580bf",
+    "license": "MIT"
+  },
+  "patch": {
+    "path": "patches/pyrowave-psnr-hvs-ppd-scorer.patch",
+    "sha256": "5763f6d9b7af4ce444648b72781aba3e9a3b46bab20a6119a50bb1b0d6396062",
+    "base_psnr_cpp_sha256": "663a77a183a1f2f4d96928e89a9e34568c1468b6d882a7b833f4f8b6a162d709",
+    "accepted_windows_worktree_psnr_cpp_sha256": "436b042a5c631c061565b023ca3317ff22a3a714cf965a5f1aeaa2bf2c41599e",
+    "patched_psnr_cpp_sha256": "8a1df7dbfc8a7173cec2143367b39cc74b3a78c6e5446adf6d63728833a69e65"
+  },
+  "build": {
+    "target": "pyrowave-psnr-hvs-m",
+    "cmake_options": [
+      "-DPYROWAVE_UTILS=ON",
+      "-DPYROWAVE_DEVEL=OFF"
+    ],
+    "runtime_defaults_changed": false
+  }
+}

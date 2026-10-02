@@ -16,8 +16,7 @@ import numpy as np
 from PIL import Image
 from .ratequality import bytes_per_frame
 
-SCHEMA = 3
-HVS_HEIGHT_FACTORS = tuple(1.0 + index / 8.0 for index in range(16))
+SCHEMA = 4
 FPS = 90
 WAVELETS = ("haar", "53", "97")
 RATES_MBPS = (300, 500, 600, 800)
@@ -180,24 +179,24 @@ def crop_y4m(planes, info:Y4MInfo, crop):
 def frame_records(source):
     info=inspect_y4m(source); return [{"source_frame":i,"source_sha256":d} for i,_,d in iter_y4m(source,info)]
 
-def hvs_factor_for_ppd(pixels_per_degree:float, image_height:int)->dict:
-    """Map the upstream source formula to one emitted height factor, if possible.
+def hvs_calibration_for_vertical_ppd(pixels_per_degree:float, image_height:int)->dict:
+    """Calibration for the scorer-only PyroWave HVS adapter.
 
-    psnr.cpp computes nyquist_cpd = height * factor * pi / 360; therefore
-    displayed pixels/degree = height * factor * pi / 180. No interpolation or
-    invented factor is allowed: the binary emits only HVS_HEIGHT_FACTORS.
+    Upstream psnr.cpp uses ``nyquist_cpd = image_height * factor * pi / 360``.
+    The adapter accepts a measured *vertical* pixels/degree value and emits this
+    derived factor, so each scaled frame or crop is calibrated to its own height.
     """
     if not isinstance(pixels_per_degree,(int,float)) or not math.isfinite(pixels_per_degree) or pixels_per_degree <= 0 or not isinstance(image_height,int) or image_height <= 0: raise ValueError("HVS calibration inputs must be finite and positive")
-    required=pixels_per_degree * 180.0 / (image_height * math.pi)
-    selected=next((factor for factor in HVS_HEIGHT_FACTORS if abs(factor-required) <= 1e-6),None)
-    return {"pixels_per_degree":pixels_per_degree,"image_height":image_height,"required_height_factor":required,"supported_height_factor":selected,"supported":selected is not None}
+    factor=float(pixels_per_degree) * 180.0 / (image_height * math.pi)
+    return {"vertical_pixels_per_degree":float(pixels_per_degree),"image_height":image_height,"height_factor":factor,"adapter_required":True}
 
 def _crop_height(crop, eye_height, chroma):
     height=max(1,round(crop["h"]*eye_height))
     return max(2,height-(height%2)) if chroma=="420" else height
 
-def build_plan(source:Path,projection_px_per_deg:float,*,projection_evidence:str,crop_evidence:str|None=None,fixture:bool=False,fps:int=FPS,wavelets=WAVELETS,rates_mbps=RATES_MBPS,geometries=GEOMETRIES,display_eye=DISPLAY_EYE,crops=DEFAULT_CROPS)->dict:
-    if not isinstance(projection_px_per_deg,(int,float)) or not math.isfinite(projection_px_per_deg) or projection_px_per_deg<=0: raise ValueError("projection_px_per_deg must be finite and positive")
+def build_plan(source:Path,vertical_pixels_per_degree:float,*,horizontal_pixels_per_degree:float|None=None,projection_evidence:str,crop_evidence:str|None=None,fixture:bool=False,fps:int=FPS,wavelets=WAVELETS,rates_mbps=RATES_MBPS,geometries=GEOMETRIES,display_eye=DISPLAY_EYE,crops=DEFAULT_CROPS)->dict:
+    if not isinstance(vertical_pixels_per_degree,(int,float)) or not math.isfinite(vertical_pixels_per_degree) or vertical_pixels_per_degree<=0: raise ValueError("vertical_pixels_per_degree must be finite and positive")
+    if horizontal_pixels_per_degree is not None and (not isinstance(horizontal_pixels_per_degree,(int,float)) or not math.isfinite(horizontal_pixels_per_degree) or horizontal_pixels_per_degree<=0): raise ValueError("horizontal_pixels_per_degree must be finite and positive")
     if not isinstance(projection_evidence,str) or not projection_evidence.strip(): raise ValueError("projection_evidence must name logged projection measurement")
     if not fixture and (not isinstance(crop_evidence,str) or not crop_evidence.strip()): raise ValueError("production plan requires semantic crop evidence")
     info=inspect_y4m(source)
@@ -211,14 +210,15 @@ def build_plan(source:Path,projection_px_per_deg:float,*,projection_evidence:str
         for rate in rates_mbps:
             for ew,eh in geometries:
                 cap=cap_bytes(int(rate),fps); cells.append({"wavelet":wv,"rate_mbps":int(rate),"fps":fps,"eye_width":int(ew),"eye_height":int(eh),"stereo_width":int(ew)*2,"encoded_chroma":info.chroma,"cap_bytes":cap,"bits_per_pixel":bpp(cap,int(ew),int(eh))})
-    display_hvs=hvs_factor_for_ppd(float(projection_px_per_deg),int(display_eye[1]))
-    codec_hvs=[hvs_factor_for_ppd(float(projection_px_per_deg)*math.sqrt((cell["eye_width"]/display_eye[0])*(cell["eye_height"]/display_eye[1])),cell["eye_height"]) for cell in cells]
-    crop_hvs=[hvs_factor_for_ppd(float(projection_px_per_deg),_crop_height(crop,display_eye[1],info.chroma)) for crop in clean_crops]
-    hvs={"source_formula":"ppd=height*height_factor*pi/180","display":display_hvs,"codec_cells":codec_hvs,"crops":crop_hvs,"all_supported":all(x["supported"] for x in [display_hvs,*codec_hvs,*crop_hvs])}
-    return {"schema":SCHEMA,"kind":"pyrowave_frame_bank","fixture_only":bool(fixture),"source":{"sha256":sha256_file(source),"geometry":[info.width,info.height],"frames":info.frames,"header_fps":[info.fps_num,info.fps_den],"target_fps":fps,"chroma":info.chroma,"color_range":info.color_range,"frame_identity":frame_records(source)},"presentation_eye":list(display_eye),"projection_px_per_deg":float(projection_px_per_deg),"projection_evidence":projection_evidence.strip(),"crop_evidence":"fixture" if fixture else crop_evidence.strip(),"hvs_calibration":hvs,"resize":{"scope":"per_eye","filter":"lanczos3","seam_crossing":False},"crops":clean_crops,"cells":cells,"required_metrics":["psnr_y","psnr_cb","psnr_cr","ssim","vmaf","psnr_hvs_m_h"]}
+    display_hvs=hvs_calibration_for_vertical_ppd(float(vertical_pixels_per_degree),int(display_eye[1]))
+    codec_hvs=[hvs_calibration_for_vertical_ppd(float(vertical_pixels_per_degree)*(cell["eye_height"]/display_eye[1]),cell["eye_height"]) for cell in cells]
+    crop_hvs=[hvs_calibration_for_vertical_ppd(float(vertical_pixels_per_degree),_crop_height(crop,display_eye[1],info.chroma)) for crop in clean_crops]
+    hvs={"source_formula":"ppd=height*height_factor*pi/180","adapter":"pyrowave_psnr_hvs_ppd_scorer","display":display_hvs,"codec_cells":codec_hvs,"crops":crop_hvs}
+    projection={"vertical_pixels_per_degree":float(vertical_pixels_per_degree),"horizontal_pixels_per_degree":None if horizontal_pixels_per_degree is None else float(horizontal_pixels_per_degree),"hvs_axis":"vertical"}
+    return {"schema":SCHEMA,"kind":"pyrowave_frame_bank","fixture_only":bool(fixture),"source":{"sha256":sha256_file(source),"geometry":[info.width,info.height],"frames":info.frames,"header_fps":[info.fps_num,info.fps_den],"target_fps":fps,"chroma":info.chroma,"color_range":info.color_range,"frame_identity":frame_records(source)},"presentation_eye":list(display_eye),"projection":projection,"projection_evidence":projection_evidence.strip(),"crop_evidence":"fixture" if fixture else crop_evidence.strip(),"hvs_calibration":hvs,"resize":{"scope":"per_eye","filter":"lanczos3","seam_crossing":False},"crops":clean_crops,"cells":cells,"required_metrics":["psnr_y","psnr_cb","psnr_cr","ssim","vmaf","psnr_hvs_m_h"]}
 
 def validate_plan(plan):
-    if not isinstance(plan,dict) or plan.get("schema")!=SCHEMA or plan.get("kind")!="pyrowave_frame_bank": raise ValueError("not a frame-bank schema-3 manifest")
+    if not isinstance(plan,dict) or plan.get("schema")!=SCHEMA or plan.get("kind")!="pyrowave_frame_bank": raise ValueError("not a frame-bank schema-4 manifest")
     src=plan.get("source",{}); ids=src.get("frame_identity")
     if src.get("chroma") not in ("420","444") or src.get("color_range") not in ("FULL","LIMITED"): raise ValueError("source format/range is unsupported")
     if not isinstance(ids,list) or len(ids)!=src.get("frames") or [x.get("source_frame") for x in ids]!=list(range(len(ids))): raise ValueError("source frame identities must be ordered and contiguous")
@@ -230,9 +230,13 @@ def validate_plan(plan):
     if plan.get("resize") != {"scope":"per_eye","filter":"lanczos3","seam_crossing":False}: raise ValueError("resize provenance does not match implementation")
     if not isinstance(src.get("geometry"),list) or len(src["geometry"]) != 2 or not all(isinstance(v,int) and v > 0 for v in src["geometry"]): raise ValueError("source geometry is invalid")
     if src.get("target_fps") != FPS or src.get("header_fps") not in ([72,1],[90,1]): raise ValueError("source frame-rate provenance is invalid")
+    projection=plan.get("projection",{})
+    if not isinstance(projection,dict) or projection.get("hvs_axis") != "vertical": raise ValueError("vertical projection calibration is missing")
+    vertical=projection.get("vertical_pixels_per_degree")
+    if not isinstance(vertical,(int,float)) or not math.isfinite(vertical) or vertical <= 0: raise ValueError("vertical projection calibration is invalid")
     calibration=plan.get("hvs_calibration")
-    if not isinstance(calibration,dict) or "all_supported" not in calibration: raise ValueError("HVS calibration is missing")
-    expected_display=hvs_factor_for_ppd(plan["projection_px_per_deg"],plan["presentation_eye"][1])
+    if not isinstance(calibration,dict) or calibration.get("adapter") != "pyrowave_psnr_hvs_ppd_scorer": raise ValueError("HVS scorer adapter calibration is missing")
+    expected_display=hvs_calibration_for_vertical_ppd(vertical,plan["presentation_eye"][1])
     if calibration.get("display") != expected_display: raise ValueError("display HVS calibration drifted")
     if not plan.get("cells"): raise ValueError("frame bank contains no cells")
     for c in plan["cells"]:
@@ -242,9 +246,9 @@ def validate_plan(plan):
         if src.get("chroma") == "420" and (c["eye_width"] % 2 or c["eye_height"] % 2): raise ValueError("C420 cell geometry must be even")
         if c.get("cap_bytes")!=cap_bytes(c.get("rate_mbps"),c.get("fps")): raise ValueError("cell cap math does not match its rate and frame rate")
         if c.get("stereo_width")!=c.get("eye_width",0)*2: raise ValueError("cell stereo geometry is not two separate eyes")
-    expected_codec=[hvs_factor_for_ppd(plan["projection_px_per_deg"]*math.sqrt((cell["eye_width"]/plan["presentation_eye"][0])*(cell["eye_height"]/plan["presentation_eye"][1])),cell["eye_height"]) for cell in plan["cells"]]
-    expected_crops=[hvs_factor_for_ppd(plan["projection_px_per_deg"],_crop_height(crop,plan["presentation_eye"][1],src["chroma"])) for crop in clean_crops]
-    if calibration.get("codec_cells") != expected_codec or calibration.get("crops") != expected_crops or calibration.get("all_supported") != all(item["supported"] for item in [expected_display,*expected_codec,*expected_crops]): raise ValueError("HVS calibration drifted")
+    expected_codec=[hvs_calibration_for_vertical_ppd(vertical*(cell["eye_height"]/plan["presentation_eye"][1]),cell["eye_height"]) for cell in plan["cells"]]
+    expected_crops=[hvs_calibration_for_vertical_ppd(vertical,_crop_height(crop,plan["presentation_eye"][1],src["chroma"])) for crop in clean_crops]
+    if calibration.get("codec_cells") != expected_codec or calibration.get("crops") != expected_crops: raise ValueError("HVS calibration drifted")
     return plan
 
 class WindowGuard:
@@ -292,18 +296,20 @@ def required_tools(tools):
     if missing: raise FileNotFoundError("required scorer/codec tool unavailable: "+", ".join(missing))
 def tool_provenance(tools): return {n:{"sha256":sha256_file(p),"basename":p.name} for n,v in tools.items() if (p:=_tool_path(v)) is not None}
 
-def parse_hvs_m_h(text,height_factor:float)->float:
-    pats=re.findall(r"HeightFactor\s*=\s*([0-9.]+).*?PSNR-HVS-M-H:\s*\(Y\)\s*([+0-9.eEinfINF-]+)",text,re.S)
-    for factor,value in pats:
-        if abs(float(factor)-height_factor)<1e-4:
-            val=float(value)
-            if math.isnan(val): raise ValueError("PSNR-HVS-M-H scorer emitted NaN")
-            return val
-    raise ValueError("PSNR-HVS-M-H scorer did not emit the requested upstream height factor")
-def _score_hvs_m_h(tool,reference,distorted,frames,hf,guard,cwd,env,timeout):
-    code,out,err=guard.run([str(tool),"--reference",str(reference),"--distorted",str(distorted),"--frames",str(frames)],cwd=cwd,env=env,timeout_s=timeout)
+def parse_hvs_m_h(text,pixels_per_degree:float,image_height:int)->dict:
+    expected=hvs_calibration_for_vertical_ppd(pixels_per_degree,image_height)
+    pats=re.findall(r"PixelsPerDegree\s*=\s*([+0-9.eE-]+).*?HeightFactor\s*=\s*([+0-9.eE-]+).*?PSNR-HVS-M-H:\s*\(Y\)\s*([+0-9.eEinfINF-]+)",text,re.S)
+    for ppd,factor,value in pats:
+        ppd,factor,val=float(ppd),float(factor),float(value)
+        if not math.isfinite(ppd) or not math.isfinite(factor) or math.isnan(val): continue
+        if math.isclose(ppd,float(pixels_per_degree),rel_tol=0,abs_tol=1e-5) and math.isclose(factor,expected["height_factor"],rel_tol=0,abs_tol=1e-5):
+            return {"value":val,"vertical_pixels_per_degree":ppd,"height_factor":factor,"image_height":image_height}
+    raise ValueError("PSNR-HVS-M-H scorer did not emit the requested vertical calibration")
+def _score_hvs_m_h(tool,reference,distorted,frames,vertical_ppd,image_height,guard,cwd,env,timeout):
+    code,out,err=guard.run([str(tool),"--reference",str(reference),"--distorted",str(distorted),"--frames",str(frames),"--pixels-per-degree",f"{vertical_ppd:.9g}"],cwd=cwd,env=env,timeout_s=timeout)
     if code: raise RuntimeError("PSNR-HVS-M-H scorer failed")
-    return parse_hvs_m_h(out+err,hf)
+    return parse_hvs_m_h(out+err,vertical_ppd,image_height)
+
 def _valid_metric(k,v): return isinstance(v,(int,float)) and not math.isnan(v) and (math.isfinite(v) or k.startswith("psnr"))
 def _score_ffmpeg(tool,distorted,reference,workdir,guard,env,timeout_s):
     # This is rdmatrix.score's established ffmpeg graph, but the process is run
@@ -321,12 +327,12 @@ def _score_ffmpeg(tool,distorted,reference,workdir,guard,env,timeout_s):
     log.unlink(missing_ok=True)
     return values
 
-def score_pair(tools,distorted,reference,workdir,px_per_deg,*,frames,hvs_height_factor,guard,env,timeout_s):
+def score_pair(tools,distorted,reference,workdir,vertical_ppd,*,frames,image_height,guard,env,timeout_s):
     values=_score_ffmpeg(tools["ffmpeg"],distorted,reference,workdir,guard,env,timeout_s)
     expected=("psnr_y","psnr_u","psnr_v","ssim_y","ssim_all","vmaf")
     missing=[k for k in expected if not _valid_metric(k,values.get(k))]
     if missing: raise RuntimeError("ffmpeg/libvmaf did not emit required metrics: "+", ".join(missing))
-    return {"psnr_y":values["psnr_y"],"psnr_cb":values["psnr_u"],"psnr_cr":values["psnr_v"],"ssim":values["ssim_y"],"ssim_all":values["ssim_all"],"vmaf":values["vmaf"],"psnr_hvs_m_h":_score_hvs_m_h(tools["psnr_hvs_m_h"],reference,distorted,frames,hvs_height_factor,guard,workdir,env,timeout_s),"projection_px_per_deg":px_per_deg,"hvs_height_factor":hvs_height_factor}
+    return {"psnr_y":values["psnr_y"],"psnr_cb":values["psnr_u"],"psnr_cr":values["psnr_v"],"ssim":values["ssim_y"],"ssim_all":values["ssim_all"],"vmaf":values["vmaf"],"psnr_hvs_m_h":_score_hvs_m_h(tools["psnr_hvs_m_h"],reference,distorted,frames,vertical_ppd,image_height,guard,workdir,env,timeout_s),"vertical_pixels_per_degree":vertical_ppd}
 
 def _private_root()->Path: return Path(__file__).resolve().parents[2]/"results"/"local"
 def _private_path(path:Path):
@@ -362,12 +368,11 @@ def _assert_same_frames(reference,decoded,ref_info):
 def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,*,arm:Path|None=None,status_command:Sequence[str]|None=None,command_timeout_s:float=900,keep_artifacts:bool=False,allow_fixture:bool=False,score_fn=score_pair):
     raw_plan=Path(plan_path).read_bytes();plan=validate_plan(json.loads(raw_plan)); source=Path(source); private_out=_private_path(private_out); guard=WindowGuard(window,arm,status_command)
     if plan.get("fixture_only") and not allow_fixture: raise ValueError("fixture-only plans cannot run outside a CPU test")
-    if not plan["hvs_calibration"]["all_supported"] and not allow_fixture: raise ValueError("PSNR-HVS-M-H calibration is unsupported at the recorded viewing density")
     required_tools(tools); guard.status(); initial={n:sha256_file(_tool_path(v)) for n,v in tools.items()};
     if sha256_file(source)!=plan["source"]["sha256"]: raise ValueError("source dump hash differs from frozen plan")
     source_info=inspect_y4m(source)
     if source_info.frames!=plan["source"]["frames"]: raise ValueError("source dump frame count differs from frozen plan")
-    private_out.mkdir(parents=True,exist_ok=True); result={"schema":SCHEMA,"kind":"pyrowave_frame_bank_result","frozen_plan_sha256":hashlib.sha256(raw_plan).hexdigest(),"source_sha256_start":sha256_file(source),"source_sha256_end":None,"tool_provenance_start":initial,"tool_provenance_end":None,"projection_px_per_deg":plan["projection_px_per_deg"],"projection_evidence":plan["projection_evidence"],"cells":[],"complete":False,"failure_reasons":[]}
+    private_out.mkdir(parents=True,exist_ok=True); result={"schema":SCHEMA,"kind":"pyrowave_frame_bank_result","frozen_plan_sha256":hashlib.sha256(raw_plan).hexdigest(),"source_sha256_start":sha256_file(source),"source_sha256_end":None,"tool_provenance_start":initial,"tool_provenance_end":None,"projection":plan["projection"],"projection_evidence":plan["projection_evidence"],"cells":[],"complete":False,"failure_reasons":[]}
     for index,cell in enumerate(plan["cells"]):
         directory=private_out/f"cell-{index:02d}-{cell['wavelet']}-{cell['rate_mbps']}-{cell['eye_width']}x{cell['eye_height']}";directory.mkdir(parents=True,exist_ok=True); ref=directory/f"reference-c{cell['encoded_chroma']}.y4m";wave=directory/"encoded.wave";decoded=directory/f"decoded-c{cell['encoded_chroma']}.y4m"; row=dict(cell)
         try:
@@ -383,12 +388,12 @@ def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,
             if code or not decoded.is_file(): raise RuntimeError("decode_failed")
             dec_info=_assert_same_frames(ref,decoded,ref_info);row["decoded_frame_identity"]=[{"cell_frame":i,"source_frame":x["source_frame"],"reference_sha256":x["reference_sha256"],"decoded_sha256":d} for (i,_,d),x in zip(iter_y4m(decoded,dec_info),ids)]
             if len(row["decoded_frame_identity"])!=len(ids): raise ValueError("decoded_identity_or_geometry_mismatch")
-            common=dict(frames=ref_info.frames,hvs_height_factor=plan["hvs_calibration"]["codec_cells"][index]["supported_height_factor"],guard=guard,env=env,timeout_s=command_timeout_s)
-            codec_ppd=plan["projection_px_per_deg"]*math.sqrt((cell["eye_width"]/plan["presentation_eye"][0])*(cell["eye_height"]/plan["presentation_eye"][1]))
-            row["codec_only"]=score_fn(tools,decoded,ref,directory,codec_ppd,**common)
+            common=dict(frames=ref_info.frames,guard=guard,env=env,timeout_s=command_timeout_s)
+            codec_ppd=plan["hvs_calibration"]["codec_cells"][index]["vertical_pixels_per_degree"]
+            row["codec_only"]=score_fn(tools,decoded,ref,directory,codec_ppd,image_height=ref_info.height,**common)
             display_ref=directory/"source-display.y4m";display_dec=directory/"decoded-display.y4m";_write_display(source,source_info,display_ref,plan["presentation_eye"]);_write_display(decoded,dec_info,display_dec,plan["presentation_eye"])
-            display_common={**common,"hvs_height_factor":plan["hvs_calibration"]["display"]["supported_height_factor"]}
-            row["displayed"]=score_fn(tools,display_dec,display_ref,directory,plan["projection_px_per_deg"],**display_common);row["crops"]={}
+            display_common=common
+            row["displayed"]=score_fn(tools,display_dec,display_ref,directory,plan["hvs_calibration"]["display"]["vertical_pixels_per_degree"],image_height=plan["presentation_eye"][1],**display_common);row["crops"]={}
             # Crop score files are written/consumed one crop at a time; only one frame is retained for its grid.
             disp_info=inspect_y4m(display_ref)
             for crop in plan["crops"]:
@@ -401,8 +406,8 @@ def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,
                     for (_,rplanes,_),(_,gplanes,_) in zip(iter_y4m(display_ref,disp_info),iter_y4m(display_dec,inspect_y4m(display_dec))):
                         _write_frame(rf,ci,crop_y4m(rplanes,disp_info,crop))
                         _write_frame(gf,ci,crop_y4m(gplanes,disp_info,crop))
-                crop_common={**common,"hvs_height_factor":plan["hvs_calibration"]["crops"][plan["crops"].index(crop)]["supported_height_factor"]}
-                row["crops"][crop["name"]]=score_fn(tools,gp,rp,directory,plan["projection_px_per_deg"],**crop_common);_grid_png(directory/"grids"/f"PRIVATE-{crop['name']}.png",c0,crop_y4m(gp0,disp_info,crop))
+                crop_calibration=plan["hvs_calibration"]["crops"][plan["crops"].index(crop)]
+                row["crops"][crop["name"]]=score_fn(tools,gp,rp,directory,crop_calibration["vertical_pixels_per_degree"],image_height=ci.height,**common);_grid_png(directory/"grids"/f"PRIVATE-{crop['name']}.png",c0,crop_y4m(gp0,disp_info,crop))
         except (PermissionError,TimeoutError,ValueError,RuntimeError) as exc:
             row["error"]=str(exc) if str(exc) in {"encode_failed","decode_failed","decoded_identity_or_geometry_mismatch"} else "cell_failed";result["failure_reasons"].append(row["error"])
         result["cells"].append(row)
@@ -416,11 +421,11 @@ def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,
 
 def sanitized_report(result):
     keep=("wavelet","rate_mbps","fps","eye_width","eye_height","encoded_chroma","cap_bytes","bits_per_pixel","actual_container_bytes","codec_only","displayed","crops","error")
-    return {"schema":SCHEMA,"kind":"pyrowave_frame_bank_sanitized","complete":result.get("complete") is True,"failure_reasons":list(result.get("failure_reasons",[])),"frozen_plan_sha256":result.get("frozen_plan_sha256"),"source_sha256":result.get("source_sha256_end"),"tool_provenance":result.get("tool_provenance_end"),"projection_px_per_deg":result.get("projection_px_per_deg"),"cells":[{k:r.get(k) for k in keep} for r in result.get("cells",[])],"optical_latency_ms":None,"display_fps":None}
+    return {"schema":SCHEMA,"kind":"pyrowave_frame_bank_sanitized","complete":result.get("complete") is True,"failure_reasons":list(result.get("failure_reasons",[])),"frozen_plan_sha256":result.get("frozen_plan_sha256"),"source_sha256":result.get("source_sha256_end"),"tool_provenance":result.get("tool_provenance_end"),"projection":result.get("projection"),"cells":[{k:r.get(k) for k in keep} for r in result.get("cells",[])],"optical_latency_ms":None,"display_fps":None}
 def _main_plan(a):
-    p=build_plan(Path(a.source),a.pixels_per_degree,projection_evidence=a.projection_evidence,crop_evidence=a.crop_evidence);Path(a.out).write_text(json.dumps(p,indent=2),encoding="utf-8");print(f"wrote frozen plan with {len(p['cells'])} cells; no codec/scorer was run");return 0
+    p=build_plan(Path(a.source),a.vertical_pixels_per_degree,horizontal_pixels_per_degree=a.horizontal_pixels_per_degree,projection_evidence=a.projection_evidence,crop_evidence=a.crop_evidence);Path(a.out).write_text(json.dumps(p,indent=2),encoding="utf-8");print(f"wrote frozen plan with {len(p['cells'])} cells; no codec/scorer was run");return 0
 def _main_run(a):
     tools={"encode":a.encode,"decode":a.decode,"ffmpeg":a.ffmpeg,"psnr_hvs_m_h":a.psnr_hvs_m_h};r=run_plan(Path(a.plan),Path(a.source),Path(a.private_out),tools,Path(a.window),arm=None if not a.arm else Path(a.arm),command_timeout_s=a.command_timeout_s,keep_artifacts=a.keep_artifacts);report=sanitized_report(r);Path(a.report).write_text(json.dumps(report,indent=2),encoding="utf-8");print(f"wrote sanitized report: complete={report['complete']}");return 0 if report["complete"] else 2
 def main(argv=None):
-    p=argparse.ArgumentParser(description=__doc__);s=p.add_subparsers(dest="command",required=True);a=s.add_parser("plan");a.add_argument("--source",required=True);a.add_argument("--pixels-per-degree",type=float,required=True);a.add_argument("--projection-evidence",required=True);a.add_argument("--crop-evidence",required=True);a.add_argument("--out",required=True);r=s.add_parser("run");r.add_argument("--plan",required=True);r.add_argument("--source",required=True);r.add_argument("--private-out",required=True);r.add_argument("--report",required=True);r.add_argument("--window",required=True);r.add_argument("--arm");r.add_argument("--encode",required=True);r.add_argument("--decode",required=True);r.add_argument("--ffmpeg",required=True);r.add_argument("--psnr-hvs-m-h",required=True);r.add_argument("--command-timeout-s",type=float,default=900);r.add_argument("--keep-artifacts",action="store_true");x=p.parse_args(argv);return _main_plan(x) if x.command=="plan" else _main_run(x)
+    p=argparse.ArgumentParser(description=__doc__);s=p.add_subparsers(dest="command",required=True);a=s.add_parser("plan");a.add_argument("--source",required=True);a.add_argument("--vertical-pixels-per-degree",type=float,required=True);a.add_argument("--horizontal-pixels-per-degree",type=float);a.add_argument("--projection-evidence",required=True);a.add_argument("--crop-evidence",required=True);a.add_argument("--out",required=True);r=s.add_parser("run");r.add_argument("--plan",required=True);r.add_argument("--source",required=True);r.add_argument("--private-out",required=True);r.add_argument("--report",required=True);r.add_argument("--window",required=True);r.add_argument("--arm");r.add_argument("--encode",required=True);r.add_argument("--decode",required=True);r.add_argument("--ffmpeg",required=True);r.add_argument("--psnr-hvs-m-h",required=True);r.add_argument("--command-timeout-s",type=float,default=900);r.add_argument("--keep-artifacts",action="store_true");x=p.parse_args(argv);return _main_plan(x) if x.command=="plan" else _main_run(x)
 if __name__=="__main__": raise SystemExit(main())

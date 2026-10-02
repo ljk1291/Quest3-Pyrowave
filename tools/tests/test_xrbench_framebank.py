@@ -77,27 +77,28 @@ class FrameBankTests(unittest.TestCase):
     def test_lossless_psnr_infinity_is_valid(self):
         self.assertTrue(fb._valid_metric("psnr_y",math.inf));self.assertFalse(fb._valid_metric("vmaf",math.inf));self.assertFalse(fb._valid_metric("psnr_y",math.nan))
 
-    def test_hvs_requires_actual_upstream_factor(self):
-        text="HeightFactor = 1.00 || PSNR-HVS-M-H: (Y) inf dB\nHeightFactor = 1.12 || PSNR-HVS-M-H: (Y) 31.2 dB"
-        self.assertEqual(fb.parse_hvs_m_h(text,1.0),math.inf);self.assertEqual(fb.parse_hvs_m_h(text,1.12),31.2)
-        with self.assertRaisesRegex(ValueError,"requested"):fb.parse_hvs_m_h(text,1.25)
+    def test_hvs_requires_emitted_vertical_calibration(self):
+        ppd,height=23.6,3232; factor=ppd*180/(height*math.pi)
+        text=f"PixelsPerDegree = {ppd:.6f} || HeightFactor = {factor:.8f} || PSNR-HVS-M-H: (Y) inf dB"
+        parsed=fb.parse_hvs_m_h(text,ppd,height)
+        self.assertEqual(parsed["value"],math.inf);self.assertAlmostEqual(parsed["height_factor"],factor,places=5)
+        with self.assertRaisesRegex(ValueError,"vertical calibration"):fb.parse_hvs_m_h(text,24.2,height)
 
-    def test_hvs_density_mapping_never_invents_an_unsupported_factor(self):
-        measured=fb.hvs_factor_for_ppd(24.2,3232)
-        self.assertFalse(measured["supported"]);self.assertAlmostEqual(measured["required_height_factor"],24.2*180/(3232*math.pi))
-        supported=fb.hvs_factor_for_ppd(3232*1.0*math.pi/180,3232)
-        self.assertEqual(supported["supported_height_factor"],1.0)
+    def test_hvs_density_uses_vertical_axis_and_actual_image_height(self):
+        measured=fb.hvs_calibration_for_vertical_ppd(23.6,3232)
+        self.assertAlmostEqual(measured["height_factor"],23.6*180/(3232*math.pi))
+        self.assertTrue(measured["adapter_required"])
 
     def test_decoded_range_mismatch_is_rejected(self):
         with self.tmp() as t:
             t=Path(t); ref=tiny_source(t, color_range="FULL"); decoded=t/"decoded.y4m"; decoded.write_bytes(ref.read_bytes().replace(b"XCOLORRANGE=FULL",b"XCOLORRANGE=LIMITED",1))
             with self.assertRaisesRegex(ValueError,"decoded_identity_or_geometry_mismatch"): fb._assert_same_frames(ref,decoded,fb.inspect_y4m(ref))
 
-    def test_production_plan_requires_90_frames_and_fails_hvs_before_codec(self):
+    def test_production_plan_requires_90_frames_and_records_vertical_hvs_adapter(self):
         with self.tmp() as t:
-            t=Path(t); source=tiny_source(t,frames=90); plan=fb.build_plan(source,24.2,projection_evidence="projection-verified",crop_evidence="metro-crop-review",display_eye=(4,4),geometries=((4,4),),wavelets=("haar",),rates_mbps=(300,)); self.assertFalse(plan["hvs_calibration"]["all_supported"])
-            frozen=t/"plan.json";frozen.write_text(json.dumps(plan))
-            with self.assertRaisesRegex(ValueError,"PSNR-HVS-M-H calibration is unsupported"): fb.run_plan(frozen,source,fb._private_root()/"framebank-production-gate",{},t/"window")
+            t=Path(t); source=tiny_source(t,frames=90); plan=fb.build_plan(source,23.6,horizontal_pixels_per_degree=24.2,projection_evidence="projection-verified",crop_evidence="metro-crop-review",display_eye=(4,4),geometries=((4,4),),wavelets=("haar",),rates_mbps=(300,)); self.assertEqual(plan["projection"]["hvs_axis"],"vertical")
+            self.assertAlmostEqual(plan["hvs_calibration"]["display"]["vertical_pixels_per_degree"],23.6)
+            self.assertIs(fb.validate_plan(plan),plan)
 
     def test_guard_uses_status_allow_and_rejects_revocation(self):
         calls=[]
