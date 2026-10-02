@@ -252,3 +252,12 @@ def test_alvr_record_change_requires_lease_and_owned_runtime(monkeypatch,tmp_pat
     path=tmp_path/'state.json'; u.atomic_write(path,{'restoration':{'status':'pending'},'owned_runtime':[]})
     monkeypatch.setattr(u,'status_payload',lambda *args,**kwargs:{'lease':{'active':True,'blockers':[]}})
     with pytest.raises(u.Refusal): u.record_change(path,'alvr','x',True,1,2)
+
+
+def test_steamvr_exact_key_rollback_preserves_absent_key(tmp_path):
+    settings=tmp_path/'steamvr.vrsettings'; u.atomic_write(settings,{'steamvr':{'supersampleScale':1.5,'newKey':True}})
+    state={'snapshot':{'configuration_snapshots':[{'label':'steamvr_settings','source':str(settings)}]},
+           'changes':[{'kind':'steamvr','key':'steamvr.supersampleScale','before_present':True,'before_value':1.0,'expected_after':1.5},
+                      {'kind':'steamvr','key':'steamvr.manualOverride','before_present':False,'before_value':None,'expected_after':True}]}
+    assert u.restore_recorded_steamvr(state)
+    after=u.json_read(settings)['steamvr']; assert after['supersampleScale']==1.0 and 'manualOverride' not in after and after['newKey'] is True

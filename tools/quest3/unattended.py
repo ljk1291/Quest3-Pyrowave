@@ -322,6 +322,10 @@ def restore(state_path, host=None):
             from .control import session as _session, set_values as _set_values
             alvr_restored=restore_recorded_alvr(state,(_session,_set_values)); steps.append('alvr_api_restored')
         except Exception as exc: steps.append('alvr_api_restore_failed:'+str(exc))
+    steamvr_restored=not any(row.get('kind')=='steamvr' for row in state.get('changes',[]))
+    if not steamvr_restored and owned_ok:
+        try: steamvr_restored=restore_recorded_steamvr(state); steps.append('steamvr_exact_keys_restored')
+        except Exception as exc: steps.append('steamvr_restore_failed:'+str(exc))
     awake_state = state_path.parent / 'awake.json'
     if awake_state.is_file():
         try:
@@ -385,8 +389,8 @@ def restore(state_path, host=None):
             property_readback[key]={'expected':wanted,'error':str(exc),'matches':False}; properties_ok=False
     vd_checks=[row for row in verification if str(row.get('label','')).startswith('virtual_desktop')]
     vd_hashes_match=all(x.get('error') is None and x.get('current_matches') is True for x in vd_checks)
-    ok=files_ok and runtime_restored and properties_ok and client_stopped and awake_restored and owned_ok and alvr_restored
-    state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'pc_configuration_verify_only;_owner_selector_or_dashboard_must_restore_drift','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'owned_runtime':owned_results,'owned_runtime_stopped':owned_ok,'alvr_restored':alvr_restored,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
+    ok=files_ok and runtime_restored and properties_ok and client_stopped and awake_restored and owned_ok and alvr_restored and steamvr_restored
+    state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'pc_configuration_verify_only;_owner_selector_or_dashboard_must_restore_drift','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'owned_runtime':owned_results,'owned_runtime_stopped':owned_ok,'alvr_restored':alvr_restored,'steamvr_restored':steamvr_restored,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
     atomic_write(state_path,state); return state['restoration']
 
 def health_decision(sample, state, now):
@@ -538,6 +542,36 @@ def restore_recorded_alvr(state, api):
         set_values(values); after=session()
         if any(_path_get(after,key) != value for key,value in values.items()): raise Refusal('ALVR rollback readback differs')
     return bool(values)
+
+def _path_present(value, dotted):
+    try: _path_get(value,dotted); return True
+    except (KeyError, TypeError): return False
+
+def apply_steamvr_changes(state_path, settings_path, values, arm_path=ARM):
+    """Record presence/value, then change exact SteamVR JSON keys while owned runtime is live."""
+    state=mutable_state(state_path,arm_path); path=Path(settings_path); current=json_read(path)
+    rows=[]
+    for key, expected in values.items():
+        present=_path_present(current,key); old=_path_get(current,key) if present else None
+        rows.append(record_change(state_path,'steamvr',key,present,old,expected,arm_path))
+        _path_set(current,key,expected)
+    atomic_write(path,current)
+    actual=json_read(path)
+    if any(_path_get(actual,key)!=expected for key,expected in values.items()): raise Refusal('SteamVR setting readback differs')
+    return rows
+
+def restore_recorded_steamvr(state):
+    rows=[row for row in state.get('changes',[]) if row.get('kind')=='steamvr']
+    if not rows: return True
+    record=next((row for row in state['snapshot']['configuration_snapshots'] if row.get('label')=='steamvr_settings'),None)
+    if not record or not record.get('source'): raise Refusal('SteamVR settings source not recorded')
+    path=Path(record['source']); current=json_read(path)
+    for row in rows:
+        if row['before_present']: _path_set(current,row['key'],row['before_value'])
+        else: _path_delete(current,row['key'])
+    atomic_write(path,current); actual=json_read(path)
+    return all((_path_present(actual,row['key']) == row['before_present'] and
+                (not row['before_present'] or _path_get(actual,row['key']) == row['before_value'])) for row in rows)
 
 def pid_alive(pid):
     if not isinstance(pid, int) or pid <= 0: return False
