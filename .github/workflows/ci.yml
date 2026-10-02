@@ -22,6 +22,8 @@ jobs:
       - name: Install CPU chart-test dependencies
         run: python3 -m pip install --disable-pip-version-check -r tools/quest3/requirements-cpu.txt
       - run: python3 -m unittest discover -s tests -v
+      - name: Geometry-control contract tests
+        run: python3 -m unittest tools.tests.test_resolution -v
       - run: g++ -std=c++17 -Wall -Werror tools/pyroclient/decode_path_test.cpp -o /tmp/decode-path && /tmp/decode-path
       - run: g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/pass_profile_test.cpp -o /tmp/pass-profile && /tmp/pass-profile
       - name: GPU failure-policy state-machine test
