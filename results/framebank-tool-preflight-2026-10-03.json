@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "kind": "framebank_packaged_tools_cpu_preflight",
+  "ci_run": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37089583733",
+  "repository_commit": "c2c49f265090e076ed4d7c1301d1a7cef7b80477",
+  "all_four_ci_jobs_passed": true,
+  "matching_pair_artifacts_verified": true,
+  "windows_archive_sha256": "c749576aa592dcb3cc32a8004b92008b0be5655e056b4f602919b9da839b6efa",
+  "android_archive_sha256": "26531a625db86a6e066b612f529b9a36570e0b7a1ce444fd430a002233ba0d86",
+  "tools_preflight_passed": false,
+  "failure_reason": "offline tool source provenance mismatch",
+  "diagnosis": {
+    "field": "source_lock_sha256",
+    "windows_tools_manifest_raw_crlf_sha256": "27cd47e3932b4924bc573a7433a768230c06bfadb7a3c1be6d9f2aaf9907bc46",
+    "canonical_lf_sha256": "b4a61b3ae0bdff818de18c8f97a1a2a1ba80ace7bf636de48093d22ad5aba23b",
+    "build_metadata_uses_canonical_hash": true,
+    "scorer_source_manifest_matches": true,
+    "dependency_revision_changed": false
+  },
+  "correction": {
+    "source_commit": "366eebbef9008fae607a0bccf49f1de31392c6aa",
+    "pull_request": "https://github.com/ljk1291/Quest3-Pyrowave/pull/8",
+    "mechanism": "Use the build-metadata canonical lock fingerprint in both manifests and run the full CPU-only package verifier before artifact upload",
+    "local_canonical_producer_matches_build_metadata": true,
+    "local_harness_scorer_passed": 33,
+    "local_native_reader_skipped": 3,
+    "full_corrected_head_ci_passed": null
+  },
+  "arm_changed": false,
+  "apk_installed": false,
+  "settings_changed": false,
+  "gpu_workload_started": false,
+  "vr_launched": false,
+  "metro_quality_improvement": null,
+  "fresh_submissions_per_s": null,
+  "display_fps": null,
+  "optical_latency_ms": null
+}

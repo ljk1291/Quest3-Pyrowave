@@ -250,3 +250,27 @@ Take the first unblocked item. Items marked ∥ are independent.
   attempt. The arm is unchanged. A successful dry run and final scorer CI remain
   prerequisites to Metro scoring. Source/build work is unblocked; the goal
   remains active, with no quality/rate gain or stable-90-Hz pass claimed.
+
+- 2026-10-03, checkpoint actual packaged-tool provenance:
+  The precondition evidence checkpoint merged after
+  [all four CI jobs](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37091525611)
+  passed. WO-1 head `c2c49f2` also passed
+  [all four jobs](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37089583733),
+  but local verification of its downloaded tools correctly refused execution:
+  the Windows tools manifest used a raw CRLF lock hash while build metadata
+  used the canonical LF hash. The paired artifacts themselves verified and
+  the pinned scorer source manifest matched. [Sanitized actual failure](../results/framebank-tool-preflight-2026-10-03.json).
+  Head `366eebb` uses the existing canonical producer and adds CPU-only
+  `framebank verify-tools` against the finished Windows package before upload.
+  It also retains both CI test lists after resolving the integration conflict.
+  **33 local harness/scorer checks and 13 build-contract checks pass**; three
+  native-reader checks still require CI's compiler. The corrected-head
+  [workflow](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37092386837)
+  is building, as is the combined detector source
+  [workflow](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37092388291).
+  The VD Streamer remains resident with unknown connection state; the existing
+  owner request is pending, and its connection gate remains closed. No new
+  window, settings mutation, VR launch or GPU workload ran. The eight-hour arm
+  is unchanged. Its scope remains PC frame-bank work only, with no default,
+  installed-pair, quality, fresh-rate or stable-90-Hz promotion. Source/build
+  work is unblocked and the goal remains active.
