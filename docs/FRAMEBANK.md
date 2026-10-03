@@ -43,3 +43,9 @@ reduce the weighted score by 20·log10(2), within 0.03 dB. A failed gate prevent
 all Metro cells and a passing report. The sanity result is retained separately;
 it checks execution/accumulation, not the perceptual model's suitability for VR.
 Each run requires a fresh private output directory to exclude stale tool output.
+
+Production child logs remain in their private cell/scorer directory, including
+lease revocation and registration failures. The first failed cell ends the matrix
+and writes an invalid partial report; a broken codec or revoked lease is never
+replayed through the remaining cells. Repair the diagnosed failure before a new
+controlled run.

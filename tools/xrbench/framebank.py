@@ -298,8 +298,13 @@ class WindowGuard:
     def run(self,argv,*,cwd:Path,env:dict,timeout_s:float):
         self.status()
         if not isinstance(timeout_s,(int,float)) or not math.isfinite(timeout_s) or timeout_s<=0: raise ValueError("subprocess timeout must be finite and positive")
-        # Disk-backed logs prevent a chatty child from blocking on undrained PIPEs.
-        with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as output:
+        # Retain production logs privately even when registration/lease checks
+        # raise; disk-backed output also avoids undrained PIPE deadlocks.
+        private_logs=Path(cwd).resolve().is_relative_to(_private_root().resolve())
+        log=(tempfile.NamedTemporaryFile(mode="w+t",encoding="utf-8",dir=cwd,
+                                        prefix="command-",suffix=".log",delete=False)
+             if private_logs else tempfile.TemporaryFile(mode="w+t",encoding="utf-8"))
+        with log as output:
             proc=subprocess.Popen(list(argv),cwd=str(cwd),env=env,stdout=output,stderr=output,text=True)
             registered=False
             deadline=time.monotonic()+timeout_s
@@ -573,6 +578,10 @@ def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,
         if not keep_artifacts:
             for p in (ref,wave,decoded,directory/"source-display.y4m",directory/"decoded-display.y4m"): p.unlink(missing_ok=True)
             for p in directory.glob('crop-*.y4m'): p.unlink()
+        if row.get("error"):
+            # Preserve the invalid partial result; do not replay a failing codec
+            # or revoked lease across all remaining frozen configurations.
+            break
     result["source_sha256_end"]=sha256_file(source); result["tool_provenance_end"]={n:sha256_file(_tool_path(v)) for n,v in tools.items()}
     if result["source_sha256_end"]!=result["source_sha256_start"]: result["failure_reasons"].append("source_changed_during_run")
     if result["tool_provenance_end"]!=result["tool_provenance_start"]: result["failure_reasons"].append("tool_changed_during_run")

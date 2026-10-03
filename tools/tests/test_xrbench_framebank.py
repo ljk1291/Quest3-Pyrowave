@@ -227,6 +227,53 @@ class FrameBankTests(unittest.TestCase):
         public=fb.sanitized_report({"complete":False,"failure_reasons":["cell_failed"],"cells":[{"wavelet":"haar","source_frame_identity":["private"],"error":"cell_failed"}]})
         self.assertNotIn("source_frame_identity",public["cells"][0]);self.assertFalse(public["complete"])
 
+    def test_failed_decoder_stops_the_frozen_matrix(self):
+        with self.tmp() as t:
+            t=Path(t); src=tiny_source(t)
+            plan=fb.build_plan(src,24,projection_evidence="test",display_eye=(4,4),
+                               geometries=((4,4),),wavelets=("haar",),rates_mbps=(300,500),fixture=True)
+            plan_path=t/"plan.json"; plan_path.write_text(json.dumps(plan))
+            fb._private_root().mkdir(parents=True,exist_ok=True)
+            with tempfile.TemporaryDirectory(dir=fb._private_root()) as out_name:
+                out=Path(out_name)/"new"; calls=[]
+                def child(self,argv,**kwargs):
+                    calls.append(argv)
+                    if len(argv)==4:
+                        shutil.copyfile(argv[1],argv[2]); return 0,"",""
+                    return 1,"terminal decoder failure",""
+                tools={k:sys.executable for k in ("encode","decode","ffmpeg","psnr_hvs_m_h")}
+                with mock.patch.object(fb.WindowGuard,"status",return_value=lease()),mock.patch.object(fb.WindowGuard,"run",child):
+                    result=fb.run_plan(plan_path,src,out,tools,t/"window",allow_fixture=True)
+                self.assertFalse(result["complete"])
+                self.assertEqual(result["failure_reasons"],["decode_failed"])
+                self.assertEqual(len(result["cells"]),1); self.assertEqual(len(calls),2)
+                self.assertFalse((out/"cell-01-haar-500-4x4").exists())
+
+    def test_private_command_log_survives_lease_revocation(self):
+        class Proc:
+            pid=123
+            def __init__(self): self.stopped=False
+            def poll(self): return 0 if self.stopped else None
+            def terminate(self): self.stopped=True
+            def wait(self,timeout=None): return 0
+        class Registry:
+            def register(self,*args): pass
+            def unregister(self,*args): pass
+        proc=Proc()
+        def spawn(*args,**kwargs):
+            kwargs["stdout"].write("decoder diagnostic before revocation\n")
+            kwargs["stdout"].flush()
+            return proc
+        fb._private_root().mkdir(parents=True,exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=fb._private_root()) as out_name:
+            cwd=Path(out_name)
+            with mock.patch("xrbench.framebank.subprocess.Popen",side_effect=spawn),mock.patch.object(fb.WindowGuard,"status",side_effect=[lease(),PermissionError("revoked")]):
+                with self.assertRaises(PermissionError):
+                    fb.WindowGuard(Path("window"),job_registry=Registry()).run(["fake"],cwd=cwd,env={},timeout_s=1)
+            self.assertTrue(proc.stopped)
+            logs=list(cwd.glob("command-*.log")); self.assertEqual(len(logs),1)
+            self.assertIn("diagnostic before revocation",logs[0].read_text())
+
     def test_codec_environment_clears_inherited_experiments(self):
         env,record=fb.codec_environment({'PATH':'keep','PYROWAVE_FORCE_FRAGMENT':'1',
                 'PYROWAVE_FUSED_HAAR':'1','pyrowave_batch_dequant':'1','PYROWAVE_LEGACY_GAINS':'1'},'haar')
