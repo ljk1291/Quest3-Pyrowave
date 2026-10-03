@@ -49,3 +49,18 @@ than being silently clipped or moved.
 Fence-first ranking must expose edge PSNR (higher better) and shimmer p99/mean
 (lower better), then calibrated HVS for comparable regions, with VMAF last. If
 these disagree, retain the tradeoff instead of asserting universal superiority.
+
+## Centre/periphery and softness comparisons
+
+The optional boolean `region_mask` restricts the threshold population and selected
+pixels to a fixed band, without creating artificial edges at the band boundary.
+The report binds its shape, pixel count, byte hash and caller's serializable band
+descriptor. Band geometry comes from the shared foveation transform. An empty band
+is explicitly invalid rather than a perfect result.
+
+`score_against_references` compares a decode with both the sharp source and an
+optional matching-blur reference. Both use the **same sharp-reference Sobel mask**,
+so deliberate blur cannot erase the edge population being evaluated. Per-frame
+reference, decode and mask-reference hashes are kept separately. Temporal deltas
+are relative to the chosen sharp/blur reference respectively. Blur-reference
+quality does not replace the sharp-reference score or certify visible equivalence.
