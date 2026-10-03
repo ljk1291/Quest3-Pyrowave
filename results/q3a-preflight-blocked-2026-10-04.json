@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "kind": "q3a_quality_preflight",
+  "sampled_at_utc": "2026-10-03T23:38:04.364976+00:00",
+  "harness_commit": "3dfa1c004019eaecd4df8d4eb6ced33b7b5577ec",
+  "frozen_plan_sha256": "e67a3bf7269239f5b677b00cce5eb8073ab090e39329c7359392ae298c8cc083",
+  "planned_nvenc_cells": 10,
+  "source_sha256": "e61163143ec9e75634fc89fcc06b3bb007667a53d94a0cbf97a39c09b452a0c2",
+  "comfy_queue": {
+    "known": true,
+    "running": 1,
+    "pending": 0
+  },
+  "gpu": {
+    "free_vram_mib": 603,
+    "total_vram_mib": 16303,
+    "overall_load_percent_context_only": 100,
+    "device_error": null
+  },
+  "quality_stop_reasons": [
+    "free_vram_below_margin",
+    "comfy_queue_active_or_unknown",
+    "compute_backend_active_or_unknown"
+  ],
+  "free_vram_safety_margin_mib": 2048,
+  "lease_created": false,
+  "gpu_benchmark_started": false,
+  "headset_test_started": false,
+  "owner_action_required": "Finish or pause ComfyUI and free at least 2048 MiB VRAM; confirm before a fresh preflight.",
+  "goal_status": "active; stopped for owner at first occurrence of this blocker",
+  "notes": "Overall utilization is context only; the stops are compute-backend activity and insufficient free VRAM. No source/codec cell was rerun."
+}
