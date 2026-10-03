@@ -241,6 +241,10 @@ class BenchTests(unittest.TestCase):
         state['property:debug.q3pw.direct_eye_copy']['value']=''
         state['property:debug.oculus.forceDisplayScaling']['value']='1'
         self.assertTrue(experiment_effective(state)['enabled']['display_scaling'])
+        state['property:debug.q3pw.layer_filter']['value']='2'
+        self.assertEqual(experiment_effective(state)['enabled']['layer_filter'],2)
+        state['property:debug.q3pw.layer_filter']['value']='7'
+        self.assertEqual(experiment_effective(state)['enabled']['layer_filter'],0)
 
     def test_effective_wavelet_prefers_haar_over_cdf53(self):
         from tools.quest3.bench import effective_pyrowave_config

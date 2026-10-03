@@ -27,6 +27,7 @@ EXPERIMENT_PROPERTIES = (
     'debug.q3pw.haar_fused','debug.q3pw.dequant_batch','debug.q3pw.convert_compute',
     'debug.q3pw.fragment_min_usage','debug.q3pw.optimal_ahb_usage','debug.q3pw.loop_probe',
     'debug.q3pw.runtime_display_time','debug.q3pw.pass_profile','debug.q3pw.hide_performance_overlay',
+    'debug.q3pw.layer_filter',
     'debug.xrwired.pyro_precision','debug.xrwired.early_poll',
     'debug.xrwired.perf_level',
 )
@@ -370,6 +371,7 @@ def experiment_effective(state):
         'runtime_display_time':value('debug.q3pw.runtime_display_time')=='1',
         'pass_profile':value('debug.q3pw.pass_profile')=='1',
         'hide_performance_overlay':value('debug.q3pw.hide_performance_overlay')=='1',
+        'layer_filter':integer('debug.q3pw.layer_filter') if integer('debug.q3pw.layer_filter') in (1,2,3) else 0,
     }
     # direct_flip_y is recorded but not treated as an opt-in experiment: source defaults it true.
     return {'raw':raw,'verified':True,'enabled':enabled,
