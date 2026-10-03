@@ -39,6 +39,24 @@ class FrameBankTests(unittest.TestCase):
         self.assertNotIn(b' C420 ',header)
         self.assertIn(b'XCOLORRANGE=FULL',header)
 
+    def test_pinned_decoder_header_adapter_preserves_every_sample(self):
+        with self.tmp() as directory:
+            path=tiny_source(Path(directory),chroma='420')
+            before=fb.frame_records(path)
+            data=path.read_bytes().replace(b'C420jpeg',b'C420',1)
+            data=data.replace(b'YUV4MPEG2 ',b'YUV4MPEG2 YUV4MPEG2 ',1)
+            path.write_bytes(data)
+            payload=data.split(b'\n',1)[1]
+            record=fb.canonicalize_decoded_header(path)
+            self.assertTrue(record['frame_payload_unchanged'])
+            self.assertEqual(path.read_bytes().split(b'\n',1)[1],payload)
+            self.assertEqual(fb.frame_records(path),before)
+            self.assertIn(b'C420jpeg',path.read_bytes().split(b'\n',1)[0])
+            self.assertFalse(fb.canonicalize_decoded_header(path)['changed'])
+            for token in (b'C420mpeg2',b'C420p10',b'C420paldv'):
+                path.write_bytes(data.replace(b'C420 ',token+b' ',1))
+                with self.assertRaises(ValueError): fb.canonicalize_decoded_header(path)
+
     def test_tiny_y4m_identity_schema_and_default_matrix(self):
         with self.tmp() as temp:
             source = tiny_source(Path(temp)); plan = fb.build_plan(source, 24.2, projection_evidence="test-projection", display_eye=(4,4), geometries=((4,4),(2,2)), fixture=True)

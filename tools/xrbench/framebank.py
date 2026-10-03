@@ -521,6 +521,42 @@ def _assert_same_frames(reference,decoded,ref_info):
     if (dec_info.width,dec_info.height,dec_info.frames,dec_info.chroma,dec_info.color_range,dec_info.fps_num,dec_info.fps_den)!=(ref_info.width,ref_info.height,ref_info.frames,ref_info.chroma,ref_info.color_range,ref_info.fps_num,ref_info.fps_den): raise ValueError("decoded_identity_or_geometry_mismatch")
     return dec_info
 
+def canonicalize_decoded_header(path:Path):
+    """Adapt the pinned decoder's plain C420 spelling; never change samples.
+
+    d2997ac decode.cpp emits C420 and repeats YUV4MPEG2 in its params.
+    Only its 8-bit JPEG-sited spelling and C444 are accepted here. Other
+    chroma positions/precision must not be relabelled as JPEG-sited samples.
+    """
+    path=Path(path)
+    with path.open('rb') as stream: original=stream.readline(4097)
+    tokens=original.decode('ascii').strip().split()
+    chroma=[token for token in tokens if token.startswith('C')]
+    if len(chroma)!=1 or chroma[0] not in ('C420','C420jpeg','C444'):
+        raise ValueError('unsupported decoded chroma spelling or precision')
+    info=_parse_header(original,path);canonical=_header(info)
+    record={'original_header':original.decode('ascii').strip(),
+            'canonical_header':canonical.decode('ascii').strip(),'changed':original!=canonical}
+    if original==canonical: return record
+    temporary=path.with_suffix(path.suffix+'.canonical.tmp')
+    payload=hashlib.sha256()
+    try:
+        with path.open('rb') as source,temporary.open('xb') as dest:
+            if source.readline(4097)!=original: raise ValueError('decoded header changed during normalization')
+            dest.write(canonical)
+            for chunk in iter(lambda:source.read(1024*1024),b''):
+                payload.update(chunk);dest.write(chunk)
+        copied=hashlib.sha256()
+        with temporary.open('rb') as stream:
+            stream.readline()
+            for chunk in iter(lambda:stream.read(1024*1024),b''): copied.update(chunk)
+        if copied.digest()!=payload.digest(): raise ValueError('decoded payload changed during header normalization')
+        temporary.replace(path)
+        record['frame_payload_sha256']=payload.hexdigest()
+        record['frame_payload_unchanged']=True
+        return record
+    finally: temporary.unlink(missing_ok=True)
+
 def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,*,arm:Path|None=None,status_command:Sequence[str]|None=None,command_timeout_s:float=900,keep_artifacts:bool=False,allow_fixture:bool=False,score_fn=score_pair,tools_metadata:Path|None=None,supervised=False):
     raw_plan=Path(plan_path).read_bytes();plan=validate_plan(json.loads(raw_plan)); source=Path(source); private_out=_private_path(private_out); guard=WindowGuard(window,arm,status_command,supervised=supervised)
     if private_out.exists(): raise FileExistsError('private output must be a fresh directory')
@@ -561,6 +597,7 @@ def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,
                     raise RuntimeError('decoder_configuration_not_confirmed')
                 row['codec_environment'].update(observed_decoder_path='compute',observed_encoder_wavelet=wavelet_name,
                                                  observed_decoder_wavelet=wavelet_name)
+            row['decoded_y4m_header']=canonicalize_decoded_header(decoded)
             dec_info=_assert_same_frames(ref,decoded,ref_info);row["decoded_frame_identity"]=[{"cell_frame":i,"source_frame":x["source_frame"],"reference_sha256":x["reference_sha256"],"decoded_sha256":d} for (i,_,d),x in zip(iter_y4m(decoded,dec_info),ids)]
             if len(row["decoded_frame_identity"])!=len(ids): raise ValueError("decoded_identity_or_geometry_mismatch")
             common=dict(frames=ref_info.frames,guard=guard,env=env,timeout_s=command_timeout_s)
@@ -618,7 +655,7 @@ def report_json(result):
     return json.dumps(transport(result),indent=2,allow_nan=False)
 
 def sanitized_report(result):
-    keep=("wavelet","rate_mbps","fps","eye_width","eye_height","encoded_chroma","cap_bytes","bits_per_pixel","actual_container_bytes","codec_environment","codec_only","displayed","crops","error")
+    keep=("wavelet","rate_mbps","fps","eye_width","eye_height","encoded_chroma","cap_bytes","bits_per_pixel","actual_container_bytes","codec_environment","decoded_y4m_header","codec_only","displayed","crops","error")
     return {"schema":SCHEMA,"kind":"pyrowave_frame_bank_sanitized","complete":result.get("complete") is True,"failure_reasons":list(result.get("failure_reasons",[])),"frozen_plan_sha256":result.get("frozen_plan_sha256"),"source_sha256":result.get("source_sha256_end"),"tool_provenance":result.get("tool_provenance_end"),"tools_build_provenance":result.get('tools_build_provenance'),"hvs_gpu_sanity":result.get('hvs_gpu_sanity'),"projection":result.get("projection"),"crop_definitions":result.get("crop_definitions"),"cells":[{k:r.get(k) for k in keep} for r in result.get("cells",[])],"optical_latency_ms":None,"display_fps":None}
 def parse_crops_argument(value:str):
     try:
