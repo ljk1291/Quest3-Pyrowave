@@ -189,3 +189,14 @@ Take the first unblocked item. Items marked ∥ are independent.
   rate gain or stable 90-Hz pass is claimed. Source/build work remains unblocked;
   chart/property/install controller orchestration and global selector support
   remain explicit WO-0 follow-up scope. The goal remains active.
+
+- 2026-10-03, follow-up verification of the scorer and process cleanup:
+  WO-1's Linux log confirms all 32 checks passed, including three compiled
+  native-reader checks. The next Windows build exposed source templates omitted
+  by an overly broad copy exclusion; head `828a12b` preserves those inputs and
+  passes 30 local checks (three native-reader checks require CI's compiler).
+  No dependency pin changed. WO-0 head `6d7b8cc` also handles an owned child
+  that completes before cleanup; all three disposable Windows process checks
+  pass. Final-head full CI and the guarded dry run remain required. The owner
+  approved the existing eight-hour window, without extending its PC-only scope.
+  No hardware workload has started, and no performance or quality gain is claimed.
