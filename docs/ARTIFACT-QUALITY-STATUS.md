@@ -154,3 +154,38 @@ Take the first unblocked item. Items marked ∥ are independent.
   No unattended window or codec/scorer workload has started. No quality gain,
   fresh-rate gain or stable 90-Hz pass is claimed. Source/build work is unblocked;
   the goal remains active.
+
+- 2026-10-03, checkpoint exact rollback and native-frame scorer:
+  [WO-4](https://github.com/ljk1291/Quest3-Pyrowave/pull/6) merged after
+  [all four CI jobs](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37081909500)
+  passed; layer filtering remains default-off. The frozen Metro preparation
+  record also merged after [full CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37082594282).
+  [WO-0](https://github.com/ljk1291/Quest3-Pyrowave/pull/10) now proves exact saved
+  ALVR/SteamVR bytes only after owned runtimes stop and all differences match
+  recorded changes. It rejects owner drift and corrupt backups, retries a real
+  mutex timeout finitely, and retains a process handle through verified cleanup.
+  Its PC/install-only arms cannot mutate VR/device settings; runtime manifest
+  bytes are checked as well as registration. **82 focused fake-host tests and
+  two disposable Windows CPU-child checks pass locally.** Native identity queries
+  avoid a shell lookup that could miss short scorer jobs. The earlier 60114c8
+  workflow passed; [the final 75c6257 workflow](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37086277788)
+  and required armed dry run remain.
+  [WO-1](https://github.com/ljk1291/Quest3-Pyrowave/pull/8)'s next real Windows
+  failure was [missing FFmpeg/PkgConfig](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37081762449).
+  Review additionally found the upstream predictive-video reader discarded
+  frame zero. Its isolated raw-Y4M target now retains every frame, extracts the
+  pinned HVS functions unchanged, packages their unchanged shader and licenses,
+  and binds the PE import inventory to build provenance. The harness requires
+  exact scorer frame counts, fresh output directories and a finite owned-GPU
+  identity/amplitude sanity gate before Metro scoring. **29 local harness/scorer
+  tests pass; three native-reader tests await CI's g++**. [Current Linux and Android
+  jobs](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37085826097) passed;
+  Windows/full-pair validation remains. The sanity gate has not run on hardware.
+  A CPU-only check reverified the retained stable d1 artifact pair and all six
+  installed server binaries; it did not re-query/install the Quest APK or start
+  VR. The owner's exact eight-hour exception remains recorded, ending 08:44:31
+  Europe/Berlin, with only `frame_bank_pc` allowed and the arm file unchanged.
+  No unattended window or codec/scorer GPU workload has opened. No quality gain,
+  rate gain or stable 90-Hz pass is claimed. Source/build work remains unblocked;
+  chart/property/install controller orchestration and global selector support
+  remain explicit WO-0 follow-up scope. The goal remains active.
