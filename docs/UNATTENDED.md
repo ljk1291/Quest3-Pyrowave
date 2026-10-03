@@ -38,6 +38,17 @@ Until then the owner may write it by hand. The path is ignored by git
   45 minutes remaining.
 - `allow` narrows what the window may do. Anything not listed is forbidden for that window.
 
+### Owner exception, 2026-10-03
+
+The owner explicitly approved **eight hours instead of six for the current once
+window**, from **00:44:31 to 08:44:31 Europe/Berlin on 2026-10-03**, with
+`allow: ["frame_bank_pc"]`. This approval overrides the six-hour duration and the
+existing arm's `max_window_hours: 6` for that exact interval only. The supervisor
+records the exception in `presets/unattended-owner-exceptions.json` and its lease
+status. Agents leave the owner's arm file unchanged. Other windows retain the
+six-hour limit; all preconditions, guards, restoration and action restrictions
+still apply. This approval does not authorize launching Metro unattended.
+
 ## 2. Preconditions (checked and recorded before any change)
 
 Any failure means no hardware actions in this window. Record the reason and continue

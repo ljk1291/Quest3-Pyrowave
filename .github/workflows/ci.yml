@@ -74,6 +74,10 @@ jobs:
           echo "XRWIRED_ANDROID_SDK=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "XRWIRED_NDK=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target aarch64-linux-android
+      - name: Compositor filter policy checks (no OpenXR runtime)
+        run: |
+          rustup run "$RUST_TOOLCHAIN" rustc --edition=2021 --test "$XRWIRED_INPUTS/research/ALVR-20.13.0/alvr/client_openxr/src/layer_filter.rs" -o /tmp/layer-filter-policy
+          /tmp/layer-filter-policy
       - name: Restore pinned Android build tools
         id: android_tools_cache
         uses: actions/cache/restore@v4
