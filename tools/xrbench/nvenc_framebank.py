@@ -1034,6 +1034,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                     streams.append({"eye": eye_name, "profile": stream_cell["nvenc_profile"], "bitstream": {**probe,
                         "initial_idr_evidence": idr_evidence,
                         "actual_elementary_stream_bytes": eye_stream.stat().st_size,
+                        "actual_elementary_stream_sha256": fb.sha256_file(eye_stream),
                         "actual_mbps_external_f90_normalization": eye_stream.stat().st_size * 8 * cell["fps"] / eye_info.frames / 1_000_000},
                         "native_decoded_raw": native_record,
                         "encode_process_completion_diagnostic": timing,
@@ -1044,6 +1045,8 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                 row["streams"] = streams
                 row["bitstream"] = {"layout": "dual_eye", "stream_count": 2,
                     "actual_elementary_stream_bytes": sum(x["bitstream"]["actual_elementary_stream_bytes"] for x in streams),
+                    "actual_elementary_stream_sha256_by_eye": {
+                        x["eye"]: x["bitstream"]["actual_elementary_stream_sha256"] for x in streams},
                     "actual_mbps_external_f90_normalization": sum(x["bitstream"]["actual_mbps_external_f90_normalization"] for x in streams),
                     "per_stream_mbps_requested": cell["per_stream_mbps"]}
             else:
@@ -1053,7 +1056,9 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                 idr_evidence = validate_initial_idr(stream, cell["codec"], ref_info.frames)
                 probe_json = directory / "bitstream-probe.json"
                 probe = validate_probe(_run_json(guard, probe_command(needed["ffprobe"], stream, probe_json), probe_json, directory, command_timeout_s), row, ref_info.frames)
-                row["bitstream"] = {**probe, "initial_idr_evidence": idr_evidence, "actual_elementary_stream_bytes": stream.stat().st_size,
+                row["bitstream"] = {**probe, "initial_idr_evidence": idr_evidence,
+                    "actual_elementary_stream_bytes": stream.stat().st_size,
+                    "actual_elementary_stream_sha256": fb.sha256_file(stream),
                     "actual_mbps_external_f90_normalization": stream.stat().st_size * 8 * cell["fps"] / ref_info.frames / 1_000_000}
                 native_raw = directory / "decoded-native.raw"
                 code, _, _, decode_timing = _run_timed(guard, decode_command(needed["ffmpeg"], stream, native_raw, ref_info.frames, probe["pix_fmt"]), directory, command_timeout_s)
@@ -1087,10 +1092,11 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
         (private_out / "nvenc-framebank-progress.json").write_text(fb.report_json(result), encoding="utf-8")
         if not keep_artifacts and not row.get("error"):
             # Raw 90-frame C420 and native Main10 payloads are large. Their
-            # hashes/scores/probes have already been persisted, whereas a
-            # failed scoring cell must remain resumable without re-encoding.
+            # hashes/scores/probes have already been persisted. Keep the small
+            # elementary stream plus its hash for decoder-only rechecks; a
+            # failed scoring cell remains resumable without re-encoding.
             for path in directory.iterdir():
-                if path.is_file() and path.suffix.lower() in (".y4m", ".raw", ".h264", ".hevc", ".av1", ".obu"):
+                if path.is_file() and path.suffix.lower() in (".y4m", ".raw"):
                     path.unlink()
         if row.get("error"):
             break
