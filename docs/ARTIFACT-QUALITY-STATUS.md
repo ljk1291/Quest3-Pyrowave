@@ -36,9 +36,9 @@ Read with Get-NetAdapter; no network changes. Negotiated link speed is not goodp
 
 ## Queue (current owner goal)
 
-1. Fence metric source work and backfill: freeze the mesh-over-fire rectangle;
-   Sobel top-5% reference mask, edge PSNR-Y/p99.9 error, temporal residual mean/p99
-   over explicitly indexed 10–89; backfill full-FOV Haar/500, 5/3/1000, 9/7/1000.
+1. Fence metrics and three-cell backfill are complete: [ranked report](../results/fence-backfill-2026-10-04.md).
+   Tight left-eye rectangle (1740,1310,240,274); all 270 regenerated decode hashes
+   match retained evidence. Keep both 1–90 and 10–89 windows and reference-only masks.
 2. WO-10 first: opt-in tangent FOV crop (default 1/1), client reports/projection,
    server density-preserving dimensions, logs and both-eye/asymmetry/alignment tests.
 3. In parallel, revised Q3a adapter and 15 offline cells (13 cropped + two full-FOV
@@ -542,3 +542,35 @@ Take the first unblocked item. Items marked ∥ are independent.
   replaced the active queue and Q3 schedule, and retained historical evidence.
   Get-NetAdapter readback confirms 2.5 Gbps / driver 10.73.813.2024; no settings
   changed. Current owner goal supplies finite offline lease authorization only.
+
+- 2026-10-04 (fence metrics/backfill checkpoint): [PR #23](https://github.com/ljk1291/Quest3-Pyrowave/pull/23)
+  merged as `5f320c0` after [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37160444658)
+  and 14 local CPU tests. Backfilled Haar/500, 5/3/1000 and 9/7/1000 at full FOV;
+  exact 270/270 retained decode hashes match. Trimmed-window edge PSNR is
+  26.117 / 33.286 / 34.583 dB; temporal residual p99 is 44 / 24 / 21 luma codes.
+  All three leases closed with zero owned jobs and no cleanup errors. Two retained
+  orchestration interruptions (private-identity lookup and unreadable status response)
+  were corrected without repeating an encode/decode. No optical/timing claim.
+  [Report](../results/fence-backfill-2026-10-04.md), [JSON](../results/fence-backfill-2026-10-04.json).
+  Exact offline crop offsets: left (278,274), right (170,274), size 2624×2776.
+  wood_gravel_region is partially excluded; fence and three other fixed crops fit.
+  [Geometry and effective FOV](../results/q3-crop-geometry-2026-10-04.json) preserve
+  density and explicitly distinguish fixed height 2776 from 0.85×3232=2747.2.
+  WO-10, WO-8, revised Q3 and WO-13 source work are active on separate branches;
+  Q3a/Q3b and the final stable-signed pair remain incomplete. No owner blocker.
+
+- 2026-10-04 (source review and Q3 preparation): [PR #28](https://github.com/ljk1291/Quest3-Pyrowave/pull/28)
+  merged as `9944e63` after [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37161080084),
+  adding reference-only band masks and sharp/matching-blur scoring. [WO-11 design PR #29](https://github.com/ljk1291/Quest3-Pyrowave/pull/29)
+  merged as `961f1aa` after [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37161552217).
+  Q3a's native C420 crop is prepared without resampling: 90 frames, 5248x2776 stereo,
+  SHA256 `4c833e175610488ffa05a8037e52c166424db8308a67a2bfed4ed48861fad2e5`.
+  WO-10 is in native CI. WO-13's reviewed follow-up now measures delayed ACKs,
+  retains skipped/partial/unacknowledged slots, and bounds receiver teardown;
+  11 CPU tests pass, native CI pending. The reconstructed stock-codec audit found
+  that Windows NVENC does not explicitly apply the H.264 High-profile setting;
+  two-eye H.264 Q3 rows remain offline proxies, not selectable live profiles.
+  Before Q3a runs, complete per-frame encoder-call timing/probe evidence and its
+  CPU CI. Before Q3b runs, finish WO-8's actual reduced-plane codec path and
+  Python/shader area-filter parity. No owner-dependent blocker; no new GPU,
+  headset, settings, installed-pair or arm-file changes at this checkpoint.
