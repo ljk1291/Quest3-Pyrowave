@@ -65,3 +65,11 @@ def test_late_fault_preserves_final_bytes(tmp_path):
     import pytest
     with pytest.raises(u.Refusal): u.record_terminal_fault(state,'decoder')
     assert state.read_bytes()==before
+
+
+def test_escaping_restore_body_publishes_failure(monkeypatch,tmp_path):
+    state=tmp_path/'state.json'; u.atomic_write(state,{'restoration':{'status':'pending'}})
+    monkeypatch.setattr(u,'_restore_locked',lambda *a,**k: (_ for _ in ()).throw(RuntimeError('boom')))
+    import pytest
+    with pytest.raises(RuntimeError): u.restore(state)
+    assert u.json_read(state)['restoration']['status']=='restore_failed'
