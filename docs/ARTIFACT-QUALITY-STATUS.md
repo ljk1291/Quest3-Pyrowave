@@ -274,3 +274,31 @@ Take the first unblocked item. Items marked ∥ are independent.
   is unchanged. Its scope remains PC frame-bank work only, with no default,
   installed-pair, quality, fresh-rate or stable-90-Hz promotion. Source/build
   work is unblocked and the goal remains active.
+
+- 2026-10-03, checkpoint qualified tools and fresh readiness:
+  [WO-1](https://github.com/ljk1291/Quest3-Pyrowave/pull/8) merged after
+  [all four corrected-head jobs](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37092386837)
+  passed. Its downloaded pair passes local artifact checks; the finished tools
+  pass their source, shader, binary and dependency verifier, and all three native
+  input-only tests pass locally without creating a Vulkan device. The actual
+  artifact commit is `9641944`, the tested PR merge of base `29f4d3f` and head
+  `366eebb`; retain those separately from final integration merge `9815153`.
+  The earlier preflight record's `repository_commit` denoted the CI head
+  `c2c49f2`; its actual artifact commit was `6316110`. This clarification leaves
+  the original evidence intact. [Qualified tools and readiness record](../results/framebank-tools-qualified-2026-10-03.json).
+  [The supervisor corrections](https://github.com/ljk1291/Quest3-Pyrowave/pull/14)
+  also merged after [all four jobs](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37092388291)
+  passed, including four real Windows CPU-process checks. Integration `bc21788`
+  is building in [this workflow](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37094707992).
+  Redundant push workflows of the same PR heads were cancelled; the qualified
+  PR workflows were retained. The fresh bounded readiness check now refuses
+  **only** the VD connection gate. Battery 57%, charging with pinned physical
+  USB proof, 37 °C, thermal status 0, owner idle and zero competing GPU activity
+  all pass. No snapshot, guard or window opened; no settings mutation, VR launch
+  or GPU work occurred, so restoration/VD hash verification remains unset.
+  The owner request to disconnect/exit VD Streamer is pending. The arm is
+  unchanged and still permits only PC frame-bank work until 08:44:31 Berlin.
+  The required successful dry run and GPU scorer sanity gate have not passed.
+  No Metro quality improvement, rate gain or stable 90-Hz pass is claimed.
+  WO-6/7/8 remain gated on actual WO-1 results; the goal remains active while
+  integration CI and the owner-dependent readiness gate remain outstanding.
