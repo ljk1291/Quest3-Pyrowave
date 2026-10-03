@@ -83,6 +83,39 @@ PR #20 and its two follow-ups (supervised CLI and current-session authorization
 note) merged as `c630f3d`; [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37135383541)
 passed. These Python/documentation changes require no new signed client/server pair.
 
+### Q1/Q2 results and Q3 implementation (2026-10-03)
+
+The four Haar/800–1000 cells completed with all 90 frames. Haar/1000 at
+3072×3232 remains below both CDF/500 references on display HVS and VMAF. At
+2560×2688, Haar/1000 improves the aggregate scores, but fails to match either
+CDF/500 reference across every fixed crop on both metrics. Bitrate alone therefore
+does not uniformly replace CDF's quality advantage in this frame bank.
+See the [complete combined table](../results/metro-q1q2-combined-2026-10-03.md).
+
+Q2 initially stopped when ComfyUI became active. After the owner cleared compute
+work, a fresh lease completed the eight CDF cells. The four Haar cells were retained
+without repetition, and the partial CDF score was excluded. All twelve cells passed
+the exact 90-frame FFmpeg/HVS audit; both leases closed cleanly. No headset or settings
+changes were made.
+
+Full-size CDF 9/7/1000 leads the 18-row comparison at **39.342 HVS dB / 99.163 VMAF**.
+Full-size CDF 5/3/1000 scores 38.583 / 98.946 and improves on Haar/1000 by
+3.127 HVS dB / 2.495 VMAF, with both metrics improving on every crop. The reduced-size
+5/3/1000 also improves every crop. Thus WO-6's offline quality prerequisite is met.
+At 800 Mbps, both full-size CDF profiles improve every crop over Haar/1000; the
+reduced-size profiles improve only two crops (5/3) or three (9/7) on both metrics.
+Full-size encoding leads each CDF pair on aggregate display HVS at all three tested
+rates. These are single-capture quality results; they do not qualify decoder timing,
+transport capacity, fresh rate or optical FPS. Keep ~82–83 fresh submissions/s
+separate from stable 90 Hz acceptance.
+
+The [Q3 NVENC frame-bank path](NVENC-FRAMEBANK.md) is implemented with CPU CI and
+a frozen 16-cell plan. Its P4/ULL/CBR configuration is an explicit offline proxy;
+hardware capability, achieved rates and quality remain unmeasured. It preserves
+native decoded samples, records unknown bitstream metadata honestly, and retains
+sanitized load samples. Run that comparison before committing to substantial CDF
+decoder work; PyroWave remains optional under the owner's artifact-first objective.
+
 ## Historical diagnosis and work orders (2026-10-02)
 
 Status: diagnosis and Codex work orders, 2026-10-02. No source, default, pin or

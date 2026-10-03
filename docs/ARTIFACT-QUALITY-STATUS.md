@@ -24,18 +24,25 @@ The complete reconciled Q1–Q4 plan is in [ARTIFACT-QUALITY-PLAN.md](ARTIFACT-Q
   in [ARTIFACT-QUALITY-PLAN.md](ARTIFACT-QUALITY-PLAN.md).
 - **Open fault:** a terminal PC encoder fence timeout at Metro startup in session 07.
   The cause is unknown.
+- **Offline quality screen:** Q1/Q2 are complete. CDF 9/7, 1000 Mbps,
+  3072×3232/eye leads the 18-row comparison at 39.342 HVS dB / 99.163 VMAF.
+  This is a quality candidate; the installed baseline and rate acceptance are unchanged.
+  [Combined table and crop gates](../results/metro-q1q2-combined-2026-10-03.md).
 
 ## Queue
 
-1. Q1/Q2: twelve offline cells, Haar/5/3/9/7 × 800/1000 Mbps ×
-   3072×3232/2560×2688, all 90 frozen frames, under the current owner-supervised lease.
-2. Add Q3 NVENC HEVC/AV1 frame-bank support with recorded low-delay settings and
-   identical image/scoring controls. Post a combined Q1/Q2/500-reference table before
-   headset work. Q3 hardware-codec matrix execution must be reported separately.
+1. Review the complete Q1/Q2/500-reference table before headset work. All twelve
+   requested cells are complete; both supervised leases are closed. The interrupted
+   partial CDF cell is excluded and the four Haar cells were not repeated.
+2. Q3 NVENC HEVC/AV1 support is merged and CPU-tested; the private 16-cell plan is
+   frozen. Execute/report that offline hardware-codec matrix under separate owner
+   authorization before substantial CDF decoder engineering. No Q3 GPU result exists yet.
 3. Q4 TCP goodput/tail-latency evidence before live video above 600 Mbps. Then compare
    quality candidates on Quest for fresh rate and latency under separate authorization.
-4. Gate WO-6 on CDF 5/3's quality gain over Haar/1000. Keep decoder pass profiling,
-   flat-field controls and real-path sampling tests; defer 4:4:4 and 1200 Mbps headroom.
+4. WO-6's offline quality prerequisite is met: CDF 5/3/1000 beats Haar/1000 in both
+   metrics on all four crops at both sizes. Engineering priority still depends on Q3.
+   Keep decoder pass profiling on the faster AHB allocation, flat-field controls and
+   real-path sampling tests; defer 4:4:4 and 1200 Mbps headroom.
 
 ## Previous queue (historical)
 
@@ -458,3 +465,48 @@ Take the first unblocked item. Items marked ∥ are independent.
   supersedes the old 300-Mbps/pass-2 schedule. Q1/Q2 are authorized by the current
   owner message. No new signed pair or headset work; planner handoff file is removed
   only after its content is committed here and in the plan.
+
+- 2026-10-03 (Codex, Q1 complete / Q2 compute-work stop): HVS sanity passed and
+  all four new Haar cells completed. Each passed six exact 90-frame FFmpeg and six
+  calibrated HVS comparisons. At 3072, Haar/1000 scores 35.455 HVS dB / 96.451 VMAF,
+  below both CDF/500 references; at 2560 it scores 36.993 / 97.555, but does not match
+  either CDF/500 reference on both metrics across every crop. The first CDF cell
+  was interrupted when the monitor observed ComfyUI `running=1`; its partial score
+  is excluded. This was the retained compute-backend stop, not desktop/browser load.
+  The lease closed, owned jobs remaining=0, cleanup errors=[]; four completed cells
+  are preserved and eight CDF cells remain. [Partial combined table](../results/metro-q1q2-progress-2026-10-03.md)
+  and [segment evidence](../results/metro-q1q2-segment1-2026-10-03.json).
+  The owner has been asked to clear compute work before resumption. No headset,
+  settings, arm file or installed pair changed; no profile is promoted.
+
+- 2026-10-03 (Codex, Q3 path ready): [PR #21](https://github.com/ljk1291/Quest3-Pyrowave/pull/21)
+  and [telemetry follow-up #22](https://github.com/ljk1291/Quest3-Pyrowave/pull/22)
+  merged after [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37136837252)
+  and [follow-up CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37137832608).
+  The [NVENC adapter](NVENC-FRAMEBANK.md) preserves native 8-bit decoded planes,
+  records actual elementary-stream bytes and observed metadata, and reuses the
+  same source/crops/calibration. It keeps external F90 normalization distinct from
+  raw-bitstream timing and requires sanitized GPU telemetry plus final lease health.
+  Fifty-five focused follow-up CPU tests passed. The real 16-cell HEVC/AV1 plan at
+  200/500/800/1000 Mbps × two sizes is frozen; no NVENC GPU matrix or Quest test ran.
+  These tool changes require no new signed pair. Stable 90 Hz remains unproved;
+  the earlier ~82–83 fresh submissions/s result is separate from offline quality.
+
+- 2026-10-03 (Codex, Q1/Q2 complete after owner-cleared resume): the owner confirmed
+  ComfyUI idle and authorized the eight remaining CDF cells. A fresh finite lease
+  passed HVS sanity and completed all eight without a stop or failure. Combined
+  with the four retained Haar cells, all twelve requested cells passed the audit:
+  72 FFmpeg comparisons with exact PSNR/SSIM indices 1–90 and 72 calibrated HVS
+  comparisons with `ScoredFrames=90`. Both leases closed with no owned jobs or
+  cleanup errors. Both segments retain identical protected Python module hashes,
+  source hash, qualified native tools/build and calibration; separate harness commits,
+  environment records and 1543 GPU-monitor samples are preserved. The interrupted
+  partial cell remains evidence, excluded from scores.
+  [Combined 18-row table](../results/metro-q1q2-combined-2026-10-03.md) and
+  [audited JSON](../results/metro-q1q2-combined-2026-10-03.json).
+  Full-size CDF 9/7/1000 leads at 39.342 HVS dB / 99.163 VMAF. Full-size 5/3/1000
+  improves on Haar/1000 by 3.127 HVS dB / 2.495 VMAF and passes every crop; the
+  reduced-size 5/3/1000 also passes every crop. Reduced-size 800-Mbps CDF profiles
+  do not pass every crop against Haar/1000. WO-6's quality prerequisite is satisfied,
+  but Q3 is the next comparison under the owner's codec-independent objective.
+  No headset work, settings/arm changes, timing claims or default promotion occurred.
