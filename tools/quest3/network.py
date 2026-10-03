@@ -145,11 +145,12 @@ def tcp_sender(ip, port, mbps, seconds, hz, connect=socket.create_connection, cl
     if max_in_flight < 1:
         raise ValueError("max_in_flight must be positive")
     ack_times_ms, schedule_lag_ms, acked, pending_ids = [], [], {}, set()
+    receiver_error = [None]
     lock, stopped = threading.Lock(), threading.Event()
     scheduled = max(0, int(seconds * hz))
     with connect((str(ip), port), timeout=10) as sock:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        sock.settimeout(10)
+        sock.settimeout(period)  # Bounds both writer backpressure and receiver reads.
         # Connection setup is intentionally outside the measured interval.
         def reader():
             pending = b""
@@ -158,13 +159,15 @@ def tcp_sender(ip, port, mbps, seconds, hz, connect=socket.create_connection, cl
                     chunk = sock.recv(4096)
                 except socket.timeout:
                     continue
+                except OSError:
+                    receiver_error[0] = "receiver_socket_error"; return
                 if not chunk:
                     return
                 pending += chunk
                 while len(pending) >= 8:
                     ack, pending = pending[:8], pending[8:]
                     if ack[:4] != TCP_ACK_MAGIC:
-                        stopped.set(); return
+                        receiver_error[0] = "invalid_receiver_ack"; return
                     with lock:
                         item = acked.get(int.from_bytes(ack[4:], "big"))
                         if item is not None and item["ack"] is None:
@@ -190,8 +193,10 @@ def tcp_sender(ip, port, mbps, seconds, hz, connect=socket.create_connection, cl
                 pending_ids.add(frame_id)
             try:
                 sock.sendall(header); sock.sendall(payload)
-            except OSError:
-                break
+            except (OSError, socket.timeout):
+                with lock:
+                    pending_ids.discard(frame_id)
+                    acked.pop(frame_id, None)
         drain_deadline = clock() + period
         while clock() < drain_deadline:
             with lock:
@@ -217,6 +222,9 @@ def tcp_sender(ip, port, mbps, seconds, hz, connect=socket.create_connection, cl
             "schedule_lag_ms_p99": percentile(schedule_lag_ms, .99),
             "frames_on_time_against_period": on_time, "frames_late_against_period": late,
             "late_frame_share_percent": 100.0 * late / scheduled if scheduled else None,
+            "unacknowledged_frames": written - acknowledged,
+            "censored_stall_lower_bound_ms": max((clock() - item["start"]) * 1000.0 for item in completed if item["ack"] is None) if any(item["ack"] is None for item in completed) else None,
+            "receiver_error": receiver_error[0],
             "acknowledged_payload_mbps": (acknowledged * payload_bytes * 8 / elapsed / 1e6) if elapsed else None,
             "delivery_semantics": "sender write start to ACK after the receiver fully read the frame; includes return path and receiver scheduling, not one-way/decode/presentation"}
 
@@ -264,9 +272,8 @@ def run_tcp(adb, serial, ip, receiver, mbps, seconds, hz):
         if proc.poll() is None:
             proc.terminate()
             proc.wait(timeout=5)
-    if sender["frames_acknowledged"] != rx.get("acks_sent"):
-        raise RuntimeError("sender and receiver ACK counts do not match")
-    return {"schema_version": 2, "type": "network_only_tcp_frame_paced", "sender": sender, "receiver": rx,
+    complete = sender["frames_acknowledged"] == rx.get("acks_sent") and sender["receiver_error"] is None
+    return {"schema_version": 2, "type": "network_only_tcp_frame_paced", "complete": complete, "sender": sender, "receiver": rx,
             "wifi_before": wifi_before, "wifi_after": wifi_readback(adb, serial),
             "frame_size_bytes": summarize_frame_sizes([sender["frame_byte_cap"]] * sender["frames_written"]),
             "one_way_latency_ms": None,
