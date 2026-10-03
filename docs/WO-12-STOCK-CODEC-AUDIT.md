@@ -1,41 +1,63 @@
-# WO-12: stock-codec audit
+# WO-12: reconstructed stock-codec audit
 
-This is a source audit, not a hardware-capability or quality result. It describes
-the reconstructed ALVR tree assembled by `tools/ci/fetch_sources.sh`: ALVR
-`7eda092dbf0002281410a4222683ec228700cffb`, followed by
+This is a source audit of the reconstructed Windows ALVR tree, not a hardware
+capability, quality, or live-stream result. The authoritative reconstruction is
+ALVR `7eda092dbf0002281410a4222683ec228700cffb` plus, in order,
 `alvr-20.13.0-server-instrumentation.patch`, `quest3-alvr.patch`,
-`stable-baseline-alvr.patch`, and `fork-identity-alvr.patch`. No FFmpeg frame-bank
-proxy result is evidence of a live ALVR encoder setting or Quest decoder result.
+`stable-baseline-alvr.patch`, and `fork-identity-alvr.patch`, as assembled by
+`tools/ci/fetch_sources.sh`. "Available" below means that this source contains
+the setting/path; it never means a Quest decoder, GPU, negotiated session, or
+elementary stream has been verified.
 
-## What the fork exposes today
+## Actual Windows NVENC path
 
-| Item | Source evidence | Status / limit |
+`alvr/server_openvr/cpp/alvr_server/Settings.cpp` makes
+`m_renderWidth = eye_resolution_width * 2`. `HMD.cpp` exposes the two eyes as
+halves of that one side-by-side render target. The Windows NVENC constructor in
+`platform/win32/VideoEncoderNVENC.cpp` receives that full width and creates one
+`NvEncoderD3D11`; its `Transmit()` submits one texture and calls one
+`BitstreamTap::Start(m_codec, m_renderWidth, m_renderHeight)`. There is no
+per-eye stream/session identifier, second NVENC instance, or stereo pairing
+protocol in this path.
+
+Therefore current stock Windows ALVR is **one side-by-side elementary stream**.
+The Q3a two-per-eye H.264 rows are an offline comparison proxy only. They do not
+describe a selectable live stock-ALVR mode. WO-11 must first design and then
+qualify stream identity, eye pairing, synchronisation, loss recovery and client
+presentation before any live dual-stream claim.
+
+## What source proves, and what it does not
+
+| Requested item | Exact reconstructed source evidence | Accurate conclusion |
 |---|---|---|
-| Codec selection | `tools/quest3/control.py` accepts `H264`, `Hevc`, `AV1`, and `PyroWave`; `patches/quest3-alvr.patch` keeps all four visible variants | Configurable. A selected value still needs server and client readback during a live cell. |
-| H.264 profile | ALVR session schema keeps `h264_profile`; `patches/quest3-alvr.patch` changes the platform capability for high profile | High profile is an available candidate. The final NVENC profile/level must be reported by the actual encoder. |
-| HEVC / AV1 bit depth | ALVR codec choice exists in the packet/client MediaCodec paths (`patches/alvr-20.13.0-server-instrumentation.patch`) | Q3 calls for Main10 / AV1 10-bit, but this fork has no source-only proof that every requested driver setting produces a 10-bit stream. Verify stream metadata and Quest MediaCodec selection per cell. |
-| NVENC preset | ALVR schema exposes `video.encoder_config.nvenc.quality_preset`; `tools/quest3/control.py` deliberately does not set it | P4 and P7 are opt-in Q3 candidates, not current defaults or measured live selections. |
-| Adaptive quantization | ALVR schema exposes `adaptive_quantization_mode` (`patches/alvr-20.13.0-server-instrumentation.patch`) | Spatial AQ is a distinct H.264 Q3 candidate. It must be read back and logged; no claim that it is currently enabled. |
-| Bitrate | `tools/quest3/control.py` writes `ConstantMbps`, checks 1–2000 Mbps, and disables dynamic bitrate | This is a requested payload cap. It does not establish achieved bitrate, Wi-Fi goodput, or decoder acceptance. Owner-planned decoder caps are 200 Mbps for HEVC/AV1 and about 700 Mbps for H.264, pending live verification. |
-| Eye packing | `patches/quest3-alvr.patch` passes one encoded render width (`encoderInfo.width = m_renderWidth`) and the current source has no per-eye stream/session identity | Stock ALVR is one encoded stereo stream. The Q3 H.264 crop uses one 3968-wide stream; full-density per-eye H.264 needs WO-11 design/implementation. |
-| H.264 4096 check | `docs/ARTIFACT-QUALITY-PLAN.md` §2; `tools/xrbench/plan.py` `NVENC_H264_LIMIT = (4096, 2048)` and `fits_limit()` | Treat 4096 pixels per encoded-stream side as a hard preflight check. Stock side-by-side H.264 is therefore at most 2048 pixels per eye horizontally; `h264fit` at 1984×2112 is within it. |
+| Codec selection | `alvr/session/src/settings.rs` defines `H264`, `Hevc`, `AV1`, and the fork's `PyroWave`; `alvr/server_core/src/connection.rs` negotiates AV1 against client `encoder_av1` capability and writes the result to `OpenvrConfig`. | H.264, HEVC and AV1 have selectable server paths. AV1 can fall back to HEVC when the client declines it, so negotiated codec/readback is required. |
+| Quest 3 capability advertisement | `alvr/client_openxr/src/lib.rs` advertises `encoder_high_profile` and `encoder_10_bits` for non-Unknown platforms, and `encoder_av1` for `Quest3`, `Quest3S`, and `Pico4Ultra`. | This fork's Quest 3 client advertises those capabilities. It is not a decoder-rate or bitstream-depth measurement. |
+| H.264 profile on Windows NVENC | `connection.rs` negotiates `h264_profile` and `Settings.cpp` stores it in `m_h264Profile`, but `platform/win32/VideoEncoderNVENC.cpp` never reads `m_h264Profile` or sets an NVENC H.264 profile. The setting is used by the Windows AMF/software paths instead. | The fork does **not** source-prove selection of H.264 High profile on Windows NVENC. Inspect a produced SPS before reporting High profile; do not present the schema setting as an NVENC control. |
+| HEVC / AV1 10-bit | `connection.rs` accepts 10-bit only when the advertised client capability permits it, then writes `use_10bit_encoder`. `VideoEncoderNVENC.cpp` selects `ABGR10`/`YUV420_10BIT` and sets HEVC `pixelBitDepthMinus8 = 2` or AV1 `pixelBitDepthMinus8 = 2` when that flag is true. | There is a source path for 10-bit HEVC and AV1. The default session has `server_overrides_use_10bit = true` and `use_10bit = false` in `settings.rs`, so 10-bit is not the default. A live cell must explicitly read back the effective setting and probe the elementary stream and MediaCodec configuration. |
+| H.264 depth | In `VideoEncoderNVENC.cpp`, only the HEVC and AV1 codec cases set a 10-bit output bit-depth field. | Treat Windows NVENC H.264 here as an 8-bit candidate unless a future implementation changes and verifies that path. |
+| NVENC preset | `settings.rs` defines P1 through P7. `Settings.cpp` forwards `m_nvencQualityPreset`; `VideoEncoderNVENC.cpp::FillEncodeConfig()` maps every value to `NV_ENC_PRESET_P1_GUID` through `P7_GUID` before `CreateDefaultEncoderParams()`. The default is P1. | P4/P7 are real opt-in Windows NVENC controls, requiring a SteamVR restart, not merely Q3 proxy labels. Actual encoder acceptance still needs live logs/bitstream evidence. |
+| Adaptive quantization | `settings.rs` defines Disabled/Spatial/Temporal; default is Spatial. `VideoEncoderNVENC.cpp::FillEncodeConfig()` sets `enableAQ` for Spatial or `enableTemporalAQ` for Temporal. | Spatial AQ is a source-backed NVENC option and is default-selected by the session schema. It is not a measured quality improvement; record the applied setting and encoder output in a live cell. |
+| Bitrate / rate control | `connection.rs` forwards the session fields. `VideoEncoderNVENC.cpp::FillEncodeConfig()` selects CBR/VBR, sets average/max bitrate, and derives nominal VBV buffer and initial delay from bitrate ÷ refresh rate; hidden NVENC overrides can replace those values. `tools/quest3/control.py` writes `ConstantMbps` in its controlled profile helper. | A requested bitrate is configuration, not achieved payload rate, Wi-Fi goodput, or Quest acceptance. Read the live packet-size/bitstream record per cell. |
+| H.264 dimensions | `NvEncoder.cpp` exposes `GetCapabilityValue(..., NV_ENC_CAPS_*)`, but the reconstructed Windows ALVR path does not query `NV_ENC_CAPS_WIDTH_MAX` or a height cap and has no source check enforcing `4096×2048`, `4096×4096`, or any fixed H.264 dimension. `VideoEncoderNVENC.cpp` passes the full side-by-side dimensions to `CreateEncoder()`. | The previous `tools/xrbench/plan.py` `(4096, 2048)` constant is a legacy planning guard, not a stock-ALVR/NVENC source limit. Do not claim any fixed H.264 cap from this repository. A live preflight must query the RTX 5080's H.264 encode caps and fail before `CreateEncoder()` if the negotiated side-by-side dimensions exceed them. |
 
-## Q3 implications
+## Consequences for Q3 and WO-11
 
-All entries are candidates until Q3 scores, encoder metadata, negotiated client
-configuration, and live decode evidence exist.
-
-| Q3 candidate | What it needs beyond the current source | What would disqualify it |
-|---|---|---|
-| H.264 crop, two per-eye streams, 400/700 Mbps, P7/P4/AQ | WO-11 implementation: two independently identified streams, synchronized stereo presentation, per-stream 4096 preflight | Any missing eye/frame identity, desynchronization, loss recovery ambiguity, or unverified NVENC profile/preset/AQ. |
-| H.264-fit, one stream, 700 Mbps, P7 | Stock single-stream H.264, crop/foveation work, 3968×2112 preflight | Width/height fails the encoder check, negotiated format differs, or Quest decoder cannot sustain it. |
-| HEVC Main10, one stream, 200 Mbps, P7/P4 | Proven 10-bit elementary stream and Quest MediaCodec configuration | Any fallback to 8-bit/another codec, metadata omission, or decoder-rate failure. |
-| AV1 10-bit, one stream, 200 Mbps, P7/P4 | Same 10-bit and negotiated-path evidence | Same failure modes; Q3a does not authorize higher bitrate cells. |
-| PyroWave crop, 5/3 or 9/7, 800/1000 Mbps | Q3 frame-bank quality plus later live decoder/network evidence | Offline quality is insufficient for fresh-rate or presentation claims. |
+* The Q3a offline H.264 dual-eye comparison remains useful for picture quality,
+  but cannot establish a deployable stock configuration.
+* The live stock-compatible H.264 candidate is one side-by-side stream. Its
+  exact width and height must pass a real GPU-capability preflight; `h264fit`
+  cannot be described as supported merely because it fits an old planning tuple.
+* HEVC/AV1 Main10 candidates need effective `use_10bit_encoder` readback, a
+  recorded elementary stream proving 10-bit, and the selected Quest MediaCodec
+  before they can be called 10-bit end to end.
+* WO-11 is conditional: prototype it only if the ranked Q3 results show that
+  per-eye H.264 quality would beat both the best stock H.264-fit and the best
+  PyroWave candidate. That comparison decides whether a prototype is warranted;
+  prototype qualification then decides whether any live experiment may follow.
 
 ## Audit boundary
 
-The prior NVENC frame-bank adapter uses FFmpeg 6.1 (`tools/xrbench/nvenc_framebank.py`)
-as an offline bitstream proxy. It records its own command line and output metadata;
-it neither configures ALVR nor demonstrates stock ALVR eye packing, NVENC presets,
-AQ, encoder profile, or Quest hardware decode. This document makes no default change.
+`tools/xrbench/nvenc_framebank.py` is an offline FFmpeg/NVENC proxy. Its command
+line and probes do not configure this ALVR tree, prove its profile selection,
+change defaults, or establish Quest decode throughput, fresh submissions,
+display FPS, optical latency, Wi-Fi capacity, or live stereo packing.
