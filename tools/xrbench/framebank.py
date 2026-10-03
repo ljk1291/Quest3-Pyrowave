@@ -281,8 +281,14 @@ class _OwnedPcJobRegistry:
         return unattended.unregister_owned_pc_job(state_path,pid)
 
 class WindowGuard:
-    def __init__(self,window:Path,arm:Path|None=None,status_command:Sequence[str]|None=None,clock:Callable[[],float]=time.time,job_registry=None):
+    def __init__(self,window:Path,arm:Path|None=None,status_command:Sequence[str]|None=None,clock:Callable[[],float]=time.time,job_registry=None,*,supervised=False):
         self.window=Path(window);self.arm=None if arm is None else Path(arm);self.command=list(status_command or [sys.executable,"-m","tools.quest3.unattended","status"]);self.clock=clock;self.job_registry=job_registry or _OwnedPcJobRegistry();self.owned_jobs=[]
+        self.supervised=supervised
+        if supervised:
+            if arm is not None or status_command is not None: raise ValueError('supervised lease has its own status authority')
+            from tools.quest3.supervised import JobRegistry
+            self.command=[sys.executable,'-m','tools.quest3.supervised','status']
+            self.job_registry=job_registry or JobRegistry()
     def status(self):
         cmd=[*self.command,"--window",str(self.window),"--require-allow","frame_bank_pc"]+([] if self.arm is None else ["--arm",str(self.arm)])
         try: r=subprocess.run(cmd,capture_output=True,text=True,timeout=10,check=False)
@@ -292,7 +298,13 @@ class WindowGuard:
         if r.returncode or data.get("schema")!=1 or data.get("lease",{}).get("active") is not True: raise PermissionError("WO-0 lease is inactive")
         deadline=data["lease"].get("deadline_epoch_s")
         guards=data.get("guards",{}); cancel=data.get("cancellation",{})
-        if not isinstance(deadline,(int,float)) or not math.isfinite(deadline) or deadline<=self.clock() or data.get("arm",{}).get("active") is not True or any(guards.get(x,{}).get(k) is not True for x in ("restorer","monitor") for k in ("ready","alive")) or cancel.get("stop_requested") or cancel.get("paused") or cancel.get("competing_gpu") or not cancel.get("monitor_fresh"):
+        authority_ok=data.get('arm',{}).get('active') is True
+        required_guards=('restorer','monitor')
+        if self.supervised:
+            auth=data.get('authorization',{})
+            authority_ok=(auth.get('kind')=='owner_supervised_pc' and auth.get('owner_present') is True and isinstance(auth.get('evidence'),str) and bool(auth['evidence'].strip()) and auth.get('allow')==['frame_bank_pc'])
+            required_guards=('monitor',)
+        if not isinstance(deadline,(int,float)) or not math.isfinite(deadline) or deadline<=self.clock() or not authority_ok or any(guards.get(x,{}).get(k) is not True for x in required_guards for k in ("ready","alive")) or cancel.get("stop_requested") or cancel.get("paused") or cancel.get("competing_gpu") or not cancel.get("monitor_fresh"):
             raise PermissionError("WO-0 lease health check failed")
         return data
     def run(self,argv,*,cwd:Path,env:dict,timeout_s:float):
@@ -508,8 +520,8 @@ def _assert_same_frames(reference,decoded,ref_info):
     if (dec_info.width,dec_info.height,dec_info.frames,dec_info.chroma,dec_info.color_range,dec_info.fps_num,dec_info.fps_den)!=(ref_info.width,ref_info.height,ref_info.frames,ref_info.chroma,ref_info.color_range,ref_info.fps_num,ref_info.fps_den): raise ValueError("decoded_identity_or_geometry_mismatch")
     return dec_info
 
-def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,*,arm:Path|None=None,status_command:Sequence[str]|None=None,command_timeout_s:float=900,keep_artifacts:bool=False,allow_fixture:bool=False,score_fn=score_pair,tools_metadata:Path|None=None):
-    raw_plan=Path(plan_path).read_bytes();plan=validate_plan(json.loads(raw_plan)); source=Path(source); private_out=_private_path(private_out); guard=WindowGuard(window,arm,status_command)
+def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,*,arm:Path|None=None,status_command:Sequence[str]|None=None,command_timeout_s:float=900,keep_artifacts:bool=False,allow_fixture:bool=False,score_fn=score_pair,tools_metadata:Path|None=None,supervised=False):
+    raw_plan=Path(plan_path).read_bytes();plan=validate_plan(json.loads(raw_plan)); source=Path(source); private_out=_private_path(private_out); guard=WindowGuard(window,arm,status_command,supervised=supervised)
     if private_out.exists(): raise FileExistsError('private output must be a fresh directory')
     if plan.get("fixture_only") and not allow_fixture: raise ValueError("fixture-only plans cannot run outside a CPU test")
     required_tools(tools); guard.status(); initial={n:sha256_file(_tool_path(v)) for n,v in tools.items()};
@@ -575,6 +587,7 @@ def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,
         except (PermissionError,TimeoutError,ValueError,RuntimeError) as exc:
             row["error"]=str(exc) if str(exc) in {"encode_failed","decode_failed","decoded_identity_or_geometry_mismatch"} else "cell_failed";result["failure_reasons"].append(row["error"])
         result["cells"].append(row)
+        (private_out/"framebank-progress.json").write_text(report_json(result),encoding="utf-8")
         if not keep_artifacts:
             for p in (ref,wave,decoded,directory/"source-display.y4m",directory/"decoded-display.y4m"): p.unlink(missing_ok=True)
             for p in directory.glob('crop-*.y4m'): p.unlink()
@@ -616,7 +629,7 @@ def parse_crops_argument(value:str):
 def _main_plan(a):
     p=build_plan(Path(a.source),a.vertical_pixels_per_degree,horizontal_pixels_per_degree=a.horizontal_pixels_per_degree,projection_evidence=a.projection_evidence,crop_evidence=a.crop_evidence,crops=parse_crops_argument(a.crops));Path(a.out).write_text(json.dumps(p,indent=2),encoding="utf-8");print(f"wrote frozen plan with {len(p['cells'])} cells; no codec/scorer was run");return 0
 def _main_run(a):
-    tools={"encode":a.encode,"decode":a.decode,"ffmpeg":a.ffmpeg,"psnr_hvs_m_h":a.psnr_hvs_m_h};r=run_plan(Path(a.plan),Path(a.source),Path(a.private_out),tools,Path(a.window),arm=None if not a.arm else Path(a.arm),command_timeout_s=a.command_timeout_s,keep_artifacts=a.keep_artifacts,tools_metadata=Path(a.tools_metadata));report=sanitized_report(r);Path(a.report).write_text(report_json(report),encoding="utf-8");print(f"wrote sanitized report: complete={report['complete']}");return 0 if report["complete"] else 2
+    tools={"encode":a.encode,"decode":a.decode,"ffmpeg":a.ffmpeg,"psnr_hvs_m_h":a.psnr_hvs_m_h};r=run_plan(Path(a.plan),Path(a.source),Path(a.private_out),tools,Path(a.window),arm=None if not a.arm else Path(a.arm),command_timeout_s=a.command_timeout_s,keep_artifacts=a.keep_artifacts,tools_metadata=Path(a.tools_metadata),supervised=getattr(a,'supervised',False));report=sanitized_report(r);Path(a.report).write_text(report_json(report),encoding="utf-8");print(f"wrote sanitized report: complete={report['complete']}");return 0 if report["complete"] else 2
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     s=p.add_subparsers(dest='command',required=True)
@@ -631,6 +644,7 @@ def main(argv=None):
     for name in ('plan','source','private-out','report','window','encode','decode','ffmpeg','psnr-hvs-m-h','tools-metadata'):
         r.add_argument('--'+name,required=True)
     r.add_argument('--arm')
+    r.add_argument('--supervised',action='store_true',help='use an existing owner-attested PC-only lease')
     r.add_argument('--command-timeout-s',type=float,default=900)
     r.add_argument('--keep-artifacts',action='store_true')
     x=p.parse_args(argv)

@@ -4,6 +4,11 @@ on:
     branches: [main, 'codex/**']
   pull_request:
   workflow_dispatch:
+    inputs:
+      cpu_only:
+        description: 'Run CPU checks only for Python orchestration changes; reuse qualified native tools'
+        type: boolean
+        default: false
 permissions:
   contents: read
 env:
@@ -25,6 +30,7 @@ jobs:
       - name: Geometry-control contract tests
         run: python3 -m unittest tools.tests.test_resolution -v
       - run: python3 -m unittest tools.tests.test_xrbench_framebank tools.tests.test_xrbench_hvs_scorer -v
+      - run: python3 -m unittest tools.tests.test_supervised -v
       - run: g++ -std=c++17 -Wall -Werror tools/pyroclient/decode_path_test.cpp -o /tmp/decode-path && /tmp/decode-path
       - run: g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/pass_profile_test.cpp -o /tmp/pass-profile && /tmp/pass-profile
       - name: GPU failure-policy state-machine test
@@ -42,7 +48,7 @@ jobs:
   client:
     runs-on: ubuntu-24.04
     needs: tests
-    if: ${{ always() && (needs.tests.result == 'success' || needs.tests.result == 'skipped') }}
+    if: ${{ !inputs.cpu_only && always() && (needs.tests.result == 'success' || needs.tests.result == 'skipped') }}
     steps:
       - uses: actions/checkout@v4
       - name: Load authoritative build pins
@@ -167,7 +173,7 @@ jobs:
   streamer:
     runs-on: windows-2022
     needs: tests
-    if: ${{ always() && (needs.tests.result == 'success' || needs.tests.result == 'skipped') }}
+    if: ${{ !inputs.cpu_only && always() && (needs.tests.result == 'success' || needs.tests.result == 'skipped') }}
     env:
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
     steps:

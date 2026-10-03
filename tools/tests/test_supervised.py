@@ -1,0 +1,95 @@
+"""CPU-only supervised lease contract; no device or GPU execution."""
+import copy
+import json
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+from unittest import mock
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from tools.quest3 import supervised as s
+from tools.quest3 import unattended as u
+from xrbench import framebank as fb
+
+class Host:
+    def __init__(self): self.stopped=[]; self.changed=False
+    def process_identity(self,pid):
+        return {'pid':pid,'path':'python.exe' if pid<3 else 'scorer.exe',
+                'started_epoch_s':float(pid)+(1 if self.changed else 0),'exited':False}
+    def gpu_sample(self): return {'conflicts':[], 'gpu_engine_activity':{'known':True}}
+    def stop_owned_runtime(self,row):
+        if not u.ownership_matches(row,self.process_identity(row['pid']),row['nonce']): raise u.Refusal('identity changed')
+        self.stopped.append(row['pid'])
+
+class SupervisedTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.path=Path(self.tmp.name);self.host=Host()
+        self.state={'guard_nonce':'nonce','closed':False,'deadline_epoch_s':110,
+                    'authorization':{'kind':s.AUTHORITY,'owner_present':True,'evidence':'explicit owner message', 'allow':['frame_bank_pc']},
+                    'parent':dict(self.host.process_identity(1),nonce='nonce'),
+                    'monitor':dict(self.host.process_identity(2),nonce='nonce',ready=True,sample_epoch_s=99,conflicts=[]),
+                    'owned_pc_jobs':[]}
+        self.write()
+    def write(self): u.atomic_write(self.path/'state.json',self.state)
+    def status(self): return s.status_payload(self.path,host=self.host,now=100)
+    def test_valid_owner_lease_without_arm_restorer_device_or_vd(self):
+        with mock.patch.object(u,'arm_window',side_effect=AssertionError('arm consulted')):
+            self.assertTrue(self.status()['lease']['active'])
+    def test_health_and_attestation_fail_closed(self):
+        cases=[('deadline_epoch_s',100),('closed',True),('deadline_epoch_s',float('nan'))]
+        for key,value in cases:
+            with self.subTest(key=key,value=value):
+                old=copy.deepcopy(self.state);self.state[key]=value;self.write()
+                self.assertFalse(self.status()['lease']['active']);self.state=old
+        for field,value in [('owner_present',False),('evidence',''),('kind','unattended'),('allow',['chart'])]:
+            with self.subTest(field=field):
+                old=copy.deepcopy(self.state);self.state['authorization'][field]=value;self.write()
+                self.assertFalse(self.status()['lease']['active']);self.state=old
+    def test_stale_competing_and_replaced_monitor(self):
+        for key,value in [('sample_epoch_s',39),('sample_epoch_s',101),('ready',False),('conflicts',['comfy_queue_active_or_unknown']),('started_epoch_s',5)]:
+            with self.subTest(key=key):
+                old=copy.deepcopy(self.state);self.state['monitor'][key]=value;self.write()
+                self.assertFalse(self.status()['lease']['active']);self.state=old
+    def test_stop_marker_and_wrong_scope(self):
+        self.assertFalse(s.status_payload(self.path,host=self.host,now=100,require_allow='chart')['lease']['active'])
+        (self.path/'stop').touch();self.assertFalse(self.status()['lease']['active'])
+    def test_registry_locked_identity_and_monitor_exclusion(self):
+        with mock.patch.object(s.time,'time',return_value=100):
+            row=s.JobRegistry().register(self.path/'state.json',3,host=self.host)
+        sample={'conflicts':['3, scorer.exe, 200','4, competitor.exe, 400']}
+        self.assertEqual(u.exclude_owned_compute_jobs(u.json_read(self.path/'state.json'),self.host,sample)['conflicts'],['4, competitor.exe, 400'])
+        self.host.changed=True
+        self.assertEqual(u.exclude_owned_compute_jobs(u.json_read(self.path/'state.json'),self.host,sample)['conflicts'],sample['conflicts'])
+        self.assertTrue(s.stop_jobs({'owned_pc_jobs':[row]},self.host));self.assertEqual(self.host.stopped,[])
+        self.host.changed=False
+        self.assertEqual(s.stop_jobs({'owned_pc_jobs':[row]},self.host),[]);self.assertEqual(self.host.stopped,[3])
+        s.JobRegistry().unregister(self.path/'state.json',3)
+        self.assertEqual(u.json_read(self.path/'state.json')['owned_pc_jobs'],[])
+    def test_registration_refused_after_stop_or_with_arm(self):
+        (self.path/'stop').touch()
+        with mock.patch.object(s.time,'time',return_value=100):
+            with self.assertRaises(u.Refusal): s.JobRegistry().register(self.path/'state.json',3,host=self.host)
+        with self.assertRaises(u.Refusal): s.JobRegistry().register(self.path/'state.json',3,Path('arm'),host=self.host)
+    def test_worker_stops_owned_jobs_on_parent_death_without_device_probes(self):
+        self.state['parent']['started_epoch_s']=7
+        self.state['owned_pc_jobs']=[dict(self.host.process_identity(3),nonce='nonce')];self.write()
+        with mock.patch.object(u,'Host',return_value=self.host),mock.patch.object(s.time,'time',return_value=100),mock.patch.object(u,'arm_window',side_effect=AssertionError('arm consulted')):
+            s.worker(self.path,'nonce')
+        self.assertEqual(self.host.stopped,[3]);self.assertTrue((self.path/'stop').exists())
+        self.assertTrue(u.json_read(self.path/'state.json')['closed'])
+    def test_windowguard_accepts_explicit_supervised_authority_only(self):
+        data=self.status()
+        response=mock.Mock(returncode=0,stdout=json.dumps(data))
+        with mock.patch.object(fb.subprocess,'run',return_value=response) as run:
+            self.assertTrue(fb.WindowGuard(self.path,clock=lambda:100,supervised=True).status()['lease']['active'])
+            self.assertIn('tools.quest3.supervised',run.call_args.args[0])
+            self.assertNotIn('--arm',run.call_args.args[0])
+            with self.assertRaises(PermissionError): fb.WindowGuard(self.path,clock=lambda:100).status()
+        with self.assertRaises(ValueError): fb.WindowGuard(self.path,arm=Path('arm'),supervised=True)
+    def test_session_requires_explicit_evidence_and_finite_duration(self):
+        for evidence,duration in [('',60),('owner',float('inf')),('owner',0),('owner',7201)]:
+            with self.subTest(evidence=evidence,duration=duration),self.assertRaises(ValueError):
+                with s.session(self.path,evidence=evidence,duration_s=duration): pass
+
+if __name__=='__main__': unittest.main()
