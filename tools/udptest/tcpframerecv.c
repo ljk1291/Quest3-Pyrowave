@@ -73,7 +73,9 @@ int main(int argc, char **argv) {
         unsigned char header[HEADER];
         int state = read_full(client, header, sizeof header);
         if (state == 0) break;
-        if (state < 0) { if (errno == EAGAIN || errno == EWOULDBLOCK) continue; perror("recv header"); break; }
+        /* A timeout after a partial stream header cannot be safely resynchronized:
+         * stop this probe rather than treating payload bytes as a new header. */
+        if (state < 0) { perror("recv header/incomplete session"); break; }
         uint32_t id_net, bytes_net;
         memcpy(&id_net, header + 4, 4); memcpy(&bytes_net, header + 8, 4);
         const uint32_t id = ntohl(id_net), bytes = ntohl(bytes_net);

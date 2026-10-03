@@ -144,7 +144,7 @@ def tcp_sender(ip, port, mbps, seconds, hz, connect=socket.create_connection, cl
     payload = bytes(payload_bytes)
     if max_in_flight < 1:
         raise ValueError("max_in_flight must be positive")
-    ack_times_ms, schedule_lag_ms, acked = [], [], {}
+    ack_times_ms, schedule_lag_ms, acked, pending_ids = [], [], {}, set()
     lock, stopped = threading.Lock(), threading.Event()
     scheduled = max(0, int(seconds * hz))
     with connect((str(ip), port), timeout=10) as sock:
@@ -169,6 +169,7 @@ def tcp_sender(ip, port, mbps, seconds, hz, connect=socket.create_connection, cl
                         item = acked.get(int.from_bytes(ack[4:], "big"))
                         if item is not None and item["ack"] is None:
                             item["ack"] = clock()
+                            pending_ids.discard(int.from_bytes(ack[4:], "big"))
         worker = threading.Thread(target=reader, daemon=True)
         worker.start()
         start = clock()
@@ -180,12 +181,13 @@ def tcp_sender(ip, port, mbps, seconds, hz, connect=socket.create_connection, cl
             write_start = clock()
             schedule_lag_ms.append(max(0.0, write_start - deadline) * 1000.0)
             with lock:
-                inflight = sum(item["ack"] is None for item in acked.values())
+                inflight = len(pending_ids)
             if write_start > deadline + period or inflight >= max_in_flight:
                 continue
             header = TCP_HEADER_MAGIC + frame_id.to_bytes(4, "big") + payload_bytes.to_bytes(4, "big")
             with lock:
                 acked[frame_id] = {"start": write_start, "deadline": deadline + period, "ack": None}
+                pending_ids.add(frame_id)
             try:
                 sock.sendall(header); sock.sendall(payload)
             except OSError:
@@ -193,7 +195,7 @@ def tcp_sender(ip, port, mbps, seconds, hz, connect=socket.create_connection, cl
         drain_deadline = clock() + period
         while clock() < drain_deadline:
             with lock:
-                if all(item["ack"] is not None for item in acked.values()): break
+                if not pending_ids: break
             sleeper(min(.001, max(0, drain_deadline - clock())))
         stopped.set(); worker.join(timeout=.2)
     with lock:
