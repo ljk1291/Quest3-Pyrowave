@@ -39,6 +39,8 @@ def test_packet_loss_is_delta_of_summary_totals(summary):
 
 def test_frame_counts(summary):
     assert summary["graph_events"] == 4 and summary["summary_events"] == 2
+    assert summary["frame_size_sample_count"] == 0
+    assert summary["frame_size_bytes"]["p99"] is None
 
 
 def test_utf8_bom_is_accepted(tmp_path):
@@ -74,6 +76,13 @@ def test_per_frame_rows_are_keyed_by_frame():
     rows = per_frame_rows([graph_event(100, 50_000), graph_event(200, 60_000)])
     assert [r["target_timestamp_ns"] for r in rows] == [100, 200]
     assert [r["video_packet_bytes"] for r in rows] == [50_000, 60_000]
+
+
+def test_summary_reports_keyed_frame_size_tail_for_live_cells():
+    report = summarize([graph_event(100, 10), graph_event(200, 20), graph_event(300, 110)])
+    assert report["frame_size_sample_count"] == 3
+    assert report["frame_size_bytes"]["p50"] == 20
+    assert report["frame_size_bytes"]["p99"] == 108.2
 
 
 def test_per_frame_rows_carry_the_stage_latencies_in_ms():
