@@ -8,6 +8,15 @@ from tools.quest3 import unattended as u
 
 @unittest.skipUnless(os.name=='nt','Windows process handles required')
 class OwnedProcessTest(unittest.TestCase):
+    def test_completed_owned_child_is_already_stopped(self):
+        child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(.1)'],
+                               creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+        try:
+            host=u.Host(); record=host.process_identity(child.pid); record['nonce']='test'
+            child.wait(timeout=3)
+            self.assertTrue(host.stop_owned_runtime(record))
+        finally:
+            if child.poll() is None: child.kill(); child.wait(timeout=3)
     def test_short_lived_child_identity_can_be_claimed_without_a_shell(self):
         child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(.1)'],
                                creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))

@@ -301,6 +301,7 @@ class Host:
             if not pid_alive(record['pid']): return True
             raise
         if not ownership_matches(record,actual,record['nonce']): raise Refusal('runtime ownership changed; no stop issued')
+        if actual.get('exited') is True: return True
         if os.name != 'nt': raise Refusal('Windows process stop is required')
         script=owned_stop_script(record)
         self.run('powershell','-NoProfile','-NonInteractive','-Command',script,timeout=20)
@@ -322,6 +323,7 @@ def windows_process_identity(pid):
     kernel.QueryFullProcessImageNameW.restype=w.BOOL
     kernel.GetProcessTimes.argtypes=[w.HANDLE]+[ctypes.POINTER(w.FILETIME)]*4
     kernel.GetProcessTimes.restype=w.BOOL
+    kernel.GetExitCodeProcess.argtypes=[w.HANDLE,ctypes.POINTER(w.DWORD)]; kernel.GetExitCodeProcess.restype=w.BOOL
     kernel.CloseHandle.argtypes=[w.HANDLE]; kernel.CloseHandle.restype=w.BOOL
     handle=kernel.OpenProcess(0x1000,False,pid)  # PROCESS_QUERY_LIMITED_INFORMATION
     if not handle: raise Refusal('process identity unavailable')
@@ -332,10 +334,12 @@ def windows_process_identity(pid):
                 not kernel.GetProcessTimes(handle,ctypes.byref(created),ctypes.byref(exited),
                                            ctypes.byref(kernel_time),ctypes.byref(user_time))):
             raise Refusal('process identity unavailable')
+        exit_code=w.DWORD()
+        if not kernel.GetExitCodeProcess(handle,ctypes.byref(exit_code)): raise Refusal('process exit state unavailable')
         ticks=(int(created.dwHighDateTime)<<32)|int(created.dwLowDateTime)
         # Same millisecond convention as the retained-handle PowerShell stop.
         started=(ticks//10000-11644473600000)/1000.0
-        return {'pid':pid,'path':path.value,'started_epoch_s':started}
+        return {'pid':pid,'path':path.value,'started_epoch_s':started,'exited':exit_code.value!=259}
     finally: kernel.CloseHandle(handle)
 
 def owned_stop_script(record):
