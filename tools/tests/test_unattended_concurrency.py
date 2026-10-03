@@ -1,4 +1,5 @@
 import threading, time
+import pytest
 from tools.quest3 import unattended as u
 
 def test_same_process_threads_exclude_each_other(tmp_path):
@@ -73,3 +74,98 @@ def test_escaping_restore_body_publishes_failure(monkeypatch,tmp_path):
     import pytest
     with pytest.raises(RuntimeError): u.restore(state)
     assert u.json_read(state)['restoration']['status']=='restore_failed'
+
+
+class RestoreHost:
+    def adb_run(self, *args): return ''
+    def vr_connected(self): return False
+    def stop_owned_runtime(self, record): return True
+
+
+def restore_state(path):
+    u.atomic_write(path, {'serial':'Q3','guard_nonce':'n','guards_ready':True,
+                         'deadline_epoch_s':time.time()+3600,
+                         'snapshot':{'headset_properties':{'managed':{}},'configuration_snapshots':[]},
+                         'owned_runtime':[{'role':'dashboard'}],
+                         'restoration':{'status':'pending'}})
+
+
+def test_inflight_setting_is_observed_and_undone_after_restore_revokes(monkeypatch,tmp_path):
+    from tools.quest3 import control, preflight
+    path=tmp_path/'state.json'; restore_state(path)
+    entered=threading.Event(); release=threading.Event(); errors=[]; applied=[]
+    settings={'session_settings':{'test':1}}
+    def status(*args,**kwargs):
+        stopped=(tmp_path/'stop').exists()
+        return {'lease':{'active':not stopped,'blockers':['stop'] if stopped else []}}
+    def current(): return settings
+    def set_values(values):
+        value=values['session_settings.test']
+        if value==2:
+            entered.set()
+            if not release.wait(3): raise TimeoutError('test mutation did not release')
+        settings['session_settings']['test']=value; applied.append(value)
+    monkeypatch.setattr(u,'status_payload',status)
+    monkeypatch.setattr(control,'session',current)
+    monkeypatch.setattr(control,'set_values',set_values)
+    monkeypatch.setattr(preflight,'verify_snapshot',lambda rows:[])
+    def mutate():
+        try: u.apply_alvr_changes(path,{'session_settings.test':2},api=(current,set_values))
+        except Exception as exc: errors.append(exc)
+    def restore():
+        try: u.restore(path,RestoreHost())
+        except Exception as exc: errors.append(exc)
+    writer=threading.Thread(target=mutate); restorer=threading.Thread(target=restore)
+    writer.start(); assert entered.wait(1); restorer.start()
+    deadline=time.monotonic()+1
+    while not (tmp_path/'stop').exists() and time.monotonic()<deadline: time.sleep(.01)
+    try:
+        assert (tmp_path/'stop').exists(), 'restoration must revoke before the writer unlocks'
+        assert not status()['lease']['active']
+        assert restorer.is_alive()
+    finally:
+        release.set(); writer.join(4); restorer.join(4)
+    assert not writer.is_alive() and not restorer.is_alive() and not errors
+    final=u.json_read(path)
+    assert applied==[2,1] and settings['session_settings']['test']==1
+    assert final['changes'][0]['before_value']==1
+    assert final['restoration']['status']=='restored' and final['restoration']['alvr_restored']
+    assert u.json_read(tmp_path/'restoration.json')==final['restoration']
+
+
+def test_repeated_restore_and_stale_claim_remain_idempotent(monkeypatch,tmp_path):
+    from tools.quest3 import preflight
+    path=tmp_path/'state.json'; restore_state(path)
+    monkeypatch.setattr(preflight,'verify_snapshot',lambda rows:[])
+    u.atomic_write(tmp_path/'restoration.lock',{'pid':999999,'at_utc':'old'})
+    first=u.restore(path,RestoreHost()); before=path.read_bytes()
+    for _ in range(3):
+        assert u.restore(path,RestoreHost())==first
+        assert path.read_bytes()==before and not (tmp_path/'restoration.lock').exists()
+
+
+def test_lock_timeout_cannot_overwrite_writer_or_publish_competing_final(monkeypatch,tmp_path):
+    from tools.quest3 import preflight
+    path=tmp_path/'state.json'; restore_state(path); before=path.read_bytes()
+    entered=threading.Event(); release=threading.Event()
+    def holder():
+        with u.state_lock(path): entered.set(); release.wait(2)
+    thread=threading.Thread(target=holder); thread.start(); assert entered.wait(1)
+    monkeypatch.setattr(u,'RESTORE_LOCK_SECONDS',.04)
+    try:
+        with pytest.raises(u.Refusal,match='state lock timeout'): u.restore(path,RestoreHost())
+        assert path.read_bytes()==before
+        assert not (tmp_path/'restoration.json').exists()
+        assert (tmp_path/'stop').exists() and (tmp_path/'restoration.lock').exists()
+        assert len(list(tmp_path.glob('restore-attempt-*.json')))==1
+    finally: release.set(); thread.join(3)
+    monkeypatch.setattr(preflight,'verify_snapshot',lambda rows:[])
+    assert u.restore(path,RestoreHost())['status']=='restored'
+
+
+def test_late_runtime_claim_preserves_final_bytes(tmp_path):
+    path=tmp_path/'state.json'; restore_state(path)
+    value=u.json_read(path); value['restoration']={'status':'restored'}; u.atomic_write(path,value)
+    before=path.read_bytes()
+    with pytest.raises(u.Refusal): u.record_owned_runtime(path,{},RestoreHost())
+    assert path.read_bytes()==before

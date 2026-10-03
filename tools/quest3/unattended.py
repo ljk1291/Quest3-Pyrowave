@@ -26,6 +26,7 @@ def managed_properties():
                                 'debug.oculus.guardian_pause')))
 GUARD_READY_SECONDS = 5
 CHECK_FRESH_SECONDS = 5 * 60
+RESTORE_LOCK_SECONDS = 60
 
 class Refusal(RuntimeError): pass
 
@@ -350,7 +351,14 @@ def snapshot(host, serial, directory, alvr_session_path=None):
             sources['alvr_session']=Path(alvr_path)/'session.json'
     except Exception as exc: raise Refusal('matched ALVR session snapshot unavailable: '+str(exc)) from exc
     records=preflight.snapshot_files(sources,before/'configurations')
+    required={'virtual_desktop_streamer','virtual_desktop_games','openvr_paths','steamvr_settings','alvr_session'}
+    if not required.issubset({row['label'] for row in records}): raise Refusal('required settings snapshot missing')
     if any(r.get('error') or not r.get('exists') for r in records): raise Refusal('incomplete PC/VD/ALVR settings snapshot')
+    runtime=inv.get('active_openxr_runtime',{})
+    manifest=inv.get('active_openxr_runtime_manifest',{})
+    if (runtime.get('error') or not runtime.get('value') or manifest.get('error')
+            or not manifest.get('exists') or not manifest.get('sha256')):
+        raise Refusal('active OpenXR runtime provenance unavailable')
     # Android getprop has no glob form. Preserve the exact old values of every
     # property this supervisor can restore; an absent value is explicitly saved.
     all_props=host.adb_run(serial,'shell','getprop')
@@ -383,7 +391,6 @@ def check_preconditions(arm, host, directory, now=None, alvr_session_path=None):
         except Exception as exc: report['failures'].append('snapshot_incomplete:'+str(exc)); report['passed']=False
     atomic_write(Path(directory)/'check.json',report); return report
 
-@locked_state_mutation
 def _restore_locked(state_path, host=None):
     """Idempotent deadline-safe fallback with an offline file-copy fallback."""
     state_path=Path(state_path); state=json_read(state_path)
@@ -471,7 +478,12 @@ def _restore_locked(state_path, host=None):
         elif record.get('label') == 'steamvr_settings':
             steps.append('steamvr_settings_verify_only')
         elif record.get('label') == 'alvr_session':
-            if not owned_ok: steps.append('alvr_cold_restore_skipped_unowned_runtime')
+            from .preflight import sha256
+            source=Path(record['source'])
+            matches=source.is_file() and record.get('sha256') and sha256(source)==record['sha256']
+            if matches: steps.append('alvr_session_unchanged')
+            elif not owned_ok or not state.get('owned_runtime'):
+                steps.append('alvr_cold_restore_skipped_unowned_runtime'); alvr_restored=False
             else:
                 try: shutil.copyfile(record['snapshot'],record['source']); steps.append('alvr_session_and_pairing_restored')
                 except OSError as exc: steps.append('alvr_session_restore_failed:'+str(exc)); owned_ok=False
@@ -493,20 +505,45 @@ def _restore_locked(state_path, host=None):
     vd_hashes_match=all(x.get('error') is None and x.get('current_matches') is True for x in vd_checks)
     ok=files_ok and runtime_restored and properties_ok and client_stopped and awake_restored and owned_ok and alvr_restored and steamvr_restored and driver_restored and jobs_ok
     state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'pc_configuration_verify_only;_owner_selector_or_dashboard_must_restore_drift','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'owned_runtime':owned_results,'owned_runtime_stopped':owned_ok,'alvr_restored':alvr_restored,'steamvr_restored':steamvr_restored,'driver_restored':driver_restored,'owned_pc_jobs':job_results,'owned_pc_jobs_stopped':jobs_ok,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
-    atomic_write(state_path,state); lock.unlink(missing_ok=True); return state['restoration']
+    atomic_write(state_path,state)
+    atomic_write(state_path.parent/'restoration.json',state['restoration'])
+    return state['restoration']
 
 def restore(state_path, host=None):
     """Revoke the lease before waiting on state writers, then reload under lock."""
     state_path=Path(state_path); stop=state_path.parent/'stop'; stop.write_text('restoration requested\n',encoding='utf-8')
     claim=state_path.parent/'restoration.lock'
-    try: claim.open('x',encoding='utf-8').write(json.dumps({'pid':os.getpid(),'at_utc':utc_now().isoformat()}))
-    except FileExistsError: raise Refusal('restoration already owns this window')
-    try: return _restore_locked(state_path,host)
-    except Exception:
-        # Preserve a visible terminal record for the independent restorer.
-        with state_lock(state_path):
-            state=json_read(state_path); state['restoration']={'status':'restore_failed','at_utc':utc_now().isoformat()}; atomic_write(state_path,state)
-        claim.unlink(missing_ok=True); raise
+    # This is a revocation marker, not the mutex. A crashed claimant must never
+    # prevent the independent restorer from acquiring the OS-backed state lock.
+    atomic_write(claim,{'pid':os.getpid(),'at_utc':utc_now().isoformat()})
+    acquired=False
+    try:
+        with state_lock(state_path,timeout_s=RESTORE_LOCK_SECONDS):
+            acquired=True
+            try:
+                result=_restore_locked(state_path,host)
+                atomic_write(state_path.parent/'restoration.json',result)
+                return result
+            except Exception as exc:
+                # Reload while still holding the mutex: never replace a state
+                # snapshot that an earlier mutation has just completed.
+                state=json_read(state_path)
+                if state.get('restoration',{}).get('status')!='restored':
+                    state['restoration']={'status':'restore_failed','at_utc':utc_now().isoformat(),
+                                          'error':type(exc).__name__}
+                    atomic_write(state_path,state)
+                    atomic_write(state_path.parent/'restoration.json',state['restoration'])
+                raise
+            finally:
+                claim.unlink(missing_ok=True)
+    except Exception as exc:
+        if not acquired:
+            # A lock timeout is an attempt failure, not a competing final state.
+            # Keep stop/claim revoked and publish a separate recovery diagnostic.
+            atomic_write(state_path.parent/('restore-attempt-'+uuid.uuid4().hex+'.json'),
+                         {'status':'lock_wait_failed','at_utc':utc_now().isoformat(),
+                          'error':type(exc).__name__})
+        raise
 
 def terminal_fault_decision(state, fault):
     """A second terminal codec/connection fault ends device work and requests restore."""
@@ -519,7 +556,8 @@ def terminal_fault_decision(state, fault):
 def record_terminal_fault(state_path, fault):
     """Persist a terminal fault; second fault atomically requests deadline restoration."""
     state_path=Path(state_path); state=json_read(state_path)
-    if state.get('restoration',{}).get('status') != 'pending': raise Refusal('rollback has begun')
+    if ((state_path.parent/'stop').exists() or (state_path.parent/'restoration.lock').exists()
+            or state.get('restoration',{}).get('status') != 'pending'): raise Refusal('rollback has begun')
     action=terminal_fault_decision(state,fault); atomic_write(state_path,state)
     if action=='restore': (state_path.parent/'stop').write_text('second terminal fault\n',encoding='utf-8')
     return action
@@ -548,10 +586,25 @@ def worker(state_path, monitor=False):
         atomic_write(ready, {'pid':os.getpid(),'role':role,'nonce':state['guard_nonce'],'ready_utc':utc_now().isoformat()})
         while True:
             state=json_read(state_path); now=time.time()
+            if state.get('guards_ready'):
+                arm_path=Path(state.get('arm_path',ARM))
+                try:
+                    arm=json_read(arm_path); arm_window(arm,require_remaining=False)
+                    if arm_digest(arm)!=state['arm_sha256']: raise Refusal('arm changed')
+                except Exception:
+                    (state_path.parent/'stop').write_text('arm revoked or changed\n',encoding='utf-8')
             if (state_path.parent/'stop').exists() or now>=state['deadline_epoch_s']:
                 if not monitor: restore(state_path,host)
                 return
             if monitor:
+                failures=[]
+                if host.idle_seconds()<30*60: failures.append('owner_activity')
+                if not state.get('owned_runtime') and host.vr_connected(): failures.append('unclaimed_vr_or_vd_session')
+                failures.extend(configuration_drift(state))
+                if failures:
+                    atomic_write(state_path.parent/'monitor.json',{'schema':1,'last_sample_epoch_s':now,
+                                'last_action':'end','ended':True,'stop_reasons':failures})
+                    (state_path.parent/'stop').write_text('monitor safety stop\n',encoding='utf-8'); return
                 b=parse_battery(host.adb_run(state['serial'],'shell','dumpsys','battery')); t=parse_thermal(host.adb_run(state['serial'],'shell','dumpsys','thermalservice'))
                 # The monitor owns a separate record. It never rewrites state.json,
                 # so it cannot race the deadline restorer's final restoration record.
@@ -577,6 +630,11 @@ def worker(state_path, monitor=False):
             # The deadline restorer sleeps only until its exact deadline; the
             # monitor retains its fixed 30-second cadence.
             time.sleep(POLL_SECONDS if monitor else max(0, min(POLL_SECONDS, state['deadline_epoch_s']-time.time())))
+    except Exception as exc:
+        atomic_write(state_path.parent/('worker-error-'+role+'.json'),
+                     {'role':role,'at_utc':utc_now().isoformat(),'error':type(exc).__name__})
+        (state_path.parent/'stop').write_text(role+' worker failure\n',encoding='utf-8')
+        raise
     finally: host.keep_awake(False)
 
 def spawn_worker(state, monitor):
@@ -584,14 +642,24 @@ def spawn_worker(state, monitor):
     opts={'creationflags':(getattr(subprocess,'CREATE_NO_WINDOW',0) | getattr(subprocess,'CREATE_NEW_PROCESS_GROUP',0) | getattr(subprocess,'DETACHED_PROCESS',0))} if os.name=='nt' else {'start_new_session':True}
     return subprocess.Popen(args,cwd=ROOT,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,**opts)
 
-def wait_for_guard(directory, name, nonce, pid, timeout_s=GUARD_READY_SECONDS):
+def guard_record_valid(record, role, pid, nonce, minimum_epoch_s=0, now=None):
+    try:
+        ready=datetime.fromisoformat(record['ready_utc'])
+        if ready.tzinfo is None: return False
+        timestamp=ready.timestamp(); current=(now or utc_now()).timestamp()
+        return (set(record)=={'pid','role','nonce','ready_utc'} and record['pid']==pid
+                and record['role']==role and record['nonce']==nonce
+                and minimum_epoch_s<=timestamp<=current+1
+                and (minimum_epoch_s==0 or timestamp<=minimum_epoch_s+GUARD_READY_SECONDS*2+2))
+    except (KeyError, ValueError, TypeError, OverflowError): return False
+
+def wait_for_guard(directory, name, nonce, pid, timeout_s=GUARD_READY_SECONDS, minimum_epoch_s=0):
     marker=Path(directory)/(name+'.ready'); deadline=time.monotonic()+timeout_s
     while time.monotonic()<deadline:
         if marker.is_file():
             try:
                 ready=json_read(marker)
-                if (set(ready) == {'pid','role','nonce','ready_utc'} and ready['pid'] == pid and
-                        ready['role'] == name and ready['nonce'] == nonce and isinstance(ready['ready_utc'],str)):
+                if guard_record_valid(ready,name,pid,nonce,minimum_epoch_s):
                     return True
             except (OSError, ValueError, json.JSONDecodeError): pass
         time.sleep(.05)
@@ -609,7 +677,10 @@ def ownership_matches(record, actual, nonce):
 def record_owned_runtime(state_path, record, host=None):
     """Persist a verified ownership record before any ALVR/SteamVR mutation."""
     state_path=Path(state_path); state=json_read(state_path); host=host or Host(state.get('adb','adb'))
-    if state.get('restoration',{}).get('status') != 'pending' or not state.get('guards_ready'): raise Refusal('window not mutable')
+    if ((state_path.parent/'stop').exists() or (state_path.parent/'restoration.lock').exists()
+            or time.time()>=state.get('deadline_epoch_s',0)
+            or state.get('restoration',{}).get('status') != 'pending'
+            or not state.get('guards_ready')): raise Refusal('window not mutable')
     actual=host.process_identity(record.get('pid'))
     if not ownership_matches(record,actual,state.get('guard_nonce')): raise Refusal('runtime ownership cannot be proved')
     owned=state.setdefault('owned_runtime',[])
@@ -632,6 +703,29 @@ def _path_delete(value, dotted):
     parts=dotted.split('.'); node=value
     for part in parts[:-1]: node=node.get(part,{})
     node.pop(parts[-1],None)
+
+def configuration_drift(state):
+    """Detect unrecorded settings changes without writing any owner file."""
+    from .preflight import sha256, registry_value
+    failures=[]
+    for record in state['snapshot']['configuration_snapshots']:
+        label=record['label']; path=Path(record['source'])
+        try:
+            if not path.is_file(): failures.append('settings_missing:'+label); continue
+            if sha256(path)==record.get('sha256'): continue
+            kind={'alvr_session':'alvr','steamvr_settings':'steamvr'}.get(label)
+            changes=[row for row in state.get('changes',[]) if row.get('kind')==kind] if kind else []
+            if changes:
+                expected=json_read(record['snapshot'])
+                for row in changes: _path_set(expected,row['key'],row['expected_after'])
+                if json_read(path)==expected: continue
+            failures.append('settings_drift:'+label)
+        except (OSError, ValueError, KeyError, TypeError): failures.append('settings_unreadable:'+label)
+    expected=state['snapshot'].get('preflight',{}).get('active_openxr_runtime',{}).get('value')
+    if expected:
+        actual=registry_value(r'SOFTWARE\Khronos\OpenXR\1','ActiveRuntime')
+        if actual.get('error') or actual.get('value')!=expected: failures.append('openxr_runtime_drift')
+    return failures
 
 def mutable_state(state_path, arm_path=ARM):
     """Fail closed before recording or applying a new setting mutation."""
@@ -751,7 +845,8 @@ def register_owned_pc_job(state_path, pid, path, started_epoch_s, arm_path=ARM, 
 @locked_state_mutation
 def unregister_owned_pc_job(state_path, pid, host=None):
     state_path=Path(state_path); state=json_read(state_path)
-    if state.get('restoration',{}).get('status') != 'pending': return None
+    if ((state_path.parent/'stop').exists() or (state_path.parent/'restoration.lock').exists()
+            or state.get('restoration',{}).get('status') != 'pending'): return None
     jobs=state.get('owned_pc_jobs',[])
     record=next((row for row in jobs if row['pid']==pid),None)
     if not record: raise Refusal('PC job not registered')
@@ -815,8 +910,8 @@ def status_payload(directory, arm_path=ARM, now=None, require_allow=None):
         pid=guard_pids.get(role); marker=directory/(role+'.ready'); ready=False
         try:
             record=json_read(marker)
-            ready=(set(record)=={'pid','role','nonce','ready_utc'} and record['pid']==pid and
-                   record['role']==role and record['nonce']==state.get('guard_nonce'))
+            ready=guard_record_valid(record,role,pid,state.get('guard_nonce'),
+                                     state.get('guard_started_epoch_s',0),now)
         except (OSError, ValueError, json.JSONDecodeError): pass
         guards[role]={'ready':ready,'pid':pid,'alive':pid_alive(pid)}
     monitor_path=directory/'monitor.json'
@@ -837,6 +932,7 @@ def status_payload(directory, arm_path=ARM, now=None, require_allow=None):
     if not sample_fresh: blockers.append('monitor_stale')
     if pause or monitor.get('paused'): blockers.append('thermal_or_battery_paused')
     if monitor.get('workload_paused') or monitor.get('competing_gpu'): blockers.append('competing_gpu_workload')
+    if monitor.get('ended') or monitor.get('stop_reasons'): blockers.append('monitor_safety_stop')
     return {'schema':1,'window_id':state.get('window_id',directory.name),
             'lease':{'active':not blockers,'deadline_epoch_s':deadline,'reason':None if not blockers else blockers[0],'blockers':blockers},
             'arm':arm,'guards':guards,'cancellation':{'stop_requested':stop,'paused':pause,
@@ -896,7 +992,7 @@ def main():
                           for x in verify_snapshot(check['snapshot']['configuration_snapshots']))
         except (KeyError, OSError, ValueError): source_ok=False
         if not source_ok: p.error('refusing start: source settings changed after snapshot')
-        live_failures, _, _ = live_preconditions(arm,Host())
+        live_failures, _, _ = live_preconditions(arm,Host(check.get('adb',args.adb)))
         if live_failures: p.error('refusing start: preconditions changed: '+','.join(live_failures))
         if state_path.exists() or (directory/'stop').exists() or (directory/'pause').exists():
             p.error('refusing start: window already has state or a cancellation marker')
@@ -904,15 +1000,15 @@ def main():
         for name in ('restorer.ready','monitor.ready','monitor.json'):
             (directory/name).unlink(missing_ok=True)
         nonce=uuid.uuid4().hex
-        state={'schema':1,'window_id':directory.name,'serial':arm['headset_serial'],'adb':check.get('adb',args.adb),'deadline_epoch_s':window['deadline'].timestamp(),'snapshot':check['snapshot'],'restoration':{'status':'pending'},'guards_ready':False,'guard_pids':{},'guard_nonce':nonce,'arm_sha256':arm_digest(arm)}
+        state={'schema':1,'window_id':directory.name,'serial':arm['headset_serial'],'adb':check.get('adb',args.adb),'deadline_epoch_s':window['deadline'].timestamp(),'snapshot':check['snapshot'],'restoration':{'status':'pending'},'guards_ready':False,'guard_pids':{},'guard_nonce':nonce,'guard_started_epoch_s':utc_now().timestamp(),'arm_path':str(args.arm.resolve()),'arm_sha256':arm_digest(arm)}
         atomic_write(state_path,state)
         r=spawn_worker(state_path,False)
-        if not wait_for_guard(directory,'restorer',nonce,r.pid) or not pid_alive(r.pid):
+        if not wait_for_guard(directory,'restorer',nonce,r.pid,minimum_epoch_s=state['guard_started_epoch_s']) or not pid_alive(r.pid):
             (directory/'stop').write_text('restorer failed readiness\n',encoding='utf-8')
             p.error('refusing start: deadline restorer did not become ready')
         state=json_read(state_path); state['guard_pids']['restorer']=r.pid; atomic_write(state_path,state)
         m=spawn_worker(state_path,True)
-        if not wait_for_guard(directory,'monitor',nonce,m.pid) or not pid_alive(m.pid):
+        if not wait_for_guard(directory,'monitor',nonce,m.pid,minimum_epoch_s=state['guard_started_epoch_s']) or not pid_alive(m.pid):
             (directory/'stop').write_text('monitor failed readiness\n',encoding='utf-8')
             p.error('refusing start: thermal monitor did not become ready')
         state=json_read(state_path); state['guard_pids']['monitor']=m.pid; state['guards_ready']=True; atomic_write(state_path,state)

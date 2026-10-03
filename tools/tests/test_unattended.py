@@ -1,4 +1,4 @@
-import json
+import json, time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import pytest
@@ -82,7 +82,7 @@ def test_guard_readiness_is_bound_to_new_nonce_and_pid(tmp_path):
     assert not u.wait_for_guard(tmp_path,'restorer','new',10,timeout_s=0)
     u.atomic_write(tmp_path/'restorer.ready', {'role':'restorer','pid':9,'nonce':'old','ready_utc':'now'})
     assert not u.wait_for_guard(tmp_path,'restorer','new',10,timeout_s=0.01)
-    u.atomic_write(tmp_path/'restorer.ready', {'role':'restorer','pid':10,'nonce':'new','ready_utc':'now'})
+    u.atomic_write(tmp_path/'restorer.ready', {'role':'restorer','pid':10,'nonce':'new','ready_utc':u.utc_now().isoformat()})
     assert u.wait_for_guard(tmp_path,'restorer','new',10,timeout_s=0.1)
 
 
@@ -93,7 +93,7 @@ def test_status_lease_fails_closed_for_guard_staleness_or_revoke(monkeypatch, tm
            'guard_pids':{'restorer':11,'monitor':12},'arm_sha256':u.arm_digest(json.loads(arm.read_text())),'guard_nonce':'n','monitor':{'last_sample_epoch_s':now.timestamp()},
            'restoration':{'status':'pending'}}
     u.atomic_write(tmp_path/'state.json',state)
-    for name in ('restorer.ready','monitor.ready'): u.atomic_write(tmp_path/name, {'pid':11 if name.startswith('restorer') else 12,'role':'restorer' if name.startswith('restorer') else 'monitor','nonce':'n','ready_utc':'now'})
+    for name in ('restorer.ready','monitor.ready'): u.atomic_write(tmp_path/name, {'pid':11 if name.startswith('restorer') else 12,'role':'restorer' if name.startswith('restorer') else 'monitor','nonce':'n','ready_utc':now.isoformat()})
     monkeypatch.setattr(u,'pid_alive',lambda pid: True)
     status=u.status_payload(tmp_path,arm,now)
     assert status['lease']['active']
@@ -113,7 +113,7 @@ def test_start_orders_guards_before_ready_state(monkeypatch, tmp_path):
         def __init__(self,pid): self.pid=pid
     def spawn(path, monitor):
         role='monitor' if monitor else 'restorer'; order.append(role); state=u.json_read(path)
-        u.atomic_write(tmp_path/(role+'.ready'), {'pid':20 if monitor else 10,'role':role,'nonce':state['guard_nonce'],'ready_utc':'now'})
+        u.atomic_write(tmp_path/(role+'.ready'), {'pid':20 if monitor else 10,'role':role,'nonce':state['guard_nonce'],'ready_utc':u.utc_now().isoformat()})
         return Process(20 if monitor else 10)
     monkeypatch.setattr(u,'spawn_worker',spawn)
     monkeypatch.setattr(u,'load_arm',lambda path: (arm, {'deadline':deadline}))
@@ -138,7 +138,7 @@ def test_start_replaces_stale_ready_marker_with_nonce_bound_record(monkeypatch, 
         def __init__(self,pid): self.pid=pid
     def spawn(path, monitor):
         role='monitor' if monitor else 'restorer'; observed.append((role,(tmp_path/'restorer.ready').exists()))
-        state=u.json_read(path); u.atomic_write(tmp_path/(role+'.ready'), {'pid':20 if monitor else 10,'role':role,'nonce':state['guard_nonce'],'ready_utc':'new'})
+        state=u.json_read(path); u.atomic_write(tmp_path/(role+'.ready'), {'pid':20 if monitor else 10,'role':role,'nonce':state['guard_nonce'],'ready_utc':u.utc_now().isoformat()})
         return Process(20 if monitor else 10)
     monkeypatch.setattr(u,'load_arm',lambda path: (arm, {'deadline':deadline}))
     monkeypatch.setattr('tools.quest3.preflight.verify_snapshot',lambda records: [])
@@ -158,7 +158,7 @@ def test_start_refuses_before_monitor_when_restorer_is_not_ready(monkeypatch, tm
                                           'checked_utc':u.utc_now().isoformat(),'window':{'deadline_utc':deadline.isoformat()}})
     calls=[]
     monkeypatch.setattr(u,'spawn_worker',lambda path,monitor: calls.append(monitor) or type('P',(),{'pid':1})())
-    monkeypatch.setattr(u,'wait_for_guard',lambda *args: False)
+    monkeypatch.setattr(u,'wait_for_guard',lambda *args,**kwargs: False)
     monkeypatch.setattr(u,'load_arm',lambda path: (arm, {'deadline':deadline}))
     monkeypatch.setattr('tools.quest3.preflight.verify_snapshot',lambda records: [])
     monkeypatch.setattr(u,'live_preconditions',lambda arm,host: ([],{},0))
@@ -179,7 +179,7 @@ def test_status_checks_required_allow(monkeypatch, tmp_path):
            'monitor':{'last_sample_epoch_s':now.timestamp()},'restoration':{'status':'pending'}}
     u.atomic_write(tmp_path/'state.json',state)
     for name in ('restorer.ready','monitor.ready'):
-        u.atomic_write(tmp_path/name, {'pid':1 if name.startswith('restorer') else 2,'role':'restorer' if name.startswith('restorer') else 'monitor','nonce':'n','ready_utc':'now'})
+        u.atomic_write(tmp_path/name, {'pid':1 if name.startswith('restorer') else 2,'role':'restorer' if name.startswith('restorer') else 'monitor','nonce':'n','ready_utc':now.isoformat()})
     monkeypatch.setattr(u,'pid_alive',lambda pid: True)
     assert u.status_payload(tmp_path,arm,now,require_allow='chart_cells')['lease']['active']
     assert 'action_not_allowed' in u.status_payload(tmp_path,arm,now,require_allow='frame_bank_pc')['lease']['blockers']
@@ -217,7 +217,7 @@ def test_real_experiment_property_set_is_used():
 def test_ownership_record_requires_exact_identity_and_nonce(tmp_path):
     class OwnedHost:
         def process_identity(self,pid): return {'pid':pid,'path':'C:/q3pw/ALVR Dashboard.exe','started_epoch_s':10.0}
-    state={'guards_ready':True,'guard_nonce':'n','restoration':{'status':'pending'}}
+    state={'guards_ready':True,'guard_nonce':'n','deadline_epoch_s':time.time()+3600,'restoration':{'status':'pending'}}
     path=tmp_path/'state.json'; u.atomic_write(path,state)
     record={'role':'dashboard','pid':1,'path':'C:/q3pw/ALVR Dashboard.exe','started_epoch_s':10.0,'nonce':'n'}
     assert u.record_owned_runtime(path,record,OwnedHost())['role']=='dashboard'
