@@ -11,6 +11,12 @@ must confirm the selected wavelet in their activation logs, and the decoder
 must confirm Compute. These are PC image-quality comparisons, not Quest GPU
 timings. Reports preserve the explicit policy and observed activation.
 
+`framebank verify-tools --tools-metadata <packaged metadata>` performs the same
+provenance and dependency checks without executing any binary or using a GPU.
+Windows CI runs this against the finished package before uploading it. Both
+metadata files use the canonical, LF-normalized lock hash from the build-metadata
+tool; a Windows CRLF checkout must not produce a different offline-tool identity.
+
 The owner creates one lossless **90-frame** Metro encoder-input dump at the agreed fixed checkpoint. This is a supervised capture, separate from a rate capture. Record the matching build identity, exact render and encode geometry, color-range setting, checkpoint, and the measured centre projection density in a private capture record.
 
 Set the existing encoder dump controls only for the supervised capture:

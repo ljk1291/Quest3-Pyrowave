@@ -298,8 +298,9 @@ class FrameBankTests(unittest.TestCase):
         root=Path(fb.__file__).resolve().parents[2]
         with self.tmp() as t:
             folder=Path(t); tools={}
-            for name in ('encode','decode','psnr_hvs_m_h'):
-                tools[name]=folder/(name+'.exe'); tools[name].write_bytes(name.encode())
+            for name,filename in (('encode','pyrowave-encode.exe'),('decode','pyrowave-decode.exe'),
+                                  ('psnr_hvs_m_h','pyrowave-psnr-hvs-m.exe')):
+                tools[name]=folder/filename; tools[name].write_bytes(name.encode())
             source=folder/'HVS-SCORER-SOURCE.json'; source.write_text(json.dumps(hs.manifest()))
             shader=folder/'psnr_hvs_m.comp'
             shutil.copyfile(Path(__file__).parent/'fixtures/pyrowave-d2997ac-psnr_hvs_m.comp',shader)
@@ -322,6 +323,13 @@ class FrameBankTests(unittest.TestCase):
                            (('encode','encode_sha256'),('decode','decode_sha256'),('psnr_hvs_m_h','scorer_sha256'))}}
             path=folder/'FRAMEBANK-TOOLS-BUILD-METADATA.json'; path.write_text(json.dumps(meta))
             self.assertEqual(fb.verify_tools_build(tools,path)['repository_commit'],'a'*40)
+            # These are deliberately non-executable fixture bytes. Verification
+            # must work without launching codec/scorer processes or creating a GPU.
+            self.assertEqual(fb.main(['verify-tools','--tools-metadata',str(path)]),0)
+            meta['source_lock_sha256']='0'*64; path.write_text(json.dumps(meta))
+            with self.assertRaisesRegex(ValueError,'source provenance'):
+                fb.main(['verify-tools','--tools-metadata',str(path)])
+            meta['source_lock_sha256']=lock_hash; path.write_text(json.dumps(meta))
             original_shader=shader.read_bytes(); shader.write_bytes(b'changed shader')
             with self.assertRaisesRegex(ValueError,'shader'): fb.verify_tools_build(tools,path)
             shader.write_bytes(original_shader)

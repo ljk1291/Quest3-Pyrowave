@@ -276,7 +276,9 @@ jobs:
             $imports[$exe.Name] = @($rows)
           }
           @{ schema=1; kind='framebank_windows_imports'; tools=$imports } | ConvertTo-Json -Depth 5 | Set-Content out/FRAMEBANK-IMPORTS.json
-          $meta = @{ schema = 1; kind = 'pyrowave_framebank_tools_build'; source_lock_sha256 = (Get-FileHash sources.lock.json).Hash.ToLower(); source_psnr_cpp_sha256 = (Get-FileHash "$source/psnr.cpp").Hash.ToLower(); source_manifest_sha256 = (Get-FileHash "$source/PYROWAVE-HVS-PPD-SCORER.json").Hash.ToLower(); imports_manifest_sha256=(Get-FileHash out/FRAMEBANK-IMPORTS.json).Hash.ToLower(); tools = @{ scorer_sha256 = (Get-FileHash $scorer).Hash.ToLower(); encode_sha256 = (Get-FileHash $encode).Hash.ToLower(); decode_sha256 = (Get-FileHash $decode).Hash.ToLower() } } | ConvertTo-Json -Depth 3
+          $lockHash = python -c "import sys; from pathlib import Path; sys.path.insert(0,'tools/ci'); from build_metadata import source_lock_sha256; print(source_lock_sha256(Path('sources.lock.json')))"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $meta = @{ schema = 1; kind = 'pyrowave_framebank_tools_build'; source_lock_sha256 = $lockHash.Trim(); source_psnr_cpp_sha256 = (Get-FileHash "$source/psnr.cpp").Hash.ToLower(); source_manifest_sha256 = (Get-FileHash "$source/PYROWAVE-HVS-PPD-SCORER.json").Hash.ToLower(); imports_manifest_sha256=(Get-FileHash out/FRAMEBANK-IMPORTS.json).Hash.ToLower(); tools = @{ scorer_sha256 = (Get-FileHash $scorer).Hash.ToLower(); encode_sha256 = (Get-FileHash $encode).Hash.ToLower(); decode_sha256 = (Get-FileHash $decode).Hash.ToLower() } } | ConvertTo-Json -Depth 3
           Set-Content out/FRAMEBANK-TOOLS-BUILD-METADATA.json $meta
           python tools/ci/package_licenses.py "$env:XRWIRED_INPUTS/research" "$env:XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_streamer_windows/LICENSES"
           Compress-Archive "$env:XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_streamer_windows/LICENSES/*" out/FRAMEBANK-LICENSES.zip
@@ -284,6 +286,11 @@ jobs:
           Copy-Item tools/windows/quality-shaders.json "$env:XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_streamer_windows/WINDOWS-COMPOSITION-SHADERS.json"
           Compress-Archive "$env:XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_streamer_windows/*" out/Quest3-Pyrowave-Windows.zip
           python tools/ci/build_metadata.py write --platform windows --output out --pyrowave "$env:XRWIRED_INPUTS/research/pyrowave" --required-native "$env:XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_streamer_windows/bin/win64/driver_alvr_server.dll" "$env:XRWIRED_INPUTS/research/ALVR-20.13.0/build/alvr_streamer_windows/bin/win64/libpyrowave-shared-0.dll"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install --disable-pip-version-check -r tools/quest3/requirements-cpu.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m tools.xrbench.framebank verify-tools --tools-metadata out/FRAMEBANK-TOOLS-BUILD-METADATA.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           (Get-FileHash out/Quest3-Pyrowave-Windows.zip).Hash.ToLower() + '  Quest3-Pyrowave-Windows.zip' | Set-Content out/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
