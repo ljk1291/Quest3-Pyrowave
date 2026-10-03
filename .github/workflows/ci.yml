@@ -29,7 +29,7 @@ jobs:
       - run: python3 -m unittest discover -s tests -v
       - name: Geometry-control contract tests
         run: python3 -m unittest tools.tests.test_resolution -v
-      - run: python3 -m unittest tools.tests.test_xrbench_framebank tools.tests.test_xrbench_hvs_scorer tools.tests.test_xrbench_nvenc_framebank -v
+      - run: python3 -m unittest tools.tests.test_xrbench_framebank tools.tests.test_xrbench_hvs_scorer tools.tests.test_xrbench_nvenc_framebank tools.tests.test_xrbench_foveation -v
       - run: python3 -m unittest tools.tests.test_supervised -v
       - run: g++ -std=c++17 -Wall -Werror tools/pyroclient/decode_path_test.cpp -o /tmp/decode-path && /tmp/decode-path
       - run: g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/pass_profile_test.cpp -o /tmp/pass-profile && /tmp/pass-profile

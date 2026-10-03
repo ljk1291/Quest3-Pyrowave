@@ -34,6 +34,7 @@ apply_patch "$dest/ALVR-20.13.0" "$repo/patches/alvr-20.13.0-server-instrumentat
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/quest3-alvr.patch"
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/stable-baseline-alvr.patch"
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/fork-identity-alvr.patch"
+apply_patch "$dest/ALVR-20.13.0" "$repo/patches/wo8-foveation.patch"
 
 checkout "$PYROWAVE_URL" "$dest/pyrowave" "$PYROWAVE_BASE"
 # pyrowave's checkout_granite.sh pins a newer Granite (9d44761), which spiked encoder p99 to 14 ms;
