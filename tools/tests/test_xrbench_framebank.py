@@ -32,6 +32,13 @@ def lease(active=True):
 class FrameBankTests(unittest.TestCase):
     def tmp(self): return tempfile.TemporaryDirectory()
 
+    def test_generated_420_header_matches_pinned_native_reader(self):
+        info=fb.Y4MInfo(64,64,90,1,'420','FULL',6144,3)
+        header=fb._header(info)
+        self.assertIn(b' C420jpeg ',header)
+        self.assertNotIn(b' C420 ',header)
+        self.assertIn(b'XCOLORRANGE=FULL',header)
+
     def test_tiny_y4m_identity_schema_and_default_matrix(self):
         with self.tmp() as temp:
             source = tiny_source(Path(temp)); plan = fb.build_plan(source, 24.2, projection_evidence="test-projection", display_eye=(4,4), geometries=((4,4),(2,2)), fixture=True)

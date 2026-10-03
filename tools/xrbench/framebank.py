@@ -95,7 +95,8 @@ def iter_y4m(path:Path,info:Y4MInfo|None=None)->Iterator[tuple[int,list[np.ndarr
             yield index,planes,hashlib.sha256(raw).hexdigest()
 
 def _header(info:Y4MInfo)->bytes:
-    return f"YUV4MPEG2 W{info.width} H{info.height} F{info.fps_num}:{info.fps_den} Ip A1:1 C{info.chroma} XCOLORRANGE={info.color_range}\n".encode("ascii")
+    chroma='420jpeg' if info.chroma=='420' else info.chroma
+    return f"YUV4MPEG2 W{info.width} H{info.height} F{info.fps_num}:{info.fps_den} Ip A1:1 C{chroma} XCOLORRANGE={info.color_range}\n".encode("ascii")
 
 def write_y4m(path:Path,info:Y4MInfo,frames:Sequence[Sequence[np.ndarray]])->list[str]:
     path=Path(path); path.parent.mkdir(parents=True,exist_ok=True); hashes=[]
