@@ -15,6 +15,16 @@ period, and longest ACK-delivery stall. These values include the ACK return path
 and receiver scheduling. They do not claim one-way latency, decoder completion,
 fresh submissions, display FPS, or optical latency.
 
+Writes and ACK reads run concurrently with at most three outstanding frames.
+A late ACK is retained rather than terminating the test at one frame period.
+Socket I/O and the final ACK drain are bounded to one second by default. An
+incomplete write terminates that TCP stream because its framing cannot safely
+continue. Every scheduled slot remains in the late-share denominator; partial
+writes, skipped slots and unacknowledged frames are separate fields. The reported
+longest completed ACK delay excludes missing ACKs, whose censored lower bound is
+reported separately. Receiver/protocol errors or sender/receiver count mismatches
+make the run incomplete rather than producing a passing delivery result.
+
 Before and after each TCP rate, the tool reads `cmd wifi status` and `dumpsys wifi`.
 It keeps only link rate, band, channel and channel width; SSID, BSSID and IP data
 are discarded. A missing field remains unknown.

@@ -67,7 +67,7 @@ def parse_wifi_status(text):
         "channel": r"(?:channel(?:\s*number)?)\s*[:=]\s*(\d+)",
         "channel_width_mhz": r"(?:channel\s*width|channelWidth)\s*[:=]\s*(\d+)\s*MHz",
         "channel_width_enum": r"(?:channelBandwidth|channel\s*bandwidth)\s*[:=]\s*([0-5])\b",
-        "band": r"(?:band|wifi\s*standard\s*band)\s*[:=]\s*([256])\s*(?:GHz|ghz)",
+        "band": r"(?:band|wifi\s*standard\s*band)\s*[:=]\s*(2\.4|5|6)\s*GHz",
         "frequency": r"(?:frequency|freq)\s*[:=]\s*(\d+)\s*MHz",
     }
     found = {name: re.search(pattern, text, flags=re.IGNORECASE) for name, pattern in patterns.items()}
@@ -133,17 +133,20 @@ def _recv_exact(sock, size):
 
 
 def tcp_sender(ip, port, mbps, seconds, hz, connect=socket.create_connection, clock=time.perf_counter,
-               sleeper=time.sleep, max_in_flight=3):
-    """Write one capped frame at each deadline and wait for its receiver ACK.
+               sleeper=time.sleep, max_in_flight=3, io_timeout_s=1.0):
+    """Pace writes independently of ACKs, with a bounded outstanding-frame queue.
 
-    Waiting prevents local socket buffering from masquerading as remote delivery.
-    A late ACK skips missed deadlines rather than creating a catch-up burst.
+    Missed slots remain in the denominator. Delayed delivery is measured rather
+    than aborting on the first 11.1-ms miss; an incomplete TCP write is fatal
+    because the next header could otherwise be mistaken for payload.
     """
     payload_bytes = frame_byte_cap(mbps, hz)
     period = 1.0 / hz
     payload = bytes(payload_bytes)
     if max_in_flight < 1:
         raise ValueError("max_in_flight must be positive")
+    if not 0 < io_timeout_s <= 5:
+        raise ValueError("I/O timeout must be positive and at most five seconds")
     ack_times_ms, schedule_lag_ms, acked, pending_ids = [], [], {}, set()
     receiver_error = [None]
     stream_incomplete = [False]
@@ -151,7 +154,7 @@ def tcp_sender(ip, port, mbps, seconds, hz, connect=socket.create_connection, cl
     scheduled = max(0, int(seconds * hz))
     with connect((str(ip), port), timeout=10) as sock:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        sock.settimeout(period)  # Bounds both writer backpressure and receiver reads.
+        sock.settimeout(io_timeout_s)
         # Connection setup is intentionally outside the measured interval.
         def reader():
             pending = b""
@@ -161,8 +164,12 @@ def tcp_sender(ip, port, mbps, seconds, hz, connect=socket.create_connection, cl
                 except socket.timeout:
                     continue
                 except OSError:
-                    receiver_error[0] = "receiver_socket_error"; return
+                    if not stopped.is_set() and receiver_error[0] is None:
+                        receiver_error[0] = "receiver_socket_error"
+                    return
                 if not chunk:
+                    if not stopped.is_set() and receiver_error[0] is None:
+                        receiver_error[0] = "receiver_closed"
                     return
                 pending += chunk
                 while len(pending) >= 8:
@@ -170,14 +177,20 @@ def tcp_sender(ip, port, mbps, seconds, hz, connect=socket.create_connection, cl
                     if ack[:4] != TCP_ACK_MAGIC:
                         receiver_error[0] = "invalid_receiver_ack"; return
                     with lock:
-                        item = acked.get(int.from_bytes(ack[4:], "big"))
-                        if item is not None and item["ack"] is None:
-                            item["ack"] = clock()
-                            pending_ids.discard(int.from_bytes(ack[4:], "big"))
+                        frame_id = int.from_bytes(ack[4:], "big")
+                        item = acked.get(frame_id)
+                        if item is None or item["ack"] is not None:
+                            receiver_error[0] = "unknown_or_duplicate_ack"
+                            return
+                        item["ack"] = clock()
+                        pending_ids.discard(frame_id)
         worker = threading.Thread(target=reader, daemon=True)
         worker.start()
         start = clock()
         for frame_id in range(scheduled):
+            if receiver_error[0]:
+                stream_incomplete[0] = True
+                break
             deadline = start + frame_id * period
             now = clock()
             if now < deadline:
@@ -190,10 +203,13 @@ def tcp_sender(ip, port, mbps, seconds, hz, connect=socket.create_connection, cl
                 continue
             header = TCP_HEADER_MAGIC + frame_id.to_bytes(4, "big") + payload_bytes.to_bytes(4, "big")
             with lock:
-                acked[frame_id] = {"start": write_start, "deadline": deadline + period, "ack": None}
+                acked[frame_id] = {"start": write_start, "deadline": deadline + period,
+                                   "ack": None, "write_complete": False}
                 pending_ids.add(frame_id)
             try:
                 sock.sendall(header); sock.sendall(payload)
+                with lock:
+                    acked[frame_id]["write_complete"] = True
             except (OSError, socket.timeout):
                 # sendall() may have put a prefix of this frame on the wire. A new
                 # header on the same TCP connection would then be parsed as payload;
@@ -205,32 +221,44 @@ def tcp_sender(ip, port, mbps, seconds, hz, connect=socket.create_connection, cl
                 except OSError:
                     pass
                 break
-        drain_deadline = clock() + period
+        drain_deadline = clock() + io_timeout_s
         while clock() < drain_deadline:
             with lock:
                 if not pending_ids: break
             sleeper(min(.001, max(0, drain_deadline - clock())))
-        stopped.set(); worker.join(timeout=.2)
+        stopped.set()
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        worker.join(timeout=io_timeout_s + .5)
+        if worker.is_alive():
+            receiver_error[0] = "receiver_thread_not_stopped"
+            stream_incomplete[0] = True
     with lock:
         completed = list(acked.values())
     for item in completed:
         if item["ack"] is not None:
             ack_times_ms.append((item["ack"] - item["start"]) * 1000.0)
     on_time = sum(item["ack"] is not None and item["ack"] <= item["deadline"] for item in completed)
-    written = len(completed)
+    attempted = len(completed)
+    written = sum(item["write_complete"] for item in completed)
     acknowledged = sum(item["ack"] is not None for item in completed)
     late = scheduled - on_time
     elapsed = max(clock() - start, 0.0)
     return {"target_mbps": mbps, "seconds": elapsed, "hz": hz, "frame_period_ms": period * 1000.0,
-            "frame_byte_cap": payload_bytes, "scheduled_frames": scheduled, "frames_written": written, "frames_acknowledged": acknowledged,
-            "skipped_frame_deadlines": scheduled - written, "ack_delivery_ms_p50": percentile(ack_times_ms, .50),
+            "frame_byte_cap": payload_bytes, "scheduled_frames": scheduled,
+            "frames_attempted": attempted, "frames_written": written, "frames_acknowledged": acknowledged,
+            "partial_frames": attempted-written,
+            "skipped_frame_deadlines": scheduled - attempted, "ack_delivery_ms_p50": percentile(ack_times_ms, .50),
             "ack_delivery_ms_p99": percentile(ack_times_ms, .99),
             "ack_delivery_ms_p99_9": percentile(ack_times_ms, .999),
             "longest_ack_delivery_stall_ms": max(ack_times_ms) if ack_times_ms else None,
             "schedule_lag_ms_p99": percentile(schedule_lag_ms, .99),
             "frames_on_time_against_period": on_time, "frames_late_against_period": late,
             "late_frame_share_percent": 100.0 * late / scheduled if scheduled else None,
-            "unacknowledged_frames": written - acknowledged,
+            "unacknowledged_frames": attempted - acknowledged,
+            "io_timeout_s": io_timeout_s,
             "censored_stall_lower_bound_ms": max((clock() - item["start"]) * 1000.0 for item in completed if item["ack"] is None) if any(item["ack"] is None for item in completed) else None,
             "receiver_error": receiver_error[0], "stream_incomplete": stream_incomplete[0],
             "acknowledged_payload_mbps": (acknowledged * payload_bytes * 8 / elapsed / 1e6) if elapsed else None,
@@ -281,6 +309,8 @@ def run_tcp(adb, serial, ip, receiver, mbps, seconds, hz):
             proc.terminate()
             proc.wait(timeout=5)
     complete = (sender["frames_acknowledged"] == rx.get("acks_sent")
+                and sender["frames_written"] == rx.get("frames_received")
+                and rx.get("bad_frames") == 0 and rx.get("incomplete") is False
                 and sender["receiver_error"] is None and not sender["stream_incomplete"])
     return {"schema_version": 2, "type": "network_only_tcp_frame_paced", "complete": complete, "sender": sender, "receiver": rx,
             "wifi_before": wifi_before, "wifi_after": wifi_readback(adb, serial),

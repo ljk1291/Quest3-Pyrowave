@@ -27,100 +27,111 @@ def test_wifi_parser_understands_android_channel_width_enum_and_frequency_only_c
 
 
 class _FakeSocket:
-    def __init__(self, ack):
-        self.ack = ack
+    """In-memory TCP peer: ACKs only complete received payloads, never preloads ACKs."""
+    def __init__(self, *, ack_delay=0, drop=False, partial=False, bad_ack=False):
+        import threading
+        self.condition = threading.Condition()
+        self.acks = []
         self.sent = []
-        self.timeout = None
+        self.header = None
+        self.closed = False
+        self.timeout = 1
+        self.delay, self.drop, self.partial, self.bad_ack = ack_delay, drop, partial, bad_ack
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *unused):
-        return False
-
-    def settimeout(self, value):
-        self.timeout = value
-
-    def setsockopt(self, *unused):
-        pass
+    def __enter__(self): return self
+    def __exit__(self, *unused): self.shutdown(); return False
+    def settimeout(self, value): self.timeout = value
+    def setsockopt(self, *unused): pass
+    def shutdown(self, *unused):
+        with self.condition:
+            self.closed = True
+            self.condition.notify_all()
 
     def sendall(self, data):
-        self.sent.append(data)
+        import time
+        with self.condition:
+            self.sent.append(data)
+            if self.header is None:
+                self.header = data
+                return
+            if self.partial: raise TimeoutError("partial payload")
+            assert len(data) == int.from_bytes(self.header[8:], 'big')
+            if not self.drop:
+                frame_id = int.from_bytes(self.header[4:8], 'big') + (100 if self.bad_ack else 0)
+                self.acks.append((time.perf_counter()+self.delay, b'Q3TA'+frame_id.to_bytes(4, 'big')))
+            self.header = None
+            self.condition.notify_all()
 
     def recv(self, count):
-        out, self.ack = self.ack[:count], self.ack[count:]
-        return out
+        import time
+        from socket import timeout
+        with self.condition:
+            until = time.perf_counter() + self.timeout
+            while not self.closed:
+                now = time.perf_counter()
+                if self.acks and self.acks[0][0] <= now:
+                    return self.acks.pop(0)[1]
+                if now >= until: raise timeout()
+                wake = min(until, self.acks[0][0]) if self.acks else until
+                self.condition.wait(max(.0001, wake-now))
+            return b''
 
 
-class _PartialWriteSocket(_FakeSocket):
-    def __init__(self):
-        super().__init__(b"")
-        self.calls = 0
-
-    def sendall(self, data):
-        self.calls += 1
-        self.sent.append(data)
-        if self.calls == 2:  # header completed; payload may have been partially written.
-            raise TimeoutError("simulated partial payload write")
-
-    def shutdown(self, *unused):
-        pass
+def _send(sock, **kwargs):
+    return network.tcp_sender('192.0.2.1', 45200, 1, .08, 50,
+                              connect=lambda *a, **kw: sock, io_timeout_s=.12, **kwargs)
 
 
-class _Tick:
-    def __init__(self):
-        self.value = 0.0
-
-    def __call__(self):
-        self.value += .001
-        return self.value
-
-
-def test_tcp_sender_counts_receiver_ack_not_local_write_completion():
-    sock = _FakeSocket(b"Q3TA" + (0).to_bytes(4, "big"))
-    ticks = _Tick()
-    result = network.tcp_sender("192.0.2.1", 45200, 1, .02, 90,
-                                connect=lambda *unused, **kwargs: sock,
-                                clock=ticks, sleeper=lambda _seconds: None)
-    assert result["scheduled_frames"] == 1
-    assert result["frames_written"] == 1
-    assert result["frames_acknowledged"] <= result["frames_written"]
-    assert result["late_frame_share_percent"] >= 0.0
-    assert len(sock.sent) == 2 and sock.sent[0][:4] == b"Q3TF"
-    assert "not one-way/decode/presentation" in result["delivery_semantics"]
+def test_tcp_sender_counts_completed_remote_payloads():
+    sock = _FakeSocket()
+    result = _send(sock)
+    assert result['scheduled_frames'] == 4
+    assert result['frames_acknowledged'] == result['frames_written'] > 0
+    assert result['receiver_error'] is None
+    assert result['partial_frames'] == 0
+    assert sock.closed
+    assert 'not one-way/decode/presentation' in result['delivery_semantics']
 
 
-def test_tcp_sender_marks_unacknowledged_scheduled_frame_late():
-    sock = _FakeSocket(b"Q3TA" + (4).to_bytes(4, "big"))
-    ticks = _Tick()
-    result = network.tcp_sender("192.0.2.1", 45200, 1, .02, 90,
-                                connect=lambda *unused, **kwargs: sock,
-                                clock=ticks, sleeper=lambda _seconds: None)
-    assert result["scheduled_frames"] == 1
-    assert result["frames_on_time_against_period"] == 0
-    assert result["late_frame_share_percent"] == 100.0
+def test_late_ack_is_measured_without_aborting_at_one_frame_period():
+    sock = _FakeSocket(ack_delay=.045)
+    result = _send(sock)
+    assert result['frames_acknowledged'] == result['frames_written'] > 1
+    assert result['ack_delivery_ms_p50'] >= 45
+    assert result['frames_on_time_against_period'] == 0
+    assert result['frames_late_against_period'] == 4
+    assert result['receiver_error'] is None
+    assert result['stream_incomplete'] is False
+    assert sock.timeout > result['frame_period_ms']/1000
 
 
 def test_backpressure_counts_every_deadline_instead_of_hiding_skipped_frames():
-    sock = _FakeSocket(b"")
-    result = network.tcp_sender("192.0.2.1", 45200, 1, .04, 90,
-                                connect=lambda *unused, **kwargs: sock,
-                                clock=_Tick(), sleeper=lambda _seconds: None,
-                                max_in_flight=1)
-    assert result["scheduled_frames"] == 3
-    assert result["frames_written"] == 1
-    assert result["skipped_frame_deadlines"] == 2
-    assert result["frames_late_against_period"] == 3
-    assert result["late_frame_share_percent"] == 100.0
+    result = _send(_FakeSocket(drop=True), max_in_flight=1)
+    assert result['scheduled_frames'] == 4
+    assert result['frames_written'] == 1
+    assert result['skipped_frame_deadlines'] == 3
+    assert result['frames_late_against_period'] == 4
+    assert result['unacknowledged_frames'] == 1
+    assert result['censored_stall_lower_bound_ms'] >= 100
+    assert result['late_frame_share_percent'] == 100
 
 
 def test_partial_write_terminates_stream_without_a_second_frame_header():
-    sock = _PartialWriteSocket()
-    result = network.tcp_sender("192.0.2.1", 45200, 1, .04, 90,
-                                connect=lambda *unused, **kwargs: sock,
-                                clock=_Tick(), sleeper=lambda _seconds: None)
-    assert result["scheduled_frames"] == 3
-    assert result["stream_incomplete"] is True
-    assert result["receiver_error"] == "partial_or_timed_out_write"
-    assert sum(packet.startswith(b"Q3TF") for packet in sock.sent) == 1
-    assert result["frames_late_against_period"] == 3
+    sock = _FakeSocket(partial=True)
+    result = _send(sock)
+    assert result['scheduled_frames'] == 4
+    assert result['stream_incomplete'] is True
+    assert result['receiver_error'] == 'partial_or_timed_out_write'
+    assert result['partial_frames'] == 1 and result['frames_written'] == 0
+    assert sum(packet.startswith(b'Q3TF') for packet in sock.sent) == 1
+    assert result['frames_late_against_period'] == 4
+
+
+def test_unknown_ack_invalidates_receiver_instead_of_disappearing():
+    result = _send(_FakeSocket(bad_ack=True))
+    assert result['receiver_error'] == 'unknown_or_duplicate_ack'
+    assert result['frames_acknowledged'] == 0
+
+
+def test_wifi_parser_preserves_decimal_band():
+    assert network.parse_wifi_status('band: 2.4GHz')['band'] == '2.4 GHz'
