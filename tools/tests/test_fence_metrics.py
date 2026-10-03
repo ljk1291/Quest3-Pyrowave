@@ -72,6 +72,36 @@ class FenceMetricsTests(unittest.TestCase):
             self.assertAlmostEqual(m.histogram_percentile(hist, percentile),
                                    np.percentile(values, percentile, method='linear'))
 
+    def test_region_limits_threshold_and_scoring_without_painting_false_edges(self):
+        r = self.reference()
+        region = np.zeros(r.shape, bool)
+        region[8:24, 10:22] = True
+        mask, _ = m.edge_mask(r, region)
+        self.assertFalse(mask[~region].any())
+        self.assertTrue(mask[8:24, 15:17].all())
+        self.assertFalse(mask[:, 10].any())
+        empty, threshold = m.edge_mask(r, np.zeros_like(region))
+        self.assertFalse(empty.any())
+        self.assertIsNone(threshold)
+
+    def test_matching_blur_keeps_sharp_mask_even_if_blurred_reference_is_flat(self):
+        sharp = self.reference()
+        blurred = np.full(sharp.shape, 120, np.uint8)
+        acc = m.FenceAccumulator(((1, 2),))
+        for t in (1, 2):
+            acc.add(t, blurred, blurred, mask_reference=sharp)
+        row = acc.report()['1-2']
+        self.assertTrue(row['valid'])
+        self.assertEqual(row['edge_psnr_y_db'], math.inf)
+        self.assertEqual(row['shimmer_mean'], 0)
+
+    def test_region_and_mask_reference_geometry_rejected(self):
+        r = self.reference()
+        for mask in (np.ones((3, 3), bool), np.ones(r.shape, np.uint8)):
+            with self.assertRaises(ValueError): m.edge_mask(r, mask)
+        with self.assertRaises(ValueError):
+            m.FenceAccumulator().add(1, r, r, mask_reference=r[:3])
+
     def test_missing_frames_geometry_drift_and_wrong_dtype_rejected(self):
         acc = m.FenceAccumulator()
         r = self.reference()

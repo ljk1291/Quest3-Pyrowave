@@ -91,7 +91,7 @@ def map_rectangle(rect, geometry):
                 retained_area_fraction=max(0, right-left)*max(0, bottom-top)/(w*h))
 
 
-def edge_mask(reference):
+def edge_mask(reference, region_mask=None):
     """Per-frame top-5% Sobel magnitude on valid interior; retain positive ties.
 
     Excluding the outer pixel avoids crop-border padding edges. Squared magnitude
@@ -106,9 +106,14 @@ def edge_mask(reference):
     gy = (r[2:, :-2]+2*r[2:, 1:-1]+r[2:, 2:]
           -r[:-2, :-2]-2*r[:-2, 1:-1]-r[:-2, 2:])
     mag = gx*gx+gy*gy
-    threshold = float(np.percentile(mag, 95, method='linear'))
+    region = np.ones(reference.shape, dtype=bool) if region_mask is None else region_mask
+    if region.dtype != np.bool_ or region.shape != reference.shape:
+        raise ValueError('region mask must be boolean and match the luma region')
+    eligible = region[1:-1, 1:-1]
+    threshold = float(np.percentile(mag[eligible], 95, method='linear')) if eligible.any() else None
     mask = np.zeros(reference.shape, dtype=bool)
-    mask[1:-1, 1:-1] = (mag >= threshold) & (mag > 0)
+    if threshold is not None:
+        mask[1:-1, 1:-1] = (mag >= threshold) & (mag > 0) & eligible
     return mask, threshold
 
 
@@ -126,8 +131,9 @@ def histogram_percentile(histogram, percentile):
 
 
 class FenceAccumulator:
-    def __init__(self, windows=WINDOWS):
+    def __init__(self, windows=WINDOWS, *, region_mask=None):
         self.windows = tuple(windows)
+        self.region_mask = region_mask
         self.data = {f'{a}-{b}': dict(edge=np.zeros(256, dtype=np.int64),
                                      temporal=np.zeros(511, dtype=np.int64),
                                      frames=0, pairs=0, masked_frames=0,
@@ -136,14 +142,16 @@ class FenceAccumulator:
         self.last_frame = 0
         self.shape = None
 
-    def add(self, frame_number, reference, decoded):
+    def add(self, frame_number, reference, decoded, *, mask_reference=None):
         if frame_number != self.last_frame+1:
             raise ValueError('frames must be consecutive and one-based')
         if decoded.dtype != np.uint8 or decoded.shape != reference.shape:
             raise ValueError('decoded luma must match reference shape/dtype')
         if self.shape is not None and reference.shape != self.shape:
             raise ValueError('region geometry changed')
-        mask, threshold = edge_mask(reference)
+        if mask_reference is not None and mask_reference.shape != reference.shape:
+            raise ValueError('mask-reference geometry mismatch')
+        mask, threshold = edge_mask(reference if mask_reference is None else mask_reference, self.region_mask)
         error = decoded.astype(np.int16)-reference.astype(np.int16)
         for a, b in self.windows:
             if a <= frame_number <= b:
@@ -183,7 +191,8 @@ class FenceAccumulator:
         return out
 
 
-def score_y4m(reference, decoded, rect, guard=None):
+def score_y4m(reference, decoded, rect, guard=None, *, region_mask=None, region_descriptor=None,
+               mask_reference=None):
     reference, decoded = Path(reference), Path(decoded)
     if guard:
         guard.status()
@@ -197,23 +206,47 @@ def score_y4m(reference, decoded, rect, guard=None):
         raise ValueError('rectangle falls outside eye')
     if rect['eye'] == 'right':
         x += ri.width//2
-    acc = FenceAccumulator()
+    mask_path = Path(mask_reference) if mask_reference is not None else reference
+    mi = fb.inspect_y4m(mask_path)
+    if mi != ri:
+        raise ValueError('mask-reference sequence format/length mismatch')
+    if region_mask is not None and (region_mask.dtype != np.bool_ or region_mask.shape != (h,w)):
+        raise ValueError('region mask must match the scored rectangle')
+    descriptor = json.loads(json.dumps(region_descriptor, allow_nan=False))
+    acc = FenceAccumulator(region_mask=region_mask)
     identity = []
-    for (i, ref, rh), (j, dec, dh) in zip(fb.iter_y4m(reference, ri), fb.iter_y4m(decoded, di)):
-        if i != j:
+    for (i, ref, rh), (j, dec, dh), (k, mr, mh) in zip(fb.iter_y4m(reference, ri), fb.iter_y4m(decoded, di), fb.iter_y4m(mask_path, mi)):
+        if i != j or i != k:
             raise ValueError('frame identity mismatch')
         if guard and i % 10 == 0:
             guard.status()
-        acc.add(i+1, ref[0][y:y+h, x:x+w], dec[0][y:y+h, x:x+w])
-        identity.append(dict(frame=i+1, reference_sha256=rh, decoded_sha256=dh))
+        acc.add(i+1, ref[0][y:y+h, x:x+w], dec[0][y:y+h, x:x+w], mask_reference=mr[0][y:y+h, x:x+w])
+        identity.append(dict(frame=i+1, reference_sha256=rh, decoded_sha256=dh, mask_reference_sha256=mh))
     if guard:
         guard.status()
     return dict(schema=1, kind='fence_sequence_error', rectangle=dict(rect),
                 reference_sha256=fb.sha256_file(reference), decoded_sha256=fb.sha256_file(decoded),
-                frame_identity=identity, windows=acc.report(),
+                frame_identity=identity, windows=acc.report(), mask_reference_sha256=fb.sha256_file(mask_path),
+                region_descriptor=descriptor,
+                region_mask=None if region_mask is None else dict(shape=list(region_mask.shape),
+                    selected_pixels=int(region_mask.sum()), sha256=hashlib.sha256(region_mask.tobytes(order='C')).hexdigest()),
                 mask='per-current-reference-frame Sobel top 5%; positive threshold ties included; valid interior',
                 temporal='absolute difference of decoded and reference temporal deltas; current-frame mask',
                 optical_shimmer_measured=False)
+
+
+def score_against_references(sharp_reference, decoded, rect, guard=None, *,
+                             matching_blur_reference=None, region_mask=None, region_descriptor=None):
+    """Compare sharp/blurred references on the SAME sharp-derived edge mask.
+
+    Using blurred edges to choose a new mask would reward hiding the original
+    edges. Both comparisons record reference and mask identities independently.
+    """
+    kwargs = dict(region_mask=region_mask, region_descriptor=region_descriptor, mask_reference=sharp_reference)
+    result = {'sharp_reference': score_y4m(sharp_reference, decoded, rect, guard, **kwargs)}
+    if matching_blur_reference is not None:
+        result['matching_blur_reference'] = score_y4m(matching_blur_reference, decoded, rect, guard, **kwargs)
+    return result
 
 
 def main(argv=None):
