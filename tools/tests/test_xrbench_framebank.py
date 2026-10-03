@@ -223,4 +223,40 @@ class FrameBankTests(unittest.TestCase):
         public=fb.sanitized_report({"complete":False,"failure_reasons":["cell_failed"],"cells":[{"wavelet":"haar","source_frame_identity":["private"],"error":"cell_failed"}]})
         self.assertNotIn("source_frame_identity",public["cells"][0]);self.assertFalse(public["complete"])
 
+    def test_codec_environment_clears_inherited_experiments(self):
+        env,record=fb.codec_environment({'PATH':'keep','PYROWAVE_FORCE_FRAGMENT':'1',
+                'PYROWAVE_FUSED_HAAR':'1','pyrowave_batch_dequant':'1','PYROWAVE_LEGACY_GAINS':'1'},'haar')
+        self.assertEqual(env,{'PATH':'keep','PYROWAVE_WAVELET':'haar','PYROWAVE_FORCE_COMPUTE':'1'})
+        self.assertEqual(record['set']['PYROWAVE_WAVELET'],'haar')
+        with self.assertRaises(ValueError): fb.codec_environment({},'unknown')
+
+    def test_tools_metadata_binds_binary_hashes_and_dependency_revisions(self):
+        from xrbench import hvs_scorer as hs
+        import hashlib
+        root=Path(fb.__file__).resolve().parents[2]
+        with self.tmp() as t:
+            folder=Path(t); tools={}
+            for name in ('encode','decode','psnr_hvs_m_h'):
+                tools[name]=folder/(name+'.exe'); tools[name].write_bytes(name.encode())
+            source=folder/'HVS-SCORER-SOURCE.json'; source.write_text(json.dumps(hs.manifest()))
+            lock=json.loads((root/'sources.lock.json').read_text())
+            lock_hash=hashlib.sha256((root/'sources.lock.json').read_bytes().replace(b'\r\n',b'\n')).hexdigest()
+            fork=json.loads((root/'fork.json').read_text())
+            build={'repository_commit':'a'*40,'sources_lock_sha256':lock_hash,'dependency_revisions':lock,
+                   'shader_hashes':{'test':'b'*64},'protocol_version':fork['protocol_version'],
+                   'client_package_id':fork['client_package_id'],
+                   'artifact_sha256':{path.name:fb.sha256_file(path) for path in tools.values()}}
+            build_path=folder/'BUILD-METADATA.json'; build_path.write_text(json.dumps(build))
+            meta={'schema':1,'kind':'pyrowave_framebank_tools_build','source_lock_sha256':lock_hash,
+                  'source_psnr_cpp_sha256':hs.PATCHED_PSNR_SHA256,'source_manifest_sha256':fb.sha256_file(source),
+                  'tools':{field:fb.sha256_file(tools[name]) for name,field in
+                           (('encode','encode_sha256'),('decode','decode_sha256'),('psnr_hvs_m_h','scorer_sha256'))}}
+            path=folder/'FRAMEBANK-TOOLS-BUILD-METADATA.json'; path.write_text(json.dumps(meta))
+            self.assertEqual(fb.verify_tools_build(tools,path)['repository_commit'],'a'*40)
+            tools['decode'].write_bytes(b'changed')
+            with self.assertRaisesRegex(ValueError,'binary differs'): fb.verify_tools_build(tools,path)
+            tools['decode'].write_bytes(b'decode')
+            build['dependency_revisions']['pyrowave']['commit']='0'*40; build_path.write_text(json.dumps(build))
+            with self.assertRaisesRegex(ValueError,'identity'): fb.verify_tools_build(tools,path)
+
 if __name__ == "__main__": unittest.main()

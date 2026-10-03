@@ -337,6 +337,48 @@ def required_tools(tools):
     if missing: raise FileNotFoundError("required scorer/codec tool unavailable: "+", ".join(missing))
 def tool_provenance(tools): return {n:{"sha256":sha256_file(p),"basename":p.name} for n,v in tools.items() if (p:=_tool_path(v)) is not None}
 
+def codec_environment(base, wavelet):
+    """Reject inherited codec experiments by constructing one explicit policy."""
+    if wavelet not in WAVELETS: raise ValueError('unsupported wavelet')
+    env={key:value for key,value in base.items() if not key.upper().startswith('PYROWAVE_')}
+    effective={'PYROWAVE_WAVELET':wavelet,'PYROWAVE_FORCE_COMPUTE':'1'}
+    env.update(effective)
+    return env,{'set':effective,'other_pyrowave_variables':'unset',
+                'decode_path':'compute requested; PC image-quality only'}
+
+def verify_tools_build(tools, metadata_path):
+    """Bind the codec/scorer binaries to the packaged commit and pinned inputs."""
+    from . import hvs_scorer
+    path=Path(metadata_path); meta=json.loads(path.read_text(encoding='utf-8-sig'))
+    bundle=path.parent; build=json.loads((bundle/'BUILD-METADATA.json').read_text(encoding='utf-8-sig'))
+    root=Path(__file__).resolve().parents[2]
+    lock_hash=hashlib.sha256((root/'sources.lock.json').read_bytes().replace(b'\r\n',b'\n')).hexdigest()
+    fork=json.loads((root/'fork.json').read_text(encoding='utf-8'))
+    source_manifest=bundle/'HVS-SCORER-SOURCE.json'
+    source_record=json.loads(source_manifest.read_text(encoding='utf-8-sig'))
+    if (meta.get('schema')!=1 or meta.get('kind')!='pyrowave_framebank_tools_build'
+            or meta.get('source_lock_sha256')!=lock_hash
+            or meta.get('source_psnr_cpp_sha256')!=hvs_scorer.PATCHED_PSNR_SHA256
+            or meta.get('source_manifest_sha256')!=sha256_file(source_manifest)
+            or source_record!=hvs_scorer.manifest()):
+        raise ValueError('offline tool source provenance mismatch')
+    if (not re.fullmatch(r'[0-9a-f]{40}',str(build.get('repository_commit','')))
+            or build.get('sources_lock_sha256')!=lock_hash
+            or build.get('protocol_version')!=fork['protocol_version']
+            or build.get('client_package_id')!=fork['client_package_id']
+            or build.get('dependency_revisions')!=json.loads((root/'sources.lock.json').read_text(encoding='utf-8'))
+            or not build.get('shader_hashes')):
+        raise ValueError('offline tool build identity incomplete or mismatched')
+    for role,field in (('encode','encode_sha256'),('decode','decode_sha256'),('psnr_hvs_m_h','scorer_sha256')):
+        tool=_tool_path(tools[role]); digest=sha256_file(tool)
+        if meta.get('tools',{}).get(field)!=digest or build.get('artifact_sha256',{}).get(tool.name)!=digest:
+            raise ValueError('offline tool binary differs from its packaged build: '+role)
+    return {'metadata_sha256':sha256_file(path),'package_metadata_sha256':sha256_file(bundle/'BUILD-METADATA.json'),
+            'repository_commit':build['repository_commit'],'sources_lock_sha256':lock_hash,
+            'dependency_revisions':build['dependency_revisions'],'shader_hashes':build['shader_hashes'],
+            'protocol_version':build['protocol_version'],'client_package_id':build['client_package_id'],
+            'scorer_source':source_record}
+
 def parse_hvs_m_h(text,pixels_per_degree:float,image_height:int)->dict:
     expected=hvs_calibration_for_vertical_ppd(pixels_per_degree,image_height)
     pats=re.findall(r"PixelsPerDegree\s*=\s*([+0-9.eE-]+).*?HeightFactor\s*=\s*([+0-9.eE-]+).*?PSNR-HVS-M-H:\s*\(Y\)\s*([+0-9.eEinfINF-]+)",text,re.S)
@@ -406,27 +448,38 @@ def _assert_same_frames(reference,decoded,ref_info):
     if (dec_info.width,dec_info.height,dec_info.frames,dec_info.chroma,dec_info.color_range,dec_info.fps_num,dec_info.fps_den)!=(ref_info.width,ref_info.height,ref_info.frames,ref_info.chroma,ref_info.color_range,ref_info.fps_num,ref_info.fps_den): raise ValueError("decoded_identity_or_geometry_mismatch")
     return dec_info
 
-def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,*,arm:Path|None=None,status_command:Sequence[str]|None=None,command_timeout_s:float=900,keep_artifacts:bool=False,allow_fixture:bool=False,score_fn=score_pair):
+def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,*,arm:Path|None=None,status_command:Sequence[str]|None=None,command_timeout_s:float=900,keep_artifacts:bool=False,allow_fixture:bool=False,score_fn=score_pair,tools_metadata:Path|None=None):
     raw_plan=Path(plan_path).read_bytes();plan=validate_plan(json.loads(raw_plan)); source=Path(source); private_out=_private_path(private_out); guard=WindowGuard(window,arm,status_command)
     if plan.get("fixture_only") and not allow_fixture: raise ValueError("fixture-only plans cannot run outside a CPU test")
     required_tools(tools); guard.status(); initial={n:sha256_file(_tool_path(v)) for n,v in tools.items()};
     if sha256_file(source)!=plan["source"]["sha256"]: raise ValueError("source dump hash differs from frozen plan")
     source_info=inspect_y4m(source)
     if source_info.frames!=plan["source"]["frames"]: raise ValueError("source dump frame count differs from frozen plan")
-    private_out.mkdir(parents=True,exist_ok=True); result={"schema":SCHEMA,"kind":"pyrowave_frame_bank_result","frozen_plan_sha256":hashlib.sha256(raw_plan).hexdigest(),"source_sha256_start":sha256_file(source),"source_sha256_end":None,"tool_provenance_start":initial,"tool_provenance_end":None,"projection":plan["projection"],"projection_evidence":plan["projection_evidence"],"crop_definitions":plan["crops"],"cells":[],"complete":False,"failure_reasons":[]}
+    if not plan.get('fixture_only') and tools_metadata is None: raise ValueError('packaged offline tools metadata is required')
+    build_provenance=verify_tools_build(tools,tools_metadata) if tools_metadata is not None else None
+    private_out.mkdir(parents=True,exist_ok=True); result={"schema":SCHEMA,"kind":"pyrowave_frame_bank_result","frozen_plan_sha256":hashlib.sha256(raw_plan).hexdigest(),"source_sha256_start":sha256_file(source),"source_sha256_end":None,"tool_provenance_start":initial,"tool_provenance_end":None,"tools_build_provenance":build_provenance,"projection":plan["projection"],"projection_evidence":plan["projection_evidence"],"crop_definitions":plan["crops"],"cells":[],"complete":False,"failure_reasons":[]}
     for index,cell in enumerate(plan["cells"]):
         directory=private_out/f"cell-{index:02d}-{cell['wavelet']}-{cell['rate_mbps']}-{cell['eye_width']}x{cell['eye_height']}";directory.mkdir(parents=True,exist_ok=True); ref=directory/f"reference-c{cell['encoded_chroma']}.y4m";wave=directory/"encoded.wave";decoded=directory/f"decoded-c{cell['encoded_chroma']}.y4m"; row=dict(cell)
         try:
             ref_info,ids=_stream_reference(source,source_info,cell,ref); row["identity_count"]=len(ids)
             if [x["source_sha256"] for x in ids] != [x["source_sha256"] for x in plan["source"]["frame_identity"]]: raise ValueError("source_frame_identity_drift")
-            env=os.environ.copy();env["PYROWAVE_WAVELET"]=cell["wavelet"]
+            env,row['codec_environment']=codec_environment(os.environ,cell['wavelet'])
             # Pinned pyrowave-encode CLI: input.y4m output.wave bytes_per_frame.
-            code,_,_=guard.run([str(tools["encode"]),str(ref),str(wave),str(cell["cap_bytes"])],cwd=directory,env=env,timeout_s=command_timeout_s)
+            code,encode_out,encode_err=guard.run([str(tools["encode"]),str(ref),str(wave),str(cell["cap_bytes"])],cwd=directory,env=env,timeout_s=command_timeout_s)
             if code or not wave.is_file() or wave.stat().st_size<=0: raise RuntimeError("encode_failed")
+            wavelet_name={'haar':'Haar','53':'CDF 5/3','97':'CDF 9/7'}[cell['wavelet']]
+            if not plan.get('fixture_only') and ('XRW: wavelet = '+wavelet_name) not in encode_out+encode_err:
+                raise RuntimeError('encoder_wavelet_not_confirmed')
             row["actual_container_bytes"]=wave.stat().st_size
             # Pinned pyrowave-decode CLI: input.wave output.y4m.
-            code,_,_=guard.run([str(tools["decode"]),str(wave),str(decoded)],cwd=directory,env=env,timeout_s=command_timeout_s)
+            code,decode_out,decode_err=guard.run([str(tools["decode"]),str(wave),str(decoded)],cwd=directory,env=env,timeout_s=command_timeout_s)
             if code or not decoded.is_file(): raise RuntimeError("decode_failed")
+            decode_log=decode_out+decode_err
+            if not plan.get('fixture_only'):
+                if 'decode path = compute' not in decode_log or ('XRW: wavelet = '+wavelet_name) not in decode_log:
+                    raise RuntimeError('decoder_configuration_not_confirmed')
+                row['codec_environment'].update(observed_decoder_path='compute',observed_encoder_wavelet=wavelet_name,
+                                                 observed_decoder_wavelet=wavelet_name)
             dec_info=_assert_same_frames(ref,decoded,ref_info);row["decoded_frame_identity"]=[{"cell_frame":i,"source_frame":x["source_frame"],"reference_sha256":x["reference_sha256"],"decoded_sha256":d} for (i,_,d),x in zip(iter_y4m(decoded,dec_info),ids)]
             if len(row["decoded_frame_identity"])!=len(ids): raise ValueError("decoded_identity_or_geometry_mismatch")
             common=dict(frames=ref_info.frames,guard=guard,env=env,timeout_s=command_timeout_s)
@@ -457,12 +510,16 @@ def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,
     result["source_sha256_end"]=sha256_file(source); result["tool_provenance_end"]={n:sha256_file(_tool_path(v)) for n,v in tools.items()}
     if result["source_sha256_end"]!=result["source_sha256_start"]: result["failure_reasons"].append("source_changed_during_run")
     if result["tool_provenance_end"]!=result["tool_provenance_start"]: result["failure_reasons"].append("tool_changed_during_run")
+    if tools_metadata is not None:
+        try:
+            if verify_tools_build(tools,tools_metadata)!=build_provenance: result['failure_reasons'].append('tool_build_provenance_changed_during_run')
+        except (OSError,ValueError,KeyError): result['failure_reasons'].append('tool_build_provenance_changed_during_run')
     if hashlib.sha256(Path(plan_path).read_bytes()).hexdigest()!=result["frozen_plan_sha256"]: result["failure_reasons"].append("plan_changed_during_run")
     result["complete"]=not result["failure_reasons"] and len(result["cells"])==len(plan["cells"]); (private_out/"framebank-private.json").write_text(json.dumps(result,indent=2),encoding="utf-8"); return result
 
 def sanitized_report(result):
-    keep=("wavelet","rate_mbps","fps","eye_width","eye_height","encoded_chroma","cap_bytes","bits_per_pixel","actual_container_bytes","codec_only","displayed","crops","error")
-    return {"schema":SCHEMA,"kind":"pyrowave_frame_bank_sanitized","complete":result.get("complete") is True,"failure_reasons":list(result.get("failure_reasons",[])),"frozen_plan_sha256":result.get("frozen_plan_sha256"),"source_sha256":result.get("source_sha256_end"),"tool_provenance":result.get("tool_provenance_end"),"projection":result.get("projection"),"crop_definitions":result.get("crop_definitions"),"cells":[{k:r.get(k) for k in keep} for r in result.get("cells",[])],"optical_latency_ms":None,"display_fps":None}
+    keep=("wavelet","rate_mbps","fps","eye_width","eye_height","encoded_chroma","cap_bytes","bits_per_pixel","actual_container_bytes","codec_environment","codec_only","displayed","crops","error")
+    return {"schema":SCHEMA,"kind":"pyrowave_frame_bank_sanitized","complete":result.get("complete") is True,"failure_reasons":list(result.get("failure_reasons",[])),"frozen_plan_sha256":result.get("frozen_plan_sha256"),"source_sha256":result.get("source_sha256_end"),"tool_provenance":result.get("tool_provenance_end"),"tools_build_provenance":result.get('tools_build_provenance'),"projection":result.get("projection"),"crop_definitions":result.get("crop_definitions"),"cells":[{k:r.get(k) for k in keep} for r in result.get("cells",[])],"optical_latency_ms":None,"display_fps":None}
 def parse_crops_argument(value:str):
     try:
         raw=Path(value[1:]).read_text(encoding="utf-8") if value.startswith("@") else value
@@ -473,7 +530,21 @@ def parse_crops_argument(value:str):
 def _main_plan(a):
     p=build_plan(Path(a.source),a.vertical_pixels_per_degree,horizontal_pixels_per_degree=a.horizontal_pixels_per_degree,projection_evidence=a.projection_evidence,crop_evidence=a.crop_evidence,crops=parse_crops_argument(a.crops));Path(a.out).write_text(json.dumps(p,indent=2),encoding="utf-8");print(f"wrote frozen plan with {len(p['cells'])} cells; no codec/scorer was run");return 0
 def _main_run(a):
-    tools={"encode":a.encode,"decode":a.decode,"ffmpeg":a.ffmpeg,"psnr_hvs_m_h":a.psnr_hvs_m_h};r=run_plan(Path(a.plan),Path(a.source),Path(a.private_out),tools,Path(a.window),arm=None if not a.arm else Path(a.arm),command_timeout_s=a.command_timeout_s,keep_artifacts=a.keep_artifacts);report=sanitized_report(r);Path(a.report).write_text(json.dumps(report,indent=2),encoding="utf-8");print(f"wrote sanitized report: complete={report['complete']}");return 0 if report["complete"] else 2
+    tools={"encode":a.encode,"decode":a.decode,"ffmpeg":a.ffmpeg,"psnr_hvs_m_h":a.psnr_hvs_m_h};r=run_plan(Path(a.plan),Path(a.source),Path(a.private_out),tools,Path(a.window),arm=None if not a.arm else Path(a.arm),command_timeout_s=a.command_timeout_s,keep_artifacts=a.keep_artifacts,tools_metadata=Path(a.tools_metadata));report=sanitized_report(r);Path(a.report).write_text(json.dumps(report,indent=2),encoding="utf-8");print(f"wrote sanitized report: complete={report['complete']}");return 0 if report["complete"] else 2
 def main(argv=None):
-    p=argparse.ArgumentParser(description=__doc__);s=p.add_subparsers(dest="command",required=True);a=s.add_parser("plan");a.add_argument("--source",required=True);a.add_argument("--vertical-pixels-per-degree",type=float,required=True);a.add_argument("--horizontal-pixels-per-degree",type=float);a.add_argument("--projection-evidence",required=True);a.add_argument("--crop-evidence",required=True);a.add_argument("--crops",required=True,help="JSON crop array or @JSON-file; production never uses defaults");a.add_argument("--out",required=True);r=s.add_parser("run");r.add_argument("--plan",required=True);r.add_argument("--source",required=True);r.add_argument("--private-out",required=True);r.add_argument("--report",required=True);r.add_argument("--window",required=True);r.add_argument("--arm");r.add_argument("--encode",required=True);r.add_argument("--decode",required=True);r.add_argument("--ffmpeg",required=True);r.add_argument("--psnr-hvs-m-h",required=True);r.add_argument("--command-timeout-s",type=float,default=900);r.add_argument("--keep-artifacts",action="store_true");x=p.parse_args(argv);return _main_plan(x) if x.command=="plan" else _main_run(x)
+    p=argparse.ArgumentParser(description=__doc__)
+    s=p.add_subparsers(dest='command',required=True)
+    a=s.add_parser('plan')
+    for name in ('source','projection-evidence','crop-evidence','out'): a.add_argument('--'+name,required=True)
+    a.add_argument('--vertical-pixels-per-degree',type=float,required=True)
+    a.add_argument('--horizontal-pixels-per-degree',type=float)
+    a.add_argument('--crops',required=True,help='JSON crop array or @JSON-file; production never uses defaults')
+    r=s.add_parser('run')
+    for name in ('plan','source','private-out','report','window','encode','decode','ffmpeg','psnr-hvs-m-h','tools-metadata'):
+        r.add_argument('--'+name,required=True)
+    r.add_argument('--arm')
+    r.add_argument('--command-timeout-s',type=float,default=900)
+    r.add_argument('--keep-artifacts',action='store_true')
+    x=p.parse_args(argv)
+    return _main_plan(x) if x.command=='plan' else _main_run(x)
 if __name__=="__main__": raise SystemExit(main())
