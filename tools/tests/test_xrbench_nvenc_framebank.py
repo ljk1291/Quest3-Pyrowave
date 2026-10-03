@@ -41,6 +41,7 @@ class NvencFramebankTests(unittest.TestCase):
         self.assertTrue(h264["spatial_aq"])
         self.assertEqual(nf.profile("hevc", 200)["pixel_format"], "p010le")
         self.assertIn("in_range=full", nf.profile("av1", 200)["score_downconvert_filter"])
+        self.assertIn("in_range=full", nf.profile("hevc", 200)["encode_upconvert_filter"])
 
     def test_frozen_plan_reuses_framebank_geometry_crops_and_calibration(self):
         with tempfile.TemporaryDirectory() as root:
@@ -77,7 +78,7 @@ class NvencFramebankTests(unittest.TestCase):
 
     def test_bitstream_probe_accepts_unknown_metadata_and_rejects_b_frames_or_count_drift(self):
         cell = {"codec":"hevc", "stereo_width":6144, "eye_height":3232, "fps":90}
-        valid = {"streams":[{"codec_name":"hevc", "width":6144, "height":3232,
+        valid = {"streams":[{"codec_name":"hevc", "profile":"Main 10", "width":6144, "height":3232,
                  "pix_fmt":"yuv420p", "color_range":"unknown", "avg_frame_rate":"0/0",
                  "chroma_location":"left", "color_space":"unknown", "color_primaries":"unknown",
                  "color_transfer":"unknown", "r_frame_rate":"0/0", "nb_read_frames":"90"}],
@@ -102,12 +103,31 @@ class NvencFramebankTests(unittest.TestCase):
             candidate = json.loads(json.dumps(valid)); mutation(candidate)
             with self.assertRaisesRegex(ValueError, message):
                 nf.validate_probe(candidate, cell, 90)
+        candidate = json.loads(json.dumps(valid)); candidate["frames"][0]["pict_type"] = "P"
+        with self.assertRaisesRegex(ValueError, "exactly one initial"):
+            nf.validate_probe(candidate, cell, 90)
+        candidate = json.loads(json.dumps(valid)); candidate["streams"][0]["profile"] = "Main"
+        with self.assertRaisesRegex(ValueError, "profile mismatch"):
+            nf.validate_probe(candidate, cell, 90)
+
+    def test_encoder_completion_parser_requires_one_ordered_sample_per_frame(self):
+        log = "\n".join(
+            f"encoder <- type:video frame_pts:{i}\n"
+            f"bench: {i} user {i + 1} sys {i + 2} real encode_video 0.0"
+            for i in range(90))
+        record = nf._parse_encode_completion_diagnostics(log, 90)
+        self.assertEqual(record["measurement_boundary"], "encoder_call_wall_cpu_microseconds")
+        self.assertFalse(record["measurement_valid_for_timing_ranking"])
+        self.assertEqual([sample["frame_pts"] for sample in record["frame_completion_samples"]], list(range(90)))
+        with self.assertRaisesRegex(ValueError, "incomplete"):
+            nf._parse_encode_completion_diagnostics(log.rsplit("\n", 2)[0], 90)
 
     def test_commands_pin_raw_codec_and_no_implicit_decode_format(self):
         cell = {"codec":"av1", "identity_count":90, "nvenc_profile":nf.profile("av1", 800)}
         encoded = nf.encode_command("ffmpeg", Path("ref.y4m"), Path("out.av1"), cell)
         self.assertEqual(encoded[-2:], ["obu", "out.av1"])
         self.assertEqual(encoded[encoded.index("-frames:v") + 1], "90")
+        self.assertIn(nf.profile("av1", 800)["encode_upconvert_filter"], encoded)
         decoded = nf.decode_command("ffmpeg", Path("out.av1"), Path("decoded.y4m"), 90, "yuv420p")
         self.assertEqual(decoded[decoded.index("-pix_fmt") + 1], "+yuv420p")
         self.assertEqual(decoded[decoded.index("-fps_mode") + 1], "passthrough")
@@ -230,7 +250,7 @@ class NvencFramebankTests(unittest.TestCase):
                                  rates_mbps=(200,), geometries=((2, 4),), codecs=("hevc",), crops=[crop], display_eye=(2, 4))
             plan_path = root / "plan.json"; plan_path.write_text(json.dumps(plan))
             output = root / "out"; metadata = root / "FRAMEBANK-TOOLS-BUILD-METADATA.json"; metadata.write_text("{}")
-            observed = {"streams":[{"codec_name":"hevc", "width":4, "height":4, "pix_fmt":"p010le",
+            observed = {"streams":[{"codec_name":"hevc", "profile":"Main 10", "width":4, "height":4, "pix_fmt":"p010le",
                 "color_range":"unknown", "chroma_location":"left", "color_space":"unknown", "color_primaries":"unknown",
                 "color_transfer":"unknown", "avg_frame_rate":"0/0", "r_frame_rate":"0/0", "nb_read_frames":"90"}],
                 "frames":[{"pict_type":"I", "width":4, "height":4, "pix_fmt":"p010le"}] +
@@ -239,6 +259,11 @@ class NvencFramebankTests(unittest.TestCase):
             class Guard:
                 def status(self): return {}
                 def run(self, argv, *, cwd, env, timeout_s):
+                    if "-debug_ts" in argv:
+                        log_name = env["FFREPORT"].split("file=", 1)[1].split(":level=", 1)[0]
+                        (Path(cwd) / log_name).write_text("\n".join(
+                            f"encoder <- type:video frame_pts:{i}\nbench: 0 user 0 sys 1 real encode_video 0.0"
+                            for i in range(90)), encoding="utf-8")
                     target = Path(argv[-1])
                     if "+p010le" in argv: target.write_bytes(bytes(48 * 90))
                     elif "rawvideo" in argv: target.write_bytes(bytes(24 * 90))
@@ -288,7 +313,7 @@ class NvencFramebankTests(unittest.TestCase):
             plan = nf.build_plan(source, 23.5, projection_evidence="p", crop_evidence="c", fixture=True,
                                  rates_mbps=(200,), geometries=((2, 4),), codecs=("hevc",), crops=[crop], display_eye=(2, 4))
             plan_path = root / "plan.json"; plan_path.write_text(json.dumps(plan)); metadata = root / "metadata.json"; metadata.write_text("{}")
-            observed = {"streams":[{"codec_name":"hevc","width":4,"height":4,"pix_fmt":"p010le","color_range":"unknown","chroma_location":"left","color_space":"unknown","color_primaries":"unknown","color_transfer":"unknown","avg_frame_rate":"0/0","r_frame_rate":"0/0","nb_read_frames":"90"}],"frames":[{"pict_type":"I","width":4,"height":4,"pix_fmt":"p010le"}]+[{"pict_type":"P","width":4,"height":4,"pix_fmt":"p010le"}]*89}
+            observed = {"streams":[{"codec_name":"hevc","profile":"Main 10","width":4,"height":4,"pix_fmt":"p010le","color_range":"unknown","chroma_location":"left","color_space":"unknown","color_primaries":"unknown","color_transfer":"unknown","avg_frame_rate":"0/0","r_frame_rate":"0/0","nb_read_frames":"90"}],"frames":[{"pict_type":"I","width":4,"height":4,"pix_fmt":"p010le"}]+[{"pict_type":"P","width":4,"height":4,"pix_fmt":"p010le"}]*89}
             for index, frame in enumerate(observed["frames"]): frame["key_frame"] = int(index == 0)
             class Guard:
                 calls = 0
@@ -297,6 +322,11 @@ class NvencFramebankTests(unittest.TestCase):
                     if self.calls >= 2: raise PermissionError("lease lost")
                     return {}
                 def run(self, argv, *, cwd, env, timeout_s):
+                    if "-debug_ts" in argv:
+                        log_name = env["FFREPORT"].split("file=", 1)[1].split(":level=", 1)[0]
+                        (Path(cwd) / log_name).write_text("\n".join(
+                            f"encoder <- type:video frame_pts:{i}\nbench: 0 user 0 sys 1 real encode_video 0.0"
+                            for i in range(90)), encoding="utf-8")
                     target = Path(argv[-1]); target.write_bytes(bytes(48 * 90) if "+p010le" in argv else (bytes(24 * 90) if "rawvideo" in argv else b"stream")); return 0, "", ""
             def hashes(path): return plan["source"]["sha256"] if Path(path) == source else "a" * 64
             with mock.patch.object(fb,"_private_path",side_effect=lambda value:Path(value)), mock.patch.object(fb,"WindowGuard",return_value=Guard()), mock.patch.object(fb,"sha256_file",side_effect=hashes), mock.patch.object(fb,"verify_tools_build",return_value={"qualified":True}), mock.patch.object(fb,"hvs_gpu_sanity",return_value={"passed":True}), mock.patch.object(nf,"_run_json",return_value=observed), mock.patch.object(nf,"lease_telemetry",return_value={"measurement_mode":"quality","samples":[{}],"cleanup_verified":False}), mock.patch.object(nf,"_same_frame_scores",return_value={"codec_only":{},"displayed":{},"crops":{}}):

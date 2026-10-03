@@ -136,6 +136,12 @@ def profile(codec: str, rate_mbps: int, fps: int = fb.FPS, *, preset: str = "p4"
             "8bit_420_observed" if defaults["pix_fmt"] == "yuv420p" else "10bit_420_observed"),
         "source_plane_contract": "C420jpeg_FULL",
         "score_pixel_format": "yuv420p",
+        # Y4M source samples are 8-bit full range. Make the encoder upload
+        # conversion explicit for Main10 rather than accepting FFmpeg's
+        # implicit swscale defaults.
+        "encode_upconvert_filter": (
+            "scale=in_range=full:out_range=full:flags=bilinear+accurate_rnd:sws_dither=none,format=p010le"
+            if defaults["pix_fmt"] == "p010le" else None),
         # This single scoring conversion is deliberately full-range to
         # full-range, bilinear, accurately rounded and non-dithered.  It is
         # recorded rather than relying on FFmpeg's implicit 10->8 conversion.
@@ -405,8 +411,10 @@ def _muxer(codec: str) -> str:
 
 def encode_command(ffmpeg: Path | str, reference: Path, output: Path, cell: dict) -> list[str]:
     p = cell["nvenc_profile"]
-    return [str(ffmpeg), "-y", "-hide_banner", "-loglevel", "info", "-benchmark_all", "-i", str(reference),
-            "-map", "0:v:0", "-frames:v", str(cell["identity_count"]), *p["ffmpeg_arguments"],
+    conversion = (["-vf", p["encode_upconvert_filter"]]
+                  if p.get("encode_upconvert_filter") is not None else [])
+    return [str(ffmpeg), "-y", "-hide_banner", "-loglevel", "verbose", "-benchmark_all", "-debug_ts", "-i", str(reference),
+            "-map", "0:v:0", "-frames:v", str(cell["identity_count"]), *conversion, *p["ffmpeg_arguments"],
             "-f", _muxer(cell["codec"]), str(output)]
 
 
@@ -434,7 +442,7 @@ def score_convert_command(ffmpeg: Path | str, native_raw: Path, output: Path, in
 
 def probe_command(ffprobe: Path | str, bitstream: Path, output: Path) -> list[str]:
     return [str(ffprobe), "-v", "error", "-count_frames", "-show_streams", "-show_frames",
-            "-show_entries", "stream=codec_name,width,height,pix_fmt,color_range,chroma_location,color_space,color_primaries,color_transfer,avg_frame_rate,r_frame_rate,nb_read_frames:frame=pict_type,key_frame,width,height,pix_fmt",
+            "-show_entries", "stream=codec_name,profile,width,height,pix_fmt,color_range,chroma_location,color_space,color_primaries,color_transfer,avg_frame_rate,r_frame_rate,nb_read_frames:frame=pict_type,key_frame,width,height,pix_fmt",
             "-of", "json", "-o", str(output), str(bitstream)]
 
 
@@ -454,6 +462,9 @@ def validate_probe(value: dict, cell: dict, frames: int) -> dict:
     for key, wanted in expected.items():
         if stream.get(key) != wanted:
             raise ValueError("NVENC bitstream metadata mismatch: " + key)
+    expected_profiles = {"h264": ("High",), "hevc": ("Main 10",), "av1": ("Main",)}
+    if stream.get("profile") not in expected_profiles[cell["codec"]]:
+        raise ValueError("NVENC bitstream profile mismatch")
     # Direct probe tests and schema-1 callers did not carry an encoder profile.
     # Production cells always do, so their native precision is fail-closed.
     expected_class = cell.get("nvenc_profile", {}).get("native_decode_format", "8bit_420_observed")
@@ -470,7 +481,7 @@ def validate_probe(value: dict, cell: dict, frames: int) -> dict:
     if len(types) != frames or any(t not in ("I", "P") for t in types):
         raise ValueError("NVENC bitstream contains B or unknown picture type")
     key_frames = [row.get("key_frame") for row in pictures]
-    if key_frames != [1] + [0] * (frames - 1):
+    if types[0] != "I" or key_frames != [1] + [0] * (frames - 1):
         raise ValueError("NVENC bitstream must have exactly one initial key frame")
     if any(row.get("width") != cell["stereo_width"] or row.get("height") != cell["eye_height"]
            or row.get("pix_fmt") != stream.get("pix_fmt") for row in pictures):
@@ -486,6 +497,9 @@ def validate_probe(value: dict, cell: dict, frames: int) -> dict:
             raise ValueError("NVENC bitstream colour metadata contradicts proxy assumption")
     return {"codec": stream["codec_name"], "geometry": [stream["width"], stream["height"]],
             "pix_fmt": stream["pix_fmt"], "frames": frames, "picture_types": {t: types.count(t) for t in sorted(set(types))},
+            # FFprobe's key_frame flag is intentionally described as a proxy:
+            # it cannot distinguish HEVC CRA from IDR, and AV1 has no IDR NAL.
+            "initial_key_frame_evidence": "exactly_one_initial_key_frame_proxy_not_codec_idr_proof",
             "ffprobe_observed_metadata": observed, "external_sequence_rate": f"{cell['fps']}/1",
             "bitstream_timing_confirmed": False}
 
@@ -526,22 +540,60 @@ def _run_json(guard, command, output, directory, timeout):
         raise ValueError("ffprobe did not emit valid JSON") from exc
 
 
-def _run_timed(guard, command, directory, timeout):
-    """Record process completion wall time without labelling it GPU execution."""
+def _parse_encode_completion_diagnostics(text: str, frames: int) -> dict:
+    """Pair each FFmpeg encoder input PTS with its following encode_video call.
+
+    FFmpeg 6.1 writes benchmark task times in microseconds.  The association is
+    an encoder-call wall diagnostic, not a GPU timestamp. Extra encode/flush
+    calls remain explicit instead of being averaged into a video frame.
+    """
+    event = re.compile(r"encoder <- type:video frame_pts:(-?\d+).*?|bench:\s+(\d+) user\s+(\d+) sys\s+(\d+) real\s+(encode_video|flush_video)", re.I)
+    pending = None; samples = []; extra_encode = []; flush = []; pts = []
+    for match in event.finditer(text):
+        if match.group(1) is not None:
+            if pending is not None:
+                raise ValueError("encoder PTS had no following encode_video call")
+            pending = int(match.group(1)); pts.append(pending)
+            continue
+        record = {"user_us": int(match.group(2)), "system_us": int(match.group(3)),
+                  "real_us": int(match.group(4))}
+        if match.group(5).lower() == "flush_video":
+            flush.append(record)
+        elif pending is not None:
+            samples.append({"frame_pts": pending, **record}); pending = None
+        else:
+            extra_encode.append(record)
+    if pending is not None or pts != list(range(frames)) or len(samples) != frames:
+        raise ValueError("encoder PTS/encode_video association is incomplete or non-contiguous")
+    return {"method": "ffmpeg-6.1-benchmark_all-next-encode_video-after-debug_ts-pts",
+            "measurement_boundary": "encoder_call_wall_cpu_microseconds",
+            "measurement_valid_for_timing_ranking": False,
+            "gpu_execution_ms": None, "frame_completion_samples": samples,
+            "unassociated_encode_video_calls": extra_encode, "flush_video_calls": flush,
+            "frame_count": frames}
+
+
+def _run_timed(guard, command, directory, timeout, *, encode_frames: int | None = None):
+    """Retain full FFmpeg logs and record explicit process/encoder diagnostics."""
     started = time.perf_counter()
-    code, out, err = guard.run(command, cwd=directory, env=os.environ.copy(), timeout_s=timeout)
+    command = [command[0], "-report", *command[1:]]
+    log_name = "ffmpeg-report-" + hashlib.sha256("\0".join(map(str, command)).encode()).hexdigest()[:16] + ".log"
+    env = os.environ.copy(); env["FFREPORT"] = "file=" + log_name + ":level=48"
+    code, out, err = guard.run(command, cwd=directory, env=env, timeout_s=timeout)
     elapsed = (time.perf_counter() - started) * 1000.0
-    # FFmpeg benchmark_all has no stable GPU timestamp API. Keep parsed rows as
-    # raw completion diagnostics only: their count and labels may help diagnose
-    # a failed cell, but no average is presented as per-frame GPU encode time.
-    bench = [{"user_s": float(u), "system_s": float(s), "real_s": float(r)}
-             for u, s, r in re.findall(r"bench:\s+utime=([0-9.]+)s\s+stime=([0-9.]+)s\s+rtime=([0-9.]+)s", out + err)]
-    return code, out, err, {"process_wall_clock_diagnostic_ms": elapsed, "completion": "subprocess_exit",
-                            "ffmpeg_benchmark_all_raw_samples": bench,
-                            "ffmpeg_benchmark_all_raw_sample_count": len(bench),
+    report_path = Path(directory) / log_name
+    retained = report_path.is_file()
+    full_log = report_path.read_text(encoding="utf-8", errors="replace") if retained else out + err
+    timing = {"process_wall_clock_diagnostic_ms": elapsed, "completion": "subprocess_exit",
+              "full_private_ffmpeg_report_retained": retained,
                             "gpu_execution_ms": None,
                             "measurement_valid_for_timing_ranking": False,
                             "gpu_execution_note": "not available from FFmpeg process completion; never divide this by frames"}
+    if encode_frames is not None and code == 0:
+        if not retained:
+            raise RuntimeError("full_ffmpeg_encode_report_missing")
+        timing["encoder_completion_diagnostic"] = _parse_encode_completion_diagnostics(full_log, encode_frames)
+    return code, out, err, timing
 
 
 def _require_jpeg_full_y4m(path: Path) -> dict:
@@ -758,12 +810,13 @@ def _window_y4m(source: Path, info: fb.Y4MInfo, output: Path, start_one_based: i
 
 
 def _score_pair_windows(tools, distorted: Path, reference: Path, info: fb.Y4MInfo, workdir: Path,
-                        vertical_ppd: float, guard, timeout: float) -> dict:
+                        vertical_ppd: float, guard, timeout: float, *, all_score: dict | None = None) -> dict:
     """All primary metrics for both required Q3 frame windows."""
     Path(workdir).mkdir(parents=True, exist_ok=True)
     common = dict(guard=guard, env=os.environ.copy(), timeout_s=timeout)
-    all_score = fb.score_pair(tools, distorted, reference, workdir, vertical_ppd,
-                              frames=info.frames, image_height=info.height, **common)
+    if all_score is None:
+        all_score = fb.score_pair(tools, distorted, reference, workdir, vertical_ppd,
+                                  frames=info.frames, image_height=info.height, **common)
     dist_trim, ref_trim = workdir / "trim-decoded.y4m", workdir / "trim-reference.y4m"
     trim_info = _window_y4m(distorted, info, dist_trim, 10, 89)
     _window_y4m(reference, info, ref_trim, 10, 89)
@@ -785,7 +838,7 @@ def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, 
     row = {"codec_only": fb.score_pair(tools, decoded, reference, directory, codec_ppd,
                                         image_height=ref_info.height, **common)}
     row["codec_only_windows"] = _score_pair_windows(tools, decoded, reference, ref_info,
-                                                      directory / "codec-windows", codec_ppd, guard, timeout)
+        directory / "codec-windows", codec_ppd, guard, timeout, all_score=row["codec_only"])
     if "fence_rectangles" in plan:
         from . import fence_metrics
         fence_rect = (plan["fence_rectangles"]["cropped"]["mapped"] if cell.get("source_geometry") == "crop"
@@ -804,8 +857,9 @@ def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, 
     row["displayed"] = fb.score_pair(tools, display_dec, display_ref, directory,
                                       display_ppd, image_height=presentation_eye[1], **common)
     row["displayed_windows"] = _score_pair_windows(tools, display_dec, display_ref, display_info,
-                                                     directory / "display-windows", display_ppd, guard, timeout)
+        directory / "display-windows", display_ppd, guard, timeout, all_score=row["displayed"])
     row["crops"] = {}
+    row["crop_windows"] = {}
     score_crops, excluded = _crop_context_for_cell(plan, cell)
     row["crops"].update(excluded)
     calibration_by_name = {crop["name"]: calibration for crop, calibration in zip(
@@ -826,10 +880,10 @@ def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, 
         calibration = calibration_by_name[crop["name"]]
         row["crops"][crop["name"]] = fb.score_pair(tools, gp, rp, directory,
             calibration["vertical_pixels_per_degree"], image_height=crop_info.height, **common)
-        row["crops"][crop["name"]] = {"1-90": row["crops"][crop["name"]],
-            "10-89": _score_pair_windows(tools, gp, rp, crop_info, directory / f"crop-{crop['name']}-windows",
-                                            calibration["vertical_pixels_per_degree"], guard, timeout)["10-89"],
-            "windows_one_based": {"1-90": [1, 90], "10-89": [10, 89]}}
+        row["crop_windows"][crop["name"]] = _score_pair_windows(
+            tools, gp, rp, crop_info, directory / f"crop-{crop['name']}-windows",
+            calibration["vertical_pixels_per_degree"], guard, timeout,
+            all_score=row["crops"][crop["name"]])
         fb._grid_png(directory / "grids" / f"PRIVATE-{crop['name']}.png", c0,
                      fb.crop_y4m(first_dec, display_info, crop))
         if not keep_artifacts:
@@ -902,7 +956,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                     stream_cell["nvenc_profile"] = profile(cell["codec"], cell["per_stream_mbps"], cell["fps"],
                                                               preset=row["nvenc_profile"]["preset"], spatial_aq=row["nvenc_profile"]["spatial_aq"],
                                                               layout="dual_eye")
-                    code, _, _, timing = _run_timed(guard, encode_command(needed["ffmpeg"], eye_ref, eye_stream, stream_cell), directory, command_timeout_s)
+                    code, _, _, timing = _run_timed(guard, encode_command(needed["ffmpeg"], eye_ref, eye_stream, stream_cell), directory, command_timeout_s, encode_frames=eye_info.frames)
                     if code or not eye_stream.is_file() or eye_stream.stat().st_size <= 0:
                         raise RuntimeError("nvenc_encode_failed")
                     eye_probe_path = directory / f"bitstream-probe-{eye_name}.json"
@@ -933,7 +987,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                     "actual_mbps_external_f90_normalization": sum(x["bitstream"]["actual_mbps_external_f90_normalization"] for x in streams),
                     "per_stream_mbps_requested": cell["per_stream_mbps"]}
             else:
-                code, _, _, timing = _run_timed(guard, encode_command(needed["ffmpeg"], ref, stream, row), directory, command_timeout_s)
+                code, _, _, timing = _run_timed(guard, encode_command(needed["ffmpeg"], ref, stream, row), directory, command_timeout_s, encode_frames=ref_info.frames)
                 if code or not stream.is_file() or stream.stat().st_size <= 0:
                     raise RuntimeError("nvenc_encode_failed")
                 probe_json = directory / "bitstream-probe.json"
@@ -1001,7 +1055,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
 
 
 def sanitized_report(result: dict) -> dict:
-    keep = ("label", "codec", "rate_mbps", "fps", "eye_width", "eye_height", "encoded_chroma", "cap_bytes", "bits_per_pixel", "source_geometry", "nvenc_profile", "streams", "bitstream", "encode_process_completion_diagnostic", "decode_process_completion_diagnostic", "decoded_raw_wrapper", "codec_only", "displayed", "fence_metrics", "crops", "error")
+    keep = ("label", "codec", "rate_mbps", "fps", "eye_width", "eye_height", "encoded_chroma", "cap_bytes", "bits_per_pixel", "source_geometry", "nvenc_profile", "streams", "bitstream", "encode_process_completion_diagnostic", "decode_process_completion_diagnostic", "score_conversion_process_completion_diagnostic", "decoded_raw_wrapper", "codec_only", "codec_only_windows", "displayed", "displayed_windows", "fence_metrics", "crops", "crop_windows", "error")
     def native_public(record):
         if not isinstance(record, dict):
             return None

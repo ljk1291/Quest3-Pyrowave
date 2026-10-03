@@ -10,7 +10,7 @@ on the same frozen 90-frame stereo Y4M input. It is an **offline encode proxy**:
 it does not configure ALVR, connect a Quest, or establish Quest hardware-decoder
 throughput, fresh submissions, display FPS, or optical latency.
 
-The planned Q3 matrix is HEVC and AV1 at 200, 500, 800 and 1000 Mbps, each at
+The historical schema-1 matrix was HEVC and AV1 at 200, 500, 800 and 1000 Mbps, each at
 3072x3232 and 2560x2688 per eye. It uses the source hash, frame order, per-eye
 Lanczos display normalization, four frozen crops, and calibrated PSNR-HVS-M-H
 from the PyroWave frame bank. A report must keep Q3 results distinct from a
@@ -24,9 +24,12 @@ crop cells and two full-FOV references: H.264 High 8-bit as two per-eye streams
 (P7/P4), AV1 Main 10-bit at 200 Mbps (P7/P4), plus full-FOV H.264 P7/700 and
 HEVC Main10 P7/200. H.264's total target splits exactly across its two streams;
 the report retains each stream's rate, elementary-stream bytes and process-wall
-completion diagnostic. It is explicitly invalid for timing ranking and is never
-divided by frames. Sequential offline invocation is recorded as such and is not
-a claim about parallel encoder or GPU execution.
+completion diagnostic. It keeps a full private FFmpeg `-benchmark_all`/
+`-debug_ts` log and pairs each stream's 90 input PTS values with the next
+`encode_video` call in microseconds. Those are CPU encoder-call wall diagnostics,
+not GPU execution or completion timestamps; they are invalid for timing ranking
+and are never divided by frames. Sequential offline invocation is recorded as
+such and is not a claim about parallel encoder or GPU execution.
 
 `revised_q3a_cells()` publishes the whole 15-cell Q3a contract: those ten NVENC
 cells plus five PyroWave rows. The PyroWave runner owns those five rows; a
@@ -37,9 +40,10 @@ The plan accepts only a frozen per-eye crop geometry made by
 `fence_metrics.crop_geometry`. It carries the original, scaled and effective
 tangent bounds and uses raw C420 slices without a resample. Fixed quality crops
 that are outside or partly outside the crop are reported as excluded with their
-coverage fraction; they are never moved, intersected or resized. Q3b uses
-`with_foveation_source` after WO-8 lands. Its transform descriptor is opt-in,
-records profile/softness/blur-only mode, and applies only after this crop.
+coverage fraction; they are never moved, intersected or resized. Q3b is blocked
+until its reduced-plane WO-8 adapter can encode the transformed geometry,
+reconstruct it only after decode, and score sharp and matching-blur references
+with the frozen bands. A transform descriptor alone is not a Q3b result.
 
 HEVC and AV1 encode from `p010le`; their decoder layout is observed rather than
 assumed. The adapter accepts and records either planar `yuv420p10le` or
@@ -47,11 +51,15 @@ semiplanar `p010le`, verifies its native raw payload before scoring, and keeps
 the layout/alignment and per-frame hashes private. The score-only conversion is
 one explicit full-range, non-dithered filter:
 `scale=in_range=full:out_range=full:flags=bilinear+accurate_rnd:sws_dither=none,format=yuv420p`.
-The native probe must first prove `p010le`; no format or range fallback is used.
+The native probe must prove one of those observed 10-bit layouts; there is no
+silent format or range fallback.
+The 8-bit C420jpeg/FULL source reaches Main10 through a separately recorded,
+full-range, non-dithered `yuv420p` to `p010le` filter before NVENC; it does not
+rely on FFmpeg's implicit upload conversion.
 Each report labels 1–90 and 10–89 score windows. Fence metrics are supplied by
 `fence_metrics`, rather than inferred from aggregate HVS or VMAF.
 
-## Profile
+## Historical schema-1 profile
 
 Every cell is CBR, `p4`, `ull`, 90 fps, one 90-frame GOP, no B frames, no
 lookahead, no multipass, zero-latency mode, zero output delay and strict GOP.
@@ -82,17 +90,22 @@ FFmpeg 6.1 uses the raw `hevc` muxer for HEVC and the raw `obu` muxer for AV1.
 ## Fail-closed checks
 
 Before decode, `ffprobe` must confirm one stream with the requested codec,
-stereo geometry, native 8-bit planar 4:2:0, exactly 90 decoded frames and only I/P
-pictures. Every decoded-frame record must carry the same geometry and native
-format. Raw HEVC/OBU output commonly has unknown chroma location, colour range
+stereo geometry, the requested observed native 4:2:0 precision (8-bit planar,
+or 10-bit `p010le`/`yuv420p10le`), exactly 90 decoded frames and only I/P
+pictures. Frame one must be an I picture and the only initial `key_frame` flag;
+this is exactly-one-initial-key-frame evidence, not codec-level IDR proof.
+Every decoded-frame record must carry the same geometry and native format. Raw
+HEVC/OBU output commonly has unknown chroma location, colour range
 or `0/0` timing. Those are retained as observed metadata and never relabelled
 as centre/full/90 Hz. A known limited-range or conflicting colour signal fails.
 
 Decode writes raw planes with `-pix_fmt +<observed-native-format>`, which makes
 FFmpeg reject a format conversion, and `-fps_mode passthrough`, which prevents
-timing-derived duplication or dropping. The only allowed formats are `yuv420p`
-and `yuvj420p`; the latter is FFmpeg's full-range 8-bit 4:2:0 alias. Every
-decoded frame must have the same observed native format. The runner verifies the
+timing-derived duplication or dropping. The allowed 8-bit formats are `yuv420p`
+and `yuvj420p`; the latter is FFmpeg's full-range 8-bit 4:2:0 alias. The
+allowed 10-bit formats are `p010le` and `yuv420p10le`; their observed layout and
+alignment remain distinct. Every decoded frame must have the same observed
+native format. The runner verifies the
 exact raw byte count and hashes each frame, then wraps those byte-identical planes
 in a Y4M header taken from the
 frozen `C420jpeg`/FULL source contract for the quality scorer. The source's
