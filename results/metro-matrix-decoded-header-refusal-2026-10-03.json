@@ -1,0 +1,223 @@
+{
+  "schema": 4,
+  "kind": "pyrowave_frame_bank_sanitized",
+  "complete": false,
+  "failure_reasons": [
+    "cell_failed"
+  ],
+  "frozen_plan_sha256": "f38479036166a0206b3a8652703c91815fa6bc13bf39cf8a2d3bb4e72d522ae0",
+  "source_sha256": "e61163143ec9e75634fc89fcc06b3bb007667a53d94a0cbf97a39c09b452a0c2",
+  "tool_provenance": {
+    "encode": "0b9415e8f78b8121bca888f616cdd05139eb927af229843be0b7b964c136bbd4",
+    "decode": "45f49be991c397bdef3b0af8a2c52dbf3e36e8e9b1da3378f036211dd2c2240b",
+    "psnr_hvs_m_h": "3a203301611812448fa279c669662ce6a65b6f946899d334503608871c167b67",
+    "ffmpeg": "ba242553f0ff60ad788069d5d376c1b4f7a2f3a3566416e0ed950ca7920da5fa"
+  },
+  "tools_build_provenance": {
+    "metadata_sha256": "4df29db7f5d540049270cc5368db9db211683a768255e4e0abbee8944fb5e64d",
+    "package_metadata_sha256": "2498118f6edc1bfb721f2a75e45acfbe321c2c17e45afba59613a0b73681ec71",
+    "repository_commit": "bc2178842e0c48ada75b2179c56cae06b6204e61",
+    "sources_lock_sha256": "b4a61b3ae0bdff818de18c8f97a1a2a1ba80ace7bf636de48093d22ad5aba23b",
+    "dependency_revisions": {
+      "alvr": {
+        "commit": "7eda092dbf0002281410a4222683ec228700cffb",
+        "url": "https://github.com/alvr-org/ALVR"
+      },
+      "android_ndk": "27.2.12479018",
+      "cargo_apk": {
+        "commit": "0fd3126dad5aa1c5f0f26cdae3410f2e5af62c60",
+        "url": "https://github.com/zarik5/cargo-apk"
+      },
+      "granite": {
+        "commit": "842d9d5686ba8c799a7d34a78a68f98d6aeb5a68",
+        "url": "https://github.com/Themaister/Granite"
+      },
+      "integration": {
+        "commit": "54cc8519bddceff57e159e6f39914e373b512809",
+        "url": "https://github.com/Terminal-ennui/galaxy-xr-alvr-pyrowave-444"
+      },
+      "openxr_loader": {
+        "android_aar": "openxr_loader_for_android-1.0.34.aar",
+        "release": "release-1.0.34",
+        "sha256": "c8b50603ad3b81756c6bd203ab9c9d19341326e14f6cbae87ee894137ee5e256"
+      },
+      "pyrowave": {
+        "commit": "d2997ac172bdc00e29c58e3f2938acb7e94580bf",
+        "url": "https://github.com/Themaister/pyrowave"
+      },
+      "reproducibility": "Pinned inputs and build recipe; signed APKs and ZIP metadata are not claimed byte-identical.",
+      "rust": "1.97.1"
+    },
+    "shader_hashes": {
+      "shaders/constants.h": "3bc9555f8399bad2bd6960536125588fd7dbc7936a7147755fc497241f04e062",
+      "shaders/dwt.comp": "f58c3f95d68a90f4621fc1999bcf9a95e1a263b80d20355b0ac20002828a90b1",
+      "shaders/dwt_common.h": "591f529143fce7efad00c0f5a5e6d9be0a714fb2d5098ac5e89242c0041ada26",
+      "shaders/dwt_quant_scale.h": "4a5e60c22785075341afa29211275857a4f3922999e0f5799131c5f4acf2c4be",
+      "shaders/dwt_swizzle.h": "0283e54d268f25375866274dd3728384c75d9783cab12787d8914588b80f0f30",
+      "shaders/idwt.comp": "e3bb1b44e1e0cb0c2137c44dc50c42f0de4b625f8505f26e96b89ea210c2c3af",
+      "shaders/idwt_haar_fused.comp": "a85ffbeb0966e22855d8c76690a7283fb6a2a5967ae5028feac81663c99be629",
+      "shaders/slangmosh.hpp": "4f84897f9d7fbb07cbc5ccba6d98bc83b85f697ca170578ba959118c84032995",
+      "shaders/slangmosh.json": "d5ea9829b89ee2ac5d16c12b34561971cfeaef5e97eec5ac47ec9a4baa3d06d5",
+      "shaders/wavelet_dequant.comp": "e588ddfdd7c3d1873b758a9d8511b80a946fccf384a7aab0b3368d4212aa1a44"
+    },
+    "protocol_version": "20.13.0-ljk1291.2",
+    "client_package_id": "io.github.ljk1291.quest3pyrowave",
+    "scorer_source": {
+      "schema": 1,
+      "kind": "pyrowave_psnr_hvs_ppd_scorer",
+      "upstream": {
+        "repository": "https://github.com/Themaister/pyrowave",
+        "base_revision": "d2997ac172bdc00e29c58e3f2938acb7e94580bf",
+        "license": "MIT"
+      },
+      "patch": {
+        "path": "patches/pyrowave-psnr-hvs-ppd-scorer.patch",
+        "sha256": "b241cb920779a645dc784fed4b983add75359a56f71694151b6085e105f08586",
+        "base_psnr_cpp_sha256": "663a77a183a1f2f4d96928e89a9e34568c1468b6d882a7b833f4f8b6a162d709",
+        "accepted_windows_worktree_psnr_cpp_sha256": "436b042a5c631c061565b023ca3317ff22a3a714cf965a5f1aeaa2bf2c41599e",
+        "preimage_normalization": "LF after exact preimage hash validation",
+        "patched_psnr_cpp_sha256": "bf2ed4c7cd2e962e97e468c2fa6b9f0d6068ee7faa441b0f3f001a93b3f3e184"
+      },
+      "standalone": {
+        "transport": "strict_native_y4m_no_frame_discard",
+        "metric_functions_sha256": "3f63c494b09278f1459a706eb2128bdb5114f367fcec028b951c0a0349af8855",
+        "generated_source_sha256": "10cde49947a73c86c94c73a5fa128c917c57e43f1dc6a1a9da99ba801897e80c",
+        "main_sha256": "11bcd185174d9fd2bfd7d0f0f9f75ddfab54ae4e07c817c85ce233fab94f9533",
+        "reader_sha256": "899a6bb219dd65beee090b3444da16a4637d6e8c551e0bd1fb0db536e5a0cee9",
+        "shader_sha256": "87fd53541193fd2543be754ecb8a6a38f810894993d1c8963e1d86bd8edc30bf",
+        "cmake_overlay_sha256": "f7a9beacebdf22374b85bdac5c54d15d9184a74ebc137e91c2dd74570d1854b3"
+      },
+      "build": {
+        "target": "pyrowave-framebank-hvs",
+        "cmake_options": [
+          "-DPYROWAVE_UTILS=OFF",
+          "-DPYROWAVE_DEVEL=ON"
+        ],
+        "runtime_defaults_changed": false
+      }
+    },
+    "imports_manifest_sha256": "3a711c67327b7337856811e4a48bb11c093507aa8d7cfcb5c5aca2924f1a4df5",
+    "scorer_shader_sha256": "87fd53541193fd2543be754ecb8a6a38f810894993d1c8963e1d86bd8edc30bf"
+  },
+  "hvs_gpu_sanity": {
+    "passed": true,
+    "frames_per_case": 3,
+    "geometry": [
+      64,
+      64
+    ],
+    "identity_psnr_db": "Infinity",
+    "uniform_shift_scores_db": {
+      "shift32": 19.331255581,
+      "shift64": 13.310655668
+    },
+    "amplitude_ratio_delta_db": 6.020599913,
+    "expected_delta_db": 6.020599913279624,
+    "tolerance_db": 0.03
+  },
+  "projection": {
+    "vertical_pixels_per_degree": 23.56428154212911,
+    "horizontal_pixels_per_degree": 24.20084103027429,
+    "hvs_axis": "vertical"
+  },
+  "crop_definitions": [
+    {
+      "name": "ui_late_region",
+      "eye": "left",
+      "x": 0.35,
+      "y": 0.36,
+      "w": 0.17,
+      "h": 0.2,
+      "resolved_pixels": {
+        "eye_x": 1074,
+        "stereo_x": 1074,
+        "y": 1164,
+        "width": 522,
+        "height": 646,
+        "chroma_aligned": true
+      }
+    },
+    {
+      "name": "tunnel_fog_region",
+      "eye": "left",
+      "x": 0.49,
+      "y": 0.31,
+      "w": 0.18,
+      "h": 0.18,
+      "resolved_pixels": {
+        "eye_x": 1504,
+        "stereo_x": 1504,
+        "y": 1002,
+        "width": 552,
+        "height": 582,
+        "chroma_aligned": true
+      }
+    },
+    {
+      "name": "rail_diagonal_region",
+      "eye": "left",
+      "x": 0.55,
+      "y": 0.68,
+      "w": 0.22,
+      "h": 0.24,
+      "resolved_pixels": {
+        "eye_x": 1690,
+        "stereo_x": 1690,
+        "y": 2198,
+        "width": 676,
+        "height": 776,
+        "chroma_aligned": true
+      }
+    },
+    {
+      "name": "wood_gravel_region",
+      "eye": "left",
+      "x": 0.08,
+      "y": 0.71,
+      "w": 0.28,
+      "h": 0.22,
+      "resolved_pixels": {
+        "eye_x": 246,
+        "stereo_x": 246,
+        "y": 2294,
+        "width": 860,
+        "height": 710,
+        "chroma_aligned": true
+      }
+    }
+  ],
+  "cells": [
+    {
+      "wavelet": "haar",
+      "rate_mbps": 500,
+      "fps": 90,
+      "eye_width": 3072,
+      "eye_height": 3232,
+      "encoded_chroma": "420",
+      "cap_bytes": 694444,
+      "bits_per_pixel": 0.2797722643358086,
+      "actual_container_bytes": 62494968,
+      "codec_environment": {
+        "set": {
+          "PYROWAVE_WAVELET": "haar",
+          "PYROWAVE_FORCE_COMPUTE": "1"
+        },
+        "other_pyrowave_variables": "unset",
+        "decode_path": "compute requested; PC image-quality only",
+        "observed_decoder_path": "compute",
+        "observed_encoder_wavelet": "Haar",
+        "observed_decoder_wavelet": "Haar"
+      },
+      "codec_only": null,
+      "displayed": null,
+      "crops": null,
+      "error": "cell_failed"
+    }
+  ],
+  "optical_latency_ms": null,
+  "display_fps": null,
+  "owner_supervised_pass": 1,
+  "parent_plan_sha256": "9652f47fe4b435f20f795ed78dcc5bef43418b94955e81ca380438c1251b552a",
+  "python_harness_commit": "5f899d3bc2f792442dad3b1a23897a748f7d05b1",
+  "live_vr_run": false
+}

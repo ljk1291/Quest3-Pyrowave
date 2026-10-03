@@ -378,3 +378,26 @@ Take the first unblocked item. Items marked ∥ are independent.
   Later chart tests need their own allowed scope/controller or owner supervision.
   No settings, installation or runtime changes require rollback from this interval;
   VD hash verification remains unset rather than claiming an unperformed check.
+
+- 2026-10-03 (Codex, owner-supervised PC pass 1): implemented the explicit owner-attested
+  frame-bank lease and separate quality/timing contention policies. Quality retains the
+  compute-backend, 2048 MiB free-VRAM, driver/device and stop-marker safety stops, with
+  GPU load samples; timing invalidates affected measurements after sustained external
+  engine load >10% for at least 10 seconds or an active compute backend. Single browser
+  spikes do not revoke quality work. No arm, idle, headset or VD gate was consulted.
+  HVS identity/amplitude sanity passed. All nine 500 Mbps × Haar/5/3/9/7 ×
+  3072/2560/2080 cells completed on the same 90 source frames and qualified native tools.
+  The six resumed CDF cells have 713 load samples, at least 12747 MiB free VRAM and no
+  safety stop; retained Haar evidence has the older monitor coverage. All 54 FFmpeg
+  comparisons passed the independent 1–90 frame audit. Ancillary PSNR was corrected
+  from retained sequence summaries without rescoring; VMAF, SSIM and HVS are unchanged.
+  [Results and limits](../results/metro-matrix-pass1-2026-10-03.md): Godlike CDF 9/7
+  leads this single-pass quality screen (97.79 display VMAF, 36.43 HVS dB), and both
+  CDF wavelets improve VMAF and calibrated HVS on all four crops at all tested sizes.
+  [PR #20](https://github.com/ljk1291/Quest3-Pyrowave/pull/20);
+  [CPU CI passed](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37112302438).
+  Local CPU checks: 49 passed, three compiler-dependent Windows skips. Native/signing
+  jobs skipped; no new signed pair, headset actions, settings changes or default
+  promotion. Lease closed, no owned jobs remain. Offline quality does not establish
+  decoder speed or stable 90 Hz; prior ~82–83 fresh submissions/s remains separate.
+  Pass 2 and further hardware work are stopped for owner review, as requested.
