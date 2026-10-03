@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "kind": "unattended_precondition_check",
+  "checked_utc": "2026-10-03T02:31:37.009719+00:00",
+  "qualified_supervisor_commit": "ef9d8b05c4d433cc5fab769e4cea9d1e21fa38f8",
+  "qualified_supervisor_ci": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37088239058",
+  "window_opened": false,
+  "preconditions_passed": false,
+  "original_failures": [
+    "battery_or_charge_precondition",
+    "vr_or_virtual_desktop_connected",
+    "competing_gpu_workload"
+  ],
+  "original_battery_readback": {
+    "charging": false,
+    "level": 74.0,
+    "temperature_c": 33.0
+  },
+  "android_thermal_status": 0,
+  "independent_power_diagnostic": {
+    "android_ac_powered": true,
+    "android_charging_status": 2,
+    "pinned_physical_usb_present": true
+  },
+  "corrected_read_only_gpu_detector": {
+    "engine_counters_available": true,
+    "engine_instance_count": 539,
+    "active_engine_pids": 0,
+    "conflict_count": 0,
+    "comfy_queue": {
+      "known": true,
+      "running": 0,
+      "pending": 0
+    }
+  },
+  "vd_connection_state_confirmed": false,
+  "owner_action_queued": "Disconnect VD and exit its Streamer manually; service and settings unchanged.",
+  "guard_start_time": null,
+  "configuration_snapshot_written": false,
+  "adb_reads_performed": true,
+  "settings_mutated": false,
+  "vr_launched": false,
+  "gpu_workload_started": false,
+  "restoration": {
+    "required": false,
+    "reason": "preconditions refused before setup",
+    "vd_hash_verification": null
+  },
+  "arm_edited": false,
+  "authorization_end_local": "2026-10-03T08:44:31+02:00",
+  "allowed_actions": [
+    "frame_bank_pc"
+  ],
+  "quality_metrics": null,
+  "fresh_submissions_per_second": null,
+  "display_fps": null,
+  "optical_latency_ms": null
+}
