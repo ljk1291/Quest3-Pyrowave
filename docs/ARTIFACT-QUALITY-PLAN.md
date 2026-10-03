@@ -1,3 +1,279 @@
+# Compression-artifact plan: fence-first codec and geometry investigation
+
+## Active owner objective and scope (2026-10-04)
+
+The owner's 2026-10-03 22:45 planner revision below supersedes every earlier planner
+note, the old Q3 sixteen-cell matrix, and the earlier engineering order. The target
+is the fewest visible artifacts at Godlike density, fresh submissions at least as
+high as today's (target 90/s), and pipeline latency no worse than today's. PyroWave
+is optional. Rank fence edge PSNR and temporal shimmer first, calibrated HVS next,
+VMAF last. Preserve the full objective rather than selecting an easier subset.
+
+The current owner message authorizes finite supervised PC-only frame-bank leases
+for fence backfill, Q3a and Q3b. ComfyUI must be idle; retain all quality-mode safety
+stops, owned-job registration, deadline and stop marker. No headset, SteamVR, Metro,
+VD, network/router, settings, arm-file or installed-pair changes are authorized.
+Source work uses separate codex/<wo> branches, CPU checks and green CI before merge.
+After Q3a/Q3b reports and WO-10/8/13 merge, build and verify a stable-signed pair
+without installing it, write exact section-6 settings/rollback, and stop for owner.
+If an owner-dependent blocker arises earlier, record it and stop.
+
+Evidence qualifications: decoder caps, VD field visibility/geometry and VD's likely
+dual-stream layout below are owner/planner inputs to verify, not established local
+measurements. Pixel-linear decode estimates are hypotheses only. Inter prediction
+may reduce codec-induced shimmer but does not guarantee artifact-free thin lines.
+The original capture has irregular timestamps and 89 distinct payloads/90 frames;
+temporal differences measure sequence reconstruction error, not optical shimmer.
+Record both one-based 1–90 and 10–89 score windows explicitly, including temporal
+pair indexing. Keep encoder wall/completion time distinct from GPU execution.
+Do not silently relax geometry, formats, safety gates or requested cells.
+
+Read-only Ethernet evidence on 2026-10-04: Get-NetAdapter reports Ethernet Up at
+2.5 Gbps, Realtek Gaming 2.5GbE Family Controller, rt640x64.sys version
+10.73.813.2024 dated 2024-08-15 (NDIS 6.40). This is link negotiation, not TCP
+goodput; no network setting changed.
+
+## 1. Owner input (2026-10-03 21:44)
+
+- **Live decoder caps on Quest 3.** These come from the owner's experience; verify them on
+  our stack.
+
+  | Codec | Cap | Limited by |
+  |---|---|---|
+  | HEVC, AV1 | about 200 Mbps | Quest decoder |
+  | H.264 | about 700 Mbps | Quest decoder (owner's Meta Link experience) |
+  | PyroWave | about 1000 Mbps | Wi-Fi; Q4 verifies |
+
+- **Godlike density is correct and the same in Virtual Desktop (VD).**
+  - VD's 2624×2776 per eye is that density over 85 % of the FOV tangent span. VD's
+    settings use multipliers 0.854 horizontal and 0.850 vertical.
+  - The outer 15 % is not visible on a Quest 3 at all.
+  - So an FOV crop is a valid option for this fork.
+- **Foveated encoding** (as in Steam Link) should be evaluated, with the outer areas
+  **slightly blurred** so their aliasing is less visible.
+- **Network questions:** what bitrate Wi-Fi 6 at 160 MHz really sustains, and whether
+  bitrate fluctuations would be visible. Section 6 covers both.
+- **The fence is the primary target.** The tunnel_fog crop shows the mesh in front of the
+  fire. It aliases clearly more than the source, even with CDF 9/7 at 1000 Mbps.
+  - It is the worst crop for every codec. Region HVS: Haar/500 30.95 dB, 9/7/1000 37.16 dB.
+    The rail crop gets 39.55 dB with 9/7/1000.
+  - Single-frame averages understate it, and still frames cannot show shimmer.
+
+## 2. What this changes
+
+- **H.264 size limit.** NVENC H.264 is limited to 4096 px per side per stream.
+  - Stock ALVR packs both eyes side by side, so stock H.264 needs ≤2048 px per eye.
+  - VD fits by (very likely) encoding one stream per eye.
+- **Decode time scales with encoded pixels.** PyroWave's limit is Quest decode time. A crop
+  and foveation cut pixels for every codec. The game also renders less with a crop.
+- **Intra coding causes shimmer.** PyroWave codes every frame on its own, so thin lines are
+  requantized differently each frame. Inter codecs reuse static content. Measure this over
+  time, not on single frames.
+
+**Geometry candidates.**
+- Sizes come from upstream's `tools/quest3/foveation.py` (centre fraction / edge ratio).
+- Decode times are a linear-in-pixels *estimate* from the live full-Godlike numbers (9/7
+  24.3 ms, Haar 10.5 ms). They are not measurements.
+- The 90 Hz budget is 11.1 ms.
+
+| Profile | Encoded/eye | Stereo width | Pixels vs today | 9/7 est. ms | Haar est. ms | bpp @1000 | bpp @700 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Today, full FOV | 3072×3232 | 6144 | 1.00 | 24.3 | 10.5 | 0.56 | 0.39 |
+| Crop | 2624×2776 | 5248 | 0.73 | 17.8 | 7.7 | 0.76 | 0.53 |
+| Crop + light (0.8 / 1.5×) | 2464×2592 | 4928 | 0.64 | 15.6 | 6.8 | 0.87 | 0.61 |
+| Crop + medium (0.6 / 2×) | 2112×2240 | 4224 | 0.48 | 11.6 | 5.0 | 1.17 | 0.82 |
+| Crop + H.264-fit (0.5 / 2×) | 1984×2112 | 3968 | 0.42 | 10.3 | 4.4 | 1.33 | 0.93 |
+
+## 3. Fence metrics (add before any new cell)
+
+1. **Fence crop.** Add a tight crop on the mesh-over-fire area inside tunnel_fog and record
+   its rectangle.
+2. **Edge-masked error.** On pixels where the reference luma Sobel magnitude is in the
+   crop's top 5 %, report PSNR-Y and p99.9 |error|.
+3. **Temporal shimmer.** On the same mask, report the mean and p99 of
+   |(dec_t − dec_{t−1}) − (ref_t − ref_{t−1})| over frames 10–89.
+4. **Ranking.** Rank by fence edge PSNR and fence shimmer first, then calibrated HVS on all
+   crops. VMAF comes last.
+5. **Backfill existing cells.** Compute these for Haar/500, 5/3/1000 and 9/7/1000 at full FOV
+   from retained decodes, or re-run only those three cells.
+
+## 4. Q3 revised (offline, PC only)
+
+**Common settings for every cell:**
+- the same 90 source frames, scored over frames 10–89 and over frames 1–90, with both
+  labelled;
+- ALVR-like encoding: CBR, no B-frames, `ull`, 1.1-frame VBV, one IDR at frame 0;
+- encode ms per frame per stream recorded;
+- 10-bit decodes converted to 8-bit full range with one documented filter for scoring.
+
+**Crop geometry:**
+- Use 2624×2776 per eye. Scale the session-07 tangent rectangle about the optical axis by
+  0.8542 / 0.8500, centre VD's size on it, and mirror it for the right eye.
+- Record the offsets.
+- Report any fixed crop that falls outside this rectangle.
+
+### Q3a: crop geometry, no foveation
+
+| # | Codec | Layout | Total Mbps | Preset | Why |
+|---|---|---|---|---|---|
+| 1–2 | H.264 High 8-bit | two per-eye streams | 400, 700 | p7 | VD-style |
+| 3 | H.264 High 8-bit | two per-eye streams | 700 | p4 | live-speed preset |
+| 4 | H.264 High 8-bit | two per-eye streams | 700 | p7 + spatial AQ | VD uses AQ |
+| 5–6 | HEVC Main10 | one stream | 200 | p7, p4 | at the decoder cap |
+| 7–8 | AV1 10-bit | one stream | 200 | p7, p4 | VD's current codec |
+| 9 | PyroWave Haar | — | 1000 | — | |
+| 10–11 | PyroWave 5/3 | — | 800, 1000 | — | |
+| 12–13 | PyroWave 9/7 | — | 800, 1000 | — | |
+
+**Full-FOV references:**
+- H.264, per-eye 3072×3232 streams, 700 Mbps, p7;
+- HEVC Main10, 200 Mbps, p7.
+
+The PyroWave full-FOV rows already exist.
+
+**Dropped:** HEVC and AV1 at 500, 800 and 1000 Mbps. They are above the Quest decoder cap.
+
+### Q3b: foveation (after WO-8's frame-bank transform lands)
+
+`s` is the peripheral softness defined under WO-8.
+
+| Profile | Cells |
+|---|---|
+| Crop + light, s = 0 / 0.5 / 1.0 | 9/7 at 1000 Mbps (3 cells); 5/3 at 1000 Mbps with s = 0.5 |
+| Crop + medium, s = 0.5 | 5/3 and 9/7 at 1000 Mbps |
+| Crop + H.264-fit, s = 0.5 | H.264 as one stream at 700 Mbps, p7 (stock-ALVR compatible); 9/7 at 1000 Mbps |
+| Crop + blur-only (light ramp, s = 0.5, no squeeze) | H.264 per-eye at 700 Mbps; 9/7 at 1000 Mbps |
+
+- Score in reconstructed (expanded) space against the cropped reference.
+- Report the centre and periphery separately. For each fixed crop, record which band it
+  falls in.
+- **What the softness cells test.** Blur should cut peripheral shimmer at little visible
+  cost, and should move bits to the centre. Report:
+  - periphery shimmer;
+  - periphery edge PSNR against both the sharp reference and a matching-blur reference;
+  - the change in centre HVS.
+
+## 5. Source work
+
+Every item below gets its own `codex/<wo>` branch, CPU tests and CI. Everything is opt-in
+and default-off. No hardware.
+
+- **WO-10, FOV crop (new; do first).**
+  - Add a client setting for the horizontal and vertical tangent multipliers. The default is
+    1.0; the candidate is 0.854 / 0.850.
+  - Scale both the FOV the client reports and the stream projection-layer FOV.
+  - The server derives the render and encode size from the scaled FOV at unchanged Godlike
+    density.
+  - Log the active multipliers and sizes.
+  - Tests: geometry for both eyes, asymmetric tangents, alignment.
+- **WO-8, foveated encoding (raised priority).**
+  - Port upstream `061dc0b` + `2b87fc7` (light: 0.8 / 1.5×) on top of WO-10.
+  - Add profiles `medium` (0.6 / 2×) and `h264fit` (0.5 / 2×).
+  - **Prefilter the compressed bands.** ALVR's compress shader takes one trilinear tap from
+    a single-mip source, which is in effect one bilinear tap. At a 1.5–2× squeeze that
+    aliases thin lines, which is the very artifact we are fixing. Use an area-weighted
+    footprint.
+  - **Peripheral softness `s` (owner request).**
+    - The prefilter footprint is (local squeeze) × (1 + s); s = 0 is anti-aliasing only.
+    - The blur must ramp in smoothly from the centre edge, with no visible boundary.
+    - Add a blur-only mode: the same ramp with no squeeze. It cuts codec bits but not
+      decode time.
+    - Rationale: peripheral vision is poor at fine detail but sensitive to flicker, so
+      trading aliasing for softness there is the right trade.
+    - Limit: Quest 3 has no eye tracking, so the eyes can rest on the periphery. Keep the
+      default mild (light profile, s ≤ 0.5). Centre fence aliasing still has to be fixed
+      by codec bits and WO-4.
+  - Provide the same forward/inverse mapping and filter as a frame-bank transform with
+    shared constants. Add a test that the Python and shader paths agree.
+- **WO-13, network tool (source only; run in section 6).**
+  - Add a TCP mode to `tools/quest3/network.py` that matches the live transport: frame-paced
+    writes at 90 Hz of the per-frame byte cap.
+  - Report per-frame delivery time p50/p99/p99.9, the share of frames late against the
+    11.1 ms period, and longest stall. Runs: 5 minutes stationary, 2 minutes moving.
+  - Record the Quest Wi-Fi link rate, band, channel and channel width before and after,
+    from read-only `adb shell cmd wifi status` / `dumpsys wifi`.
+  - Add frame-size logging (p50/p99/max bytes) to the live cell telemetry so H.264's
+    variable frames can be compared with PyroWave's fixed cap.
+- **WO-12, stock-codec audit (report only).**
+  - Document what the fork allows today for ALVR H.264, HEVC and AV1: 10-bit, high profile,
+    preset, AQ, maximum bitrate, eye packing, and the H.264 4096 check.
+  - Document what each Q3 winner would need.
+- **WO-11, per-eye dual-stream H.264 (design note only).** Build it only if per-eye
+  full-density H.264 clearly beats both the H.264-fit single stream and the best PyroWave.
+- **WO-6, fast 5/3: deferred.** Revisit it only if PyroWave CDF wins Q3 and the
+  crop + foveation decode still misses 11.1 ms live.
+- **WO-4, layer filter: already built** (`debug.q3pw.layer_filter`). Keep it for the headset
+  session. The compositor's unfiltered downsample is a second source of fence shimmer that
+  no codec can fix.
+
+## 6. Owner-supervised headset session
+
+Run this after Q3 and a stable-signed matching pair that includes WO-10 and WO-8.
+
+0. **Now, read-only (Codex).** Record the PC's Ethernet adapter link speed and driver with
+   `Get-NetAdapter`; change nothing. 1 GbE caps TCP payload near 940 Mbps, which makes
+   1000 Mbps video impossible. Report it at once if the link is below 2.5 GbE.
+1. **Q4 network first,** with WO-13's TCP mode.
+   - **Reference (upstream's setup, not ours):** Quest 3 at a 2401 Mbps PHY, 2.5 GbE PC,
+     stationary, UDP, 10 s per rate (`results/network-first-pass.json`).
+
+     | Rate | Frames on time | Delivery p99 |
+     |---|---:|---:|
+     | 600 Mbps | 100 % | 6.1 ms |
+     | 800 Mbps | 99.1 % | 7.6 ms |
+     | 1000 Mbps | 99.2 % | 9.9 ms |
+     | 1500 Mbps | 89 % | 12.2 ms |
+
+     Maximum throughput was about 1.74 Gbps. So about 1000 Mbps is the stationary edge for
+     90 Hz, and only just: 9.9 ms of the 11.1 ms frame period.
+   - **Runs.**
+     - Stationary: 5 minutes each at 600, 800, 1000 and 1200 Mbps.
+     - Moving: 2 minutes each at 800 and 1000 Mbps while the owner turns 360°, crouches and
+       puts a hand near the headset.
+   - **Bitrate rule.** Take the highest rate with ≥99.5 % of frames on time *while moving*
+     and use about 85 % of it as the live fixed bitrate. Cap it by the codec's decoder limit.
+   - **DFS risk.** Record the router channel. 160 MHz on 5 GHz is usually a DFS channel,
+     where a radar event forces a channel change and a drop of about a minute. Only the
+     owner changes router settings; agents never touch the network.
+2. **Cells.** Run each for 60–90 s on the chart and the owner's fence scene. Record GPU decode,
+   decode-to-fence, fresh/s, encoder ms and estimated latency.
+
+   | Cell | Configuration | Purpose |
+   |---|---|---|
+   | a | Haar, full FOV, 500 Mbps | today's baseline |
+   | b | WO-10 crop, Haar, 1000 Mbps | the owner confirms the crop edge is invisible |
+   | c | best PyroWave from Q3, crop + its foveation profile, 1000 Mbps | |
+   | d | stock H.264 `h264fit`, 700 Mbps | Quest decoder at 90 Hz |
+   | e | HEVC or AV1 10-bit, crop, 200 Mbps | |
+   | f | the winner with the layer filter off/on/off | |
+   | g | the winner with a live bitrate step 1000 → 600 → 1000, 10 s each, unannounced | can the owner see bitrate changes? |
+   | h | the winner at the Q4 bitrate rule's rate while the owner moves | stutter versus image |
+
+   Cell h also records stalls, late frames and the latency p99.
+
+3. **VD comparison.** The owner compares the winner with VD H.264+ Godlike on the same fence
+   scene. The owner launches VD and Metro; agents never touch VD.
+
+## 7. Decision rule
+
+Consider only candidates that keep fresh submissions at or above today's (target 90) and
+latency no worse than today's. Among them, pick the best fence edge PSNR, fence shimmer and
+HVS. The owner's in-headset comparison with VD decides close calls.
+
+Run every candidate at the Q4 rule's bitrate, never at a stationary peak. A late frame
+(stutter, latency spike) is worse than a slightly softer image.
+
+## Q1/Q2 interpretation (record in status)
+
+- **Bitrate alone does not replace the wavelet.** At 3072, Haar/1000 still trails 5/3/500
+  by 0.43 dB and 9/7/500 by 0.98 dB HVS.
+- **Haar's 2560 lead at 1000 Mbps is optimistic.** The frame bank's Lanczos resize smooths
+  Haar blocks, while the live path is a single tap plus a bilinear upscale.
+- **VMAF saturates near 99.** Rank by HVS and the fence metrics.
+
+
+# Prior plan and measurements (historical; superseded schedule)
+
 # Compression-artifact plan: mura-like texture and line aliasing
 
 ## Owner objective and revised investigation (2026-10-03)

@@ -5,14 +5,19 @@ agent (Codex). Codex reads it at every checkpoint and appends to **Log**. The ow
 Claude may reorder **Queue** or add **Notes for Codex** between checkpoints. Keep
 entries short and link to evidence.
 
-## Owner objective (2026-10-03)
+## Owner objective (revised 2026-10-04)
 
-Fewest artifacts at Godlike per-eye render, near-90 fresh submissions/s and no
-pipeline-latency regression. The owner reports ~1000 Mbps available over Wi-Fi 6
-at 160 MHz; sustained TCP headroom is unmeasured. PyroWave is optional. Rank offline
-candidates by calibrated HVS before VMAF, with owner judgement required for promotion.
-Reduced-size Lanczos frame-bank rows are optimistic relative to current live sampling.
-The complete reconciled Q1–Q4 plan is in [ARTIFACT-QUALITY-PLAN.md](ARTIFACT-QUALITY-PLAN.md).
+Fewest artifacts at Godlike density, fresh submissions at least today's (~82–83/s,
+target 90/s), and no pipeline-latency regression; PyroWave is optional. Fence edge
+PSNR and temporal shimmer lead ranking, then calibrated HVS, then VMAF. Owner
+decoder-cap estimates (HEVC/AV1 ~200 Mbps, H.264 ~700, PyroWave ~1000 network-limited)
+require verification on our stack. VMAF saturation and optimistic Lanczos reduction
+limit prior rankings. The [active plan](ARTIFACT-QUALITY-PLAN.md) incorporates the
+complete 2026-10-03 22:45 planner revision, replacing every earlier note and Q3 plan.
+
+**Ethernet readback, 2026-10-04:** Up, **2.5 Gbps**, Realtek Gaming 2.5GbE Family
+Controller. Driver rt640x64.sys **10.73.813.2024**, date **2024-08-15**, NDIS 6.40.
+Read with Get-NetAdapter; no network changes. Negotiated link speed is not goodput.
 
 ## Current state (baseline retained; updated 2026-10-03)
 
@@ -29,20 +34,42 @@ The complete reconciled Q1–Q4 plan is in [ARTIFACT-QUALITY-PLAN.md](ARTIFACT-Q
   This is a quality candidate; the installed baseline and rate acceptance are unchanged.
   [Combined table and crop gates](../results/metro-q1q2-combined-2026-10-03.md).
 
-## Queue
+## Queue (current owner goal)
 
-1. Review the complete Q1/Q2/500-reference table before headset work. All twelve
-   requested cells are complete; both supervised leases are closed. The interrupted
-   partial CDF cell is excluded and the four Haar cells were not repeated.
-2. Q3 NVENC HEVC/AV1 support is merged and CPU-tested; the private 16-cell plan is
-   frozen. Execute/report that offline hardware-codec matrix under separate owner
-   authorization before substantial CDF decoder engineering. No Q3 GPU result exists yet.
-3. Q4 TCP goodput/tail-latency evidence before live video above 600 Mbps. Then compare
-   quality candidates on Quest for fresh rate and latency under separate authorization.
-4. WO-6's offline quality prerequisite is met: CDF 5/3/1000 beats Haar/1000 in both
-   metrics on all four crops at both sizes. Engineering priority still depends on Q3.
-   Keep decoder pass profiling on the faster AHB allocation, flat-field controls and
-   real-path sampling tests; defer 4:4:4 and 1200 Mbps headroom.
+1. Fence metric source work and backfill: freeze the mesh-over-fire rectangle;
+   Sobel top-5% reference mask, edge PSNR-Y/p99.9 error, temporal residual mean/p99
+   over explicitly indexed 10–89; backfill full-FOV Haar/500, 5/3/1000, 9/7/1000.
+2. WO-10 first: opt-in tangent FOV crop (default 1/1), client reports/projection,
+   server density-preserving dimensions, logs and both-eye/asymmetry/alignment tests.
+3. In parallel, revised Q3a adapter and 15 offline cells (13 cropped + two full-FOV
+   references), WO-13 TCP/frame-size telemetry, WO-12 stock-codec report and WO-11
+   dual-stream design only. See active plan for exact rates/presets/formats.
+4. WO-8 on WO-10: upstream light, medium/h264fit, area prefilter, smooth peripheral
+   softness and blur-only; shared live/frame-bank mapping and filter with CPU parity
+   checks. Every runtime feature default-off; own codex branch and green CI per WO.
+5. Merge WO-8, then Q3b's ten offline cells; report both frame windows, centre and
+   periphery, sharp/matching-blur comparisons and crop bands. Publish JSON + Markdown
+   ranked by fence metrics then HVS. Preserve exact build/source/tool provenance.
+6. When Q3a/Q3b and WO-10/8/13 are complete, build a stable-signed matching pair per
+   BUILD.md, verify without installing; write Q4 and cells a–h exact settings and
+   rollback checklist, then stop for the owner. WO-6 stays deferred unless CDF wins
+   and crop/foveation later misses the live 11.1-ms budget.
+
+## Active notes for Codex (2026-10-04)
+
+- Current-session owner authorization covers supervised offline PC leases only for
+  fence metrics, Q3a and Q3b. Keep ComfyUI idle and all existing quality safety stops;
+  do not touch arm, headset, VR apps, VD, router/network, settings or installed pair.
+- Earlier Q3 16-cell plan is obsolete. Drop HEVC/AV1 above 200 Mbps; include H.264
+  per-eye and 10-bit HEVC/AV1 plus the exact crop/foveation candidates in the plan.
+- Owner's FOV claim is an input requiring later headset confirmation. Record crop
+  offsets and excluded fixed regions, preserve Godlike density, and mirror eyes.
+- The fence dominates: single-frame averages do not establish temporal stability.
+  Preserve measured GPU execution/completion, fresh submissions and optical FPS as
+  separate quantities; prior ~82–83/s is not a 90-Hz pass.
+- Q1/Q2: full-size Haar/1000 trails 5/3/500 by 0.43 HVS dB and 9/7/500 by 0.98;
+  reduced-size Haar's gain includes optimistic Lanczos smoothing. No defaults promoted.
+- An owner-dependent blocker must be written here and work stopped for the owner.
 
 ## Previous queue (historical)
 
@@ -510,3 +537,8 @@ Take the first unblocked item. Items marked ∥ are independent.
   do not pass every crop against Haar/1000. WO-6's quality prerequisite is satisfied,
   but Q3 is the next comparison under the owner's codec-independent objective.
   No headset work, settings/arm changes, timing claims or default promotion occurred.
+
+- 2026-10-04 (planner revision and Ethernet): reconciled the complete 22:45 note,
+  replaced the active queue and Q3 schedule, and retained historical evidence.
+  Get-NetAdapter readback confirms 2.5 Gbps / driver 10.73.813.2024; no settings
+  changed. Current owner goal supplies finite offline lease authorization only.

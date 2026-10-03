@@ -1,5 +1,10 @@
 # NVENC offline frame bank
 
+> The sixteen-cell plan and fixed 8-bit/P4 contract below describe the previous
+> implementation. They are superseded by sections 3–4 of
+> [the active artifact-quality plan](ARTIFACT-QUALITY-PLAN.md). Do not execute the
+> old frozen plan. Revised Q3a/Q3b support and fence-first scoring are required.
+
 `tools/xrbench/nvenc_framebank.py` compares NVENC HEVC and AV1 with PyroWave
 on the same frozen 90-frame stereo Y4M input. It is an **offline encode proxy**:
 it does not configure ALVR, connect a Quest, or establish Quest hardware-decoder
