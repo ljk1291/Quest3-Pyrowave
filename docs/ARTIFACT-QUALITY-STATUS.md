@@ -302,3 +302,27 @@ Take the first unblocked item. Items marked ∥ are independent.
   No Metro quality improvement, rate gain or stable 90-Hz pass is claimed.
   WO-6/7/8 remain gated on actual WO-1 results; the goal remains active while
   integration CI and the owner-dependent readiness gate remain outstanding.
+
+- 2026-10-03, checkpoint startup publication and signed-build preparation:
+  [The qualified-tools record](https://github.com/ljk1291/Quest3-Pyrowave/pull/16)
+  merged after [all four PR jobs](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37095245697)
+  passed. Integration `bc21788` also passed
+  [all four jobs](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37094707992).
+  A [manual signed build](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37097253052)
+  is preparing that commit's matching pair. Its downloaded Android artifact
+  passes local checksums, fork identity, canonical source-lock and stable
+  certificate checks; Windows/full-pair validation remains. Nothing was installed.
+  Source review found two startup state writes outside the rollback mutex.
+  Real CPU-thread regressions reproduce them reverting a completed restoration
+  to pending. Guard publication and exclusive initial-window creation now use
+  the shared mutex; cancelled startup and late claims cannot overwrite the final
+  report. **105 focused CPU checks pass**, including eight new regressions.
+  [Reproduction and scope](../results/supervisor-startup-race-2026-10-03.json).
+  Full correction-head CI and the required live restoration dry run remain.
+  The VD Streamer is still resident with unknown connection state and its owner
+  request remains pending. No ADB, hardware window, settings mutation, VR launch
+  or GPU workload occurred in this checkpoint. The arm remains unchanged,
+  allowing only PC frame-bank work until 08:44:31 Berlin. Chart/property/install
+  controller integration remains explicit follow-up scope. No quality gain,
+  fresh-rate gain or stable 90-Hz pass is claimed; WO-6/7/8 stay gated on actual
+  WO-1 scores. Source/CI work continues and the goal remains active.

@@ -105,3 +105,22 @@ The resident VD Streamer supplied no current connection log. Its connection gate
 remains closed; the agent does not stop VD to get around it. The owner is asked
 to disconnect and exit the Streamer themselves. No test window, settings mutation,
 VR launch or GPU workload occurred in this failed check.
+
+## Startup publication review, 2026-10-03
+
+Two CPU-thread regressions reproduce a startup writer overwriting a completed
+restorer: `restoration.json` said restored while `state.json` had reverted to
+pending, with the old guard-ready flag. Both guard-registration writes now use
+the same OS-backed mutex as rollback, reload state under that mutex, and reject
+cancelled, restoring, completed or different-nonce windows. They recheck the
+guard readiness and liveness before publication. A stop arriving during the
+write refuses startup; the waiting restorer reloads and publishes the final
+state. Late registration cannot overwrite it. Historical ready flags alone do
+not grant a lease after restoration.
+
+Initial state creation uses that mutex too. A second creator cannot replace an
+existing window or clear its readiness/cancellation markers. Eight new regressions
+bring the focused CPU suite to **105 passing checks** on Windows. The race cases
+use the real CLI, threads and lock with fake hardware hosts; they perform no ADB,
+VR launch or GPU work. [Sanitized reproduction](../results/supervisor-startup-race-2026-10-03.json).
+Full CI and the successful armed check/start/restore dry run are still required.
