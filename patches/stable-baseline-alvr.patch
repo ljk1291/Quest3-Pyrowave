@@ -574,10 +574,13 @@ index 688a94ff996571329b2422458d9e57bbc05686d2..40f2054d33b915b23d060af5f1a87ee6
              header: "Connecting".into(),
          })
 diff --git a/alvr/client_openxr/src/stream.rs b/alvr/client_openxr/src/stream.rs
-index eb04019edefff6ebbc77744948a173d41687de19..accaaa4d254a0302501645b6de205000202813fc 100644
+index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e2db9bced 100644
 --- a/alvr/client_openxr/src/stream.rs
 +++ b/alvr/client_openxr/src/stream.rs
-@@ -3,7 +3,7 @@ use crate::{
+@@ -1,9 +1,9 @@
+ use crate::{
+-    graphics::{self, ProjectionLayerAlphaConfig, ProjectionLayerBuilder},
++    graphics::{self, ProjectionLayerAlphaConfig, ProjectionLayerBuilder, ProjectionLayerSettingsConfig},
      interaction::{self, InteractionContext, InteractionSourcesConfig},
  };
  use alvr_client_core::{
@@ -621,7 +624,20 @@ index eb04019edefff6ebbc77744948a173d41687de19..accaaa4d254a0302501645b6de205000
      frame_wait_budget: Duration,
      frame_wait_stats: [u64; 4], // waits, ready hits, total microseconds, max microseconds
      frame_wait_last_log: Instant,
-@@ -113,6 +122,15 @@ impl StreamContext {
+@@ -99,6 +108,7 @@ pub struct StreamContext {
+     pending_frame_selected_at: Option<Instant>,
+     pre_wait_stats: [u64; 5], // polls, hits, consumed held frames, total hold us, max hold us
+     pre_wait_last_log: Instant,
++    layer_filter_flags: Option<u64>,
+ }
+ 
+ impl StreamContext {
+@@ -109,10 +119,20 @@ impl StreamContext {
+         interaction_ctx: Arc<RwLock<InteractionContext>>,
+         platform: Platform,
+         config: ParsedStreamConfig,
++        layer_filter_flags: Option<u64>,
+     ) -> StreamContext {
          interaction_ctx
              .write()
              .select_sources(&config.interaction_sources);
@@ -637,7 +653,7 @@ index eb04019edefff6ebbc77744948a173d41687de19..accaaa4d254a0302501645b6de205000
  
          let xr_exts = xr_session.instance().exts();
  
-@@ -190,7 +208,7 @@ impl StreamContext {
+@@ -190,7 +210,7 @@ impl StreamContext {
              format,
              config.foveated_encoding_config.clone(),
              platform != Platform::Lynx && !((platform.is_pico()) && config.enable_hdr),
@@ -646,7 +662,15 @@ index eb04019edefff6ebbc77744948a173d41687de19..accaaa4d254a0302501645b6de205000
              config.encoding_gamma,
              config.upscaling.clone(),
          );
-@@ -511,8 +529,10 @@ impl StreamContext {
+@@ -245,6 +265,7 @@ impl StreamContext {
+             pending_frame_selected_at: None,
+             pre_wait_stats: [0; 5],
+             pre_wait_last_log: Instant::now(),
++            layer_filter_flags,
+         };
+ 
+         alvr_graphics::log_quest_experiment(format!(
+@@ -511,8 +532,10 @@ impl StreamContext {
              }
          }
  
@@ -659,7 +683,7 @@ index eb04019edefff6ebbc77744948a173d41687de19..accaaa4d254a0302501645b6de205000
                  let view_params = self.core_context.report_compositor_start(timestamp);
  
                  // Avoid passing invalid timestamp to runtime
-@@ -521,9 +541,9 @@ impl StreamContext {
+@@ -521,9 +544,9 @@ impl StreamContext {
  
                  self.last_good_view_params = view_params;
  
@@ -671,7 +695,7 @@ index eb04019edefff6ebbc77744948a173d41687de19..accaaa4d254a0302501645b6de205000
              };
  
          // Match the inverse warp to the centre the server actually foveated this frame with.
-@@ -587,6 +607,13 @@ impl StreamContext {
+@@ -587,6 +610,13 @@ impl StreamContext {
  
              self.swapchains[0].release_image().unwrap();
              self.swapchains[1].release_image().unwrap();
@@ -685,7 +709,17 @@ index eb04019edefff6ebbc77744948a173d41687de19..accaaa4d254a0302501645b6de205000
              if latest_only {
                  video_decoder::telemetry::record_eye_copy(acquire_wait_ms, eye_render_ms,
                      release_start.elapsed().as_secs_f32() * 1000.0,
-@@ -805,3 +832,25 @@ fn stream_input_loop(
+@@ -650,7 +680,8 @@ impl StreamContext {
+                             | PassthroughMode::HsvChromaKey(_)
+                     ),
+                 }),
+-        );
++        )
++        .with_settings(self.layer_filter_flags.map(|flags| ProjectionLayerSettingsConfig { flags }));
+ 
+         (layer, timestamp)
+     }
+@@ -805,3 +836,25 @@ fn stream_input_loop(
          thread::sleep(deadline.saturating_duration_since(Instant::now()));
      }
  }

@@ -61,3 +61,11 @@ Windows shader manifest checks passed. The legacy default shader binaries remain
 unchanged. CI runs the three pure Rust filter-policy tests without an OpenXR
 runtime before compiling the client. These source checks do not establish a
 Quest quality or performance improvement.
+
+The first combined build failed: `StreamContext::new` still had its baseline
+signature while the caller supplied the filter flags. The integration review
+had missed WO-4's fourth client file, `stream.rs`, shared with the baseline
+patch. The corrected reconstruction includes its constructor, stored flags and
+projection-layer chain. All other WO-5 files remain byte-identical, the clean
+apply/reverse and fork-identity checks pass, and the shader manifest is unchanged.
+This correction requires a new full CI result before merge.
