@@ -185,8 +185,13 @@ def parse_vmaf_log(path):
     pooled = data.get("pooled_metrics", {})
     out = {}
     for key, col in (("psnr_hvs", "psnr_hvs"), ("vmaf", "vmaf"), ("psnr_hvs_y", "psnr_hvs_y")):
-        if key in pooled and "mean" in pooled[key]:
-            out[col] = float(pooled[key]["mean"])
+        row=pooled.get(key)
+        # libvmaf emits JSON null for infinite identity PSNR-HVS. Optional
+        # unavailable features must not hide a valid, separately pooled VMAF;
+        # absent/null VMAF stays absent and fails the frame-bank metric gate.
+        if isinstance(row,dict) and row.get("mean") is not None:
+            try: out[col] = float(row["mean"])
+            except (TypeError,ValueError): pass
     return out
 
 

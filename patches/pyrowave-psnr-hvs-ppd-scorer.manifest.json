@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "kind": "pyrowave_psnr_hvs_ppd_scorer",
+  "upstream": {
+    "repository": "https://github.com/Themaister/pyrowave",
+    "base_revision": "d2997ac172bdc00e29c58e3f2938acb7e94580bf",
+    "license": "MIT"
+  },
+  "patch": {
+    "path": "patches/pyrowave-psnr-hvs-ppd-scorer.patch",
+    "sha256": "b241cb920779a645dc784fed4b983add75359a56f71694151b6085e105f08586",
+    "base_psnr_cpp_sha256": "663a77a183a1f2f4d96928e89a9e34568c1468b6d882a7b833f4f8b6a162d709",
+    "accepted_windows_worktree_psnr_cpp_sha256": "436b042a5c631c061565b023ca3317ff22a3a714cf965a5f1aeaa2bf2c41599e",
+    "preimage_normalization": "LF after exact preimage hash validation",
+    "patched_psnr_cpp_sha256": "bf2ed4c7cd2e962e97e468c2fa6b9f0d6068ee7faa441b0f3f001a93b3f3e184"
+  },
+  "standalone": {
+    "transport": "strict_native_y4m_no_frame_discard",
+    "metric_functions_sha256": "3f63c494b09278f1459a706eb2128bdb5114f367fcec028b951c0a0349af8855",
+    "generated_source_sha256": "10cde49947a73c86c94c73a5fa128c917c57e43f1dc6a1a9da99ba801897e80c",
+    "main_sha256": "11bcd185174d9fd2bfd7d0f0f9f75ddfab54ae4e07c817c85ce233fab94f9533",
+    "reader_sha256": "899a6bb219dd65beee090b3444da16a4637d6e8c551e0bd1fb0db536e5a0cee9",
+    "shader_sha256": "87fd53541193fd2543be754ecb8a6a38f810894993d1c8963e1d86bd8edc30bf",
+    "cmake_overlay_sha256": "f7a9beacebdf22374b85bdac5c54d15d9184a74ebc137e91c2dd74570d1854b3"
+  },
+  "build": {
+    "target": "pyrowave-framebank-hvs",
+    "cmake_options": [
+      "-DPYROWAVE_UTILS=OFF",
+      "-DPYROWAVE_DEVEL=ON"
+    ],
+    "runtime_defaults_changed": false
+  }
+}

@@ -7,3 +7,7 @@
 *.cso binary
 *.spv binary
 captures/** -text
+# Preserve the exact pinned source bytes used by the scorer-patch fixture.
+tools/tests/fixtures/pyrowave-d2997ac-psnr.cpp text eol=lf
+tools/tests/fixtures/pyrowave-d2997ac-psnr_hvs_m.comp text eol=lf
+tools/xrbench/native/* text eol=lf
