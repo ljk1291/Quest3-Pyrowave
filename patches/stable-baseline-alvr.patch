@@ -824,7 +824,7 @@ index d3a1d7c323e3fe3810c6366241a111b942988bd0..02d18e9a88f995012b2088b838ab7026
      }
  
 diff --git a/alvr/packets/src/lib.rs b/alvr/packets/src/lib.rs
-index 57060522d6aa0e566e0200b6838ca3cb0e2b152c..fe857433a03a91096db9e4c895c740216b4e4c07 100644
+index 57060522d6aa0e566e0200b6838ca3cb0e2b152c..1223c0523819addccecd35fbf0e8612f61215b2f 100644
 --- a/alvr/packets/src/lib.rs
 +++ b/alvr/packets/src/lib.rs
 @@ -1,5 +1,5 @@
@@ -834,7 +834,7 @@ index 57060522d6aa0e566e0200b6838ca3cb0e2b152c..fe857433a03a91096db9e4c895c74021
      glam::{UVec2, Vec2},
      semver::Version,
      ConnectionState, DeviceMotion, Fov, LogEntry, LogSeverity, Pose, ToAny,
-@@ -21,6 +21,69 @@ pub const AUDIO: u16 = 2;
+@@ -21,6 +21,74 @@ pub const AUDIO: u16 = 2;
  pub const VIDEO: u16 = 3;
  pub const STATISTICS: u16 = 4;
  
@@ -879,6 +879,11 @@ index 57060522d6aa0e566e0200b6838ca3cb0e2b152c..fe857433a03a91096db9e4c895c74021
 +    /// Scale a four-sided OpenXR FOV around the optical axis. Scaling tangents,
 +    /// rather than angles, keeps the requested pixel density and eye asymmetry.
 +    pub fn scale_fov(self, fov: Fov) -> Fov {
++        // Default-off must be bit-exact. atan(tan(angle)) is close but not
++        // necessarily identical to the runtime-provided floating-point angle.
++        if self == Self::default() {
++            return fov;
++        }
 +        let h = self.horizontal;
 +        let v = self.vertical;
 +        Fov {
@@ -904,7 +909,7 @@ index 57060522d6aa0e566e0200b6838ca3cb0e2b152c..fe857433a03a91096db9e4c895c74021
  // todo: use simple string
  #[derive(Serialize, Deserialize, Clone)]
  pub struct VideoStreamingCapabilitiesLegacy {
-@@ -133,6 +196,9 @@ pub struct NegotiatedStreamingConfig {
+@@ -133,6 +201,9 @@ pub struct NegotiatedStreamingConfig {
      pub encoding_gamma: f32,
      pub enable_hdr: bool,
      pub wired: bool,
@@ -914,19 +919,21 @@ index 57060522d6aa0e566e0200b6838ca3cb0e2b152c..fe857433a03a91096db9e4c895c74021
  }
  
  #[derive(Serialize, Deserialize)]
-@@ -179,6 +245,11 @@ pub fn decode_stream_config(packet: &StreamConfigPacket) -> Result<StreamConfig>
+@@ -179,6 +250,13 @@ pub fn decode_stream_config(packet: &StreamConfigPacket) -> Result<StreamConfig>
      let encoding_gamma = json::from_value(negotiated_json["encoding_gamma"].clone()).unwrap_or(1.0);
      let enable_hdr = json::from_value(negotiated_json["enable_hdr"].clone()).unwrap_or(false);
      let wired = json::from_value(negotiated_json["wired"].clone()).unwrap_or(false);
-+    let fov_tangent_multipliers = json::from_value(
-+        negotiated_json["fov_tangent_multipliers"].clone(),
-+    )
-+    .unwrap_or_default()
-+    .validate()?;
++    // Missing is an old-server compatibility case. Present-but-malformed must
++    // fail closed: otherwise the server may render a crop while this client
++    // presents a full frustum.
++    let fov_tangent_multipliers = match negotiated_json.get("fov_tangent_multipliers") {
++        Some(value) => json::from_value::<FovTangentMultipliers>(value.clone())?.validate()?,
++        None => FovTangentMultipliers::default(),
++    };
  
      Ok(StreamConfig {
          server_version: session_config.server_version,
-@@ -193,6 +264,7 @@ pub fn decode_stream_config(packet: &StreamConfigPacket) -> Result<StreamConfig>
+@@ -193,6 +271,7 @@ pub fn decode_stream_config(packet: &StreamConfigPacket) -> Result<StreamConfig>
              encoding_gamma,
              enable_hdr,
              wired,
@@ -934,7 +941,7 @@ index 57060522d6aa0e566e0200b6838ca3cb0e2b152c..fe857433a03a91096db9e4c895c74021
          },
      })
  }
-@@ -318,6 +390,12 @@ pub struct HeadsetTelemetry {
+@@ -318,6 +397,12 @@ pub struct HeadsetTelemetry {
      pub battery_temperature_c: Option<f32>,
      pub battery_level: Option<f32>,
      pub pyrowave: Option<PyroWaveDecodeStats>,
@@ -947,7 +954,7 @@ index 57060522d6aa0e566e0200b6838ca3cb0e2b152c..fe857433a03a91096db9e4c895c74021
  }
  
  #[derive(Serialize, Deserialize, Clone, Default)]
-@@ -610,6 +688,91 @@ mod pyrowave_udp_tests {
+@@ -610,6 +695,157 @@ mod pyrowave_udp_tests {
      }
  }
  
@@ -1034,12 +1041,78 @@ index 57060522d6aa0e566e0200b6838ca3cb0e2b152c..fe857433a03a91096db9e4c895c74021
 +        .validate()
 +        .is_err());
 +    }
++
++    fn stream_packet() -> StreamConfigPacket {
++        encode_stream_config(
++            &SessionConfig::default(),
++            &NegotiatedStreamingConfig {
++                view_resolution: UVec2::new(3072, 3232),
++                refresh_rate_hint: 90.0,
++                game_audio_sample_rate: 48_000,
++                enable_foveated_encoding: false,
++                use_multimodal_protocol: false,
++                use_full_range: true,
++                encoding_gamma: 1.0,
++                enable_hdr: false,
++                wired: false,
++                fov_tangent_multipliers: FovTangentMultipliers::default(),
++            },
++        )
++        .unwrap()
++    }
++
++    #[test]
++    fn missing_multiplier_is_legacy_identity_but_bad_values_fail_closed() {
++        let mut missing = stream_packet();
++        let mut json: json::Value = json::from_str(&missing.negotiated).unwrap();
++        json.as_object_mut()
++            .unwrap()
++            .remove("fov_tangent_multipliers");
++        missing.negotiated = json::to_string(&json).unwrap();
++        assert_eq!(
++            decode_stream_config(&missing)
++                .unwrap()
++                .negotiated_config
++                .fov_tangent_multipliers,
++            FovTangentMultipliers::default()
++        );
++
++        let mut invalid = stream_packet();
++        let mut json: json::Value = json::from_str(&invalid.negotiated).unwrap();
++        json["fov_tangent_multipliers"] = json::json!({
++            "horizontal": 0.1,
++            "vertical": 0.85,
++        });
++        invalid.negotiated = json::to_string(&json).unwrap();
++        assert!(decode_stream_config(&invalid).is_err());
++
++        let mut malformed = stream_packet();
++        let mut json: json::Value = json::from_str(&malformed.negotiated).unwrap();
++        json["fov_tangent_multipliers"] = json::json!("not multipliers");
++        malformed.negotiated = json::to_string(&json).unwrap();
++        assert!(decode_stream_config(&malformed).is_err());
++    }
++
++    #[test]
++    fn identity_crop_preserves_runtime_angles_bit_for_bit() {
++        let input = Fov {
++            left: -1.002_345_6,
++            right: 0.731_234_5,
++            up: 0.912_345_6,
++            down: -0.812_345_6,
++        };
++        let output = FovTangentMultipliers::default().scale_fov(input);
++        assert_eq!(output.left.to_bits(), input.left.to_bits());
++        assert_eq!(output.right.to_bits(), input.right.to_bits());
++        assert_eq!(output.up.to_bits(), input.up.to_bits());
++        assert_eq!(output.down.to_bits(), input.down.to_bits());
++    }
 +}
 +
  #[cfg(test)]
  mod beta_telemetry_tests {
      use super::*;
-@@ -636,6 +799,8 @@ mod beta_telemetry_tests {
+@@ -636,6 +872,8 @@ mod beta_telemetry_tests {
                  staging_eye_copies: 200,
                  ..Default::default()
              }),
