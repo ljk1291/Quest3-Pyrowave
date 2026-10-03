@@ -80,3 +80,28 @@ headset properties without force-stopping the client or replaying setprop;
 unexpected property drift fails restoration without overwriting the owner.
 Two regressions cover unchanged state and drift. Device-window cleanup preserves
 the required client-stop-before-property-restore ordering.
+
+## First live precondition check, 2026-10-03
+
+The first PC-only check refused before opening a window. The Quest reported
+74%, 33 °C, thermal status 0 and Android AC/charging, with Windows independently
+confirming the armed physical USB device. AC alone remains insufficient: startup
+accepts that classification only with charging/full status and the pinned USB
+presence proof. An explicit discharging state still fails.
+
+On this WDDM host NVIDIA listed resident shell/browser contexts, while Windows
+reported 539 engine counters and zero active engines. The workload detector now
+joins the resident-process inventory to per-process engine activity. Active
+Comfy GPU work fails even with an idle queue; a running/pending/unknown queue
+also fails independently. Missing engine telemetry fails closed. These are
+precondition detector corrections, not performance or GPU metric results.
+
+The retained check also showed one Comfy-discovery row was the PowerShell query
+itself. Discovery now excludes probe shells, including parallel monitor probes.
+A disposable Windows CPU-child regression exercises that case; a stopped Comfy
+server is no longer misidentified solely because the probe contains its name.
+
+The resident VD Streamer supplied no current connection log. Its connection gate
+remains closed; the agent does not stop VD to get around it. The owner is asked
+to disconnect and exit the Streamer themselves. No test window, settings mutation,
+VR launch or GPU workload occurred in this failed check.

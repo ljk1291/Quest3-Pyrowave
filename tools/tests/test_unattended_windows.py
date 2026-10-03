@@ -8,6 +8,18 @@ from tools.quest3 import unattended as u
 
 @unittest.skipUnless(os.name=='nt','Windows process handles required')
 class OwnedProcessTest(unittest.TestCase):
+    def test_comfy_discovery_ignores_its_own_and_parallel_probe_shells(self):
+        child=subprocess.Popen(['powershell','-NoProfile','-NonInteractive','-Command',
+                               '# ComfyUI discovery probe, no inference\nStart-Sleep -Seconds 20'],
+                               creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+        try:
+            rows=u.Host()._comfy_pids()
+            self.assertNotIn(child.pid,[r['ProcessId'] for r in rows])
+            self.assertFalse(any('Get-CimInstance Win32_Process' in r.get('CommandLine','') for r in rows))
+        finally:
+            if child.poll() is None: child.terminate()
+            child.wait(timeout=5)
+
     def test_completed_owned_child_is_already_stopped(self):
         child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(.1)'],
                                creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
