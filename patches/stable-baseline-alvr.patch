@@ -574,7 +574,7 @@ index 688a94ff996571329b2422458d9e57bbc05686d2..40f2054d33b915b23d060af5f1a87ee6
              header: "Connecting".into(),
          })
 diff --git a/alvr/client_openxr/src/stream.rs b/alvr/client_openxr/src/stream.rs
-index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e2db9bced 100644
+index eb04019edefff6ebbc77744948a173d41687de19..9c4192ea99474a6170758bfd2fd67f5427240bd7 100644
 --- a/alvr/client_openxr/src/stream.rs
 +++ b/alvr/client_openxr/src/stream.rs
 @@ -1,9 +1,9 @@
@@ -589,15 +589,27 @@ index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e
      ClientCoreContext,
  };
  use alvr_common::{
-@@ -34,6 +34,7 @@ use std::{
+@@ -16,7 +16,7 @@ use alvr_common::{
+ use alvr_graphics::{
+     compute_target_view_resolution, GraphicsContext, StreamRenderer, StreamViewParams,
+ };
+-use alvr_packets::{FaceData, RealTimeConfig, StreamConfig, ViewParams};
++use alvr_packets::{FovTangentMultipliers, FaceData, RealTimeConfig, StreamConfig, ViewParams};
+ use alvr_session::{
+     ClientsideFoveationConfig, ClientsideFoveationMode, CodecType, FoveatedEncodingConfig,
+     MediacodecProperty, PassthroughMode, UpscalingConfig,
+@@ -34,8 +34,10 @@ use std::{
  const DECODER_MAX_TIMEOUT_MULTIPLIER: f32 = 0.8;
  
  pub struct ParsedStreamConfig {
 +    pub codec: CodecType,
      pub view_resolution: UVec2,
      pub refresh_rate_hint: f32,
++    pub fov_tangent_multipliers: FovTangentMultipliers,
      pub use_full_range: bool,
-@@ -50,9 +51,17 @@ pub struct ParsedStreamConfig {
+     pub encoding_gamma: f32,
+     pub enable_hdr: bool,
+@@ -50,11 +52,20 @@ pub struct ParsedStreamConfig {
      pub interaction_sources: InteractionSourcesConfig,
  }
  
@@ -614,8 +626,11 @@ index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e
 +            codec: config.settings.video.preferred_codec,
              view_resolution: config.negotiated_config.view_resolution,
              refresh_rate_hint: config.negotiated_config.refresh_rate_hint,
++            fov_tangent_multipliers: config.negotiated_config.fov_tangent_multipliers,
              use_full_range: config.negotiated_config.use_full_range,
-@@ -91,7 +100,7 @@ pub struct StreamContext {
+             encoding_gamma: config.negotiated_config.encoding_gamma,
+             enable_hdr: config.negotiated_config.enable_hdr,
+@@ -91,7 +102,7 @@ pub struct StreamContext {
      /// A decoded frame selected before xrWaitFrame. Legacy decoders may block while
      /// selecting; the opt-in Quest3 PyroWave pre-wait poll only takes a ready frame.
      /// Its existing native-buffer lease remains protected until the eye copy is ready.
@@ -624,7 +639,7 @@ index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e
      frame_wait_budget: Duration,
      frame_wait_stats: [u64; 4], // waits, ready hits, total microseconds, max microseconds
      frame_wait_last_log: Instant,
-@@ -99,6 +108,7 @@ pub struct StreamContext {
+@@ -99,6 +110,7 @@ pub struct StreamContext {
      pending_frame_selected_at: Option<Instant>,
      pre_wait_stats: [u64; 5], // polls, hits, consumed held frames, total hold us, max hold us
      pre_wait_last_log: Instant,
@@ -632,7 +647,7 @@ index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e
  }
  
  impl StreamContext {
-@@ -109,10 +119,20 @@ impl StreamContext {
+@@ -109,10 +121,28 @@ impl StreamContext {
          interaction_ctx: Arc<RwLock<InteractionContext>>,
          platform: Platform,
          config: ParsedStreamConfig,
@@ -650,10 +665,18 @@ index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e
 +            config.enable_hdr,
 +            limited_range_remap,
 +        );
++        alvr_common::info!(
++            "[FOV-CROP] active={} tangents=h{:.4}/v{:.4} stream={}x{} /eye",
++            config.fov_tangent_multipliers != FovTangentMultipliers::default(),
++            config.fov_tangent_multipliers.horizontal,
++            config.fov_tangent_multipliers.vertical,
++            config.view_resolution.x,
++            config.view_resolution.y,
++        );
  
          let xr_exts = xr_session.instance().exts();
  
-@@ -190,7 +210,7 @@ impl StreamContext {
+@@ -190,7 +220,7 @@ impl StreamContext {
              format,
              config.foveated_encoding_config.clone(),
              platform != Platform::Lynx && !((platform.is_pico()) && config.enable_hdr),
@@ -662,7 +685,7 @@ index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e
              config.encoding_gamma,
              config.upscaling.clone(),
          );
-@@ -245,6 +265,7 @@ impl StreamContext {
+@@ -245,6 +275,7 @@ impl StreamContext {
              pending_frame_selected_at: None,
              pre_wait_stats: [0; 5],
              pre_wait_last_log: Instant::now(),
@@ -670,7 +693,23 @@ index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e
          };
  
          alvr_graphics::log_quest_experiment(format!(
-@@ -511,8 +532,10 @@ impl StreamContext {
+@@ -292,6 +323,7 @@ impl StreamContext {
+             let stage_reference_space = Arc::clone(&self.stage_reference_space);
+             let view_reference_space = Arc::clone(&self.view_reference_space);
+             let refresh_rate = self.config.refresh_rate_hint;
++            let fov_tangent_multipliers = self.config.fov_tangent_multipliers;
+             let running = Arc::clone(&self.input_thread_running);
+             move || {
+                 stream_input_loop(
+@@ -301,6 +333,7 @@ impl StreamContext {
+                     &stage_reference_space,
+                     &view_reference_space,
+                     refresh_rate,
++                    fov_tangent_multipliers,
+                     running,
+                 )
+             }
+@@ -511,8 +544,10 @@ impl StreamContext {
              }
          }
  
@@ -683,7 +722,7 @@ index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e
                  let view_params = self.core_context.report_compositor_start(timestamp);
  
                  // Avoid passing invalid timestamp to runtime
-@@ -521,9 +544,9 @@ impl StreamContext {
+@@ -521,9 +556,9 @@ impl StreamContext {
  
                  self.last_good_view_params = view_params;
  
@@ -695,7 +734,7 @@ index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e
              };
  
          // Match the inverse warp to the centre the server actually foveated this frame with.
-@@ -587,6 +610,13 @@ impl StreamContext {
+@@ -587,6 +622,13 @@ impl StreamContext {
  
              self.swapchains[0].release_image().unwrap();
              self.swapchains[1].release_image().unwrap();
@@ -709,7 +748,7 @@ index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e
              if latest_only {
                  video_decoder::telemetry::record_eye_copy(acquire_wait_ms, eye_render_ms,
                      release_start.elapsed().as_secs_f32() * 1000.0,
-@@ -650,7 +680,8 @@ impl StreamContext {
+@@ -650,7 +692,8 @@ impl StreamContext {
                              | PassthroughMode::HsvChromaKey(_)
                      ),
                  }),
@@ -719,7 +758,33 @@ index eb04019edefff6ebbc77744948a173d41687de19..c7ea7e2f6d94c02bc5c74c4cf752f39e
  
          (layer, timestamp)
      }
-@@ -805,3 +836,25 @@ fn stream_input_loop(
+@@ -672,6 +715,7 @@ fn stream_input_loop(
+     stage_reference_space: &xr::Space,
+     view_reference_space: &xr::Space,
+     refresh_rate: f32,
++    fov_tangent_multipliers: FovTangentMultipliers,
+     running: Arc<RelaxedAtomic>,
+ ) {
+     let platform = alvr_system_info::platform();
+@@ -712,8 +756,15 @@ fn stream_input_loop(
+         };
+ 
+         if let Some(views) = local_views {
+-            core_ctx.send_view_params(views);
+-            last_view_params = views;
++            // report_compositor_start() returns these cached values to the
++            // projection layer, so applying the crop here changes both the FOV
++            // sent to the server and the FOV submitted at xrEndFrame exactly once.
++            let scaled_views = views.map(|view| ViewParams {
++                pose: view.pose,
++                fov: fov_tangent_multipliers.scale_fov(view.fov),
++            });
++            core_ctx.send_view_params(scaled_views);
++            last_view_params = scaled_views;
+         }
+ 
+         let mut device_motions = Vec::with_capacity(3);
+@@ -805,3 +856,25 @@ fn stream_input_loop(
          thread::sleep(deadline.saturating_duration_since(Instant::now()));
      }
  }
@@ -759,10 +824,117 @@ index d3a1d7c323e3fe3810c6366241a111b942988bd0..02d18e9a88f995012b2088b838ab7026
      }
  
 diff --git a/alvr/packets/src/lib.rs b/alvr/packets/src/lib.rs
-index 57060522d6aa0e566e0200b6838ca3cb0e2b152c..39b311dfda24ec23a99bd66357b3c4cd94722ef5 100644
+index 57060522d6aa0e566e0200b6838ca3cb0e2b152c..fe857433a03a91096db9e4c895c740216b4e4c07 100644
 --- a/alvr/packets/src/lib.rs
 +++ b/alvr/packets/src/lib.rs
-@@ -318,6 +318,12 @@ pub struct HeadsetTelemetry {
+@@ -1,5 +1,5 @@
+ use alvr_common::{
+-    anyhow::Result,
++    anyhow::{bail, Result},
+     glam::{UVec2, Vec2},
+     semver::Version,
+     ConnectionState, DeviceMotion, Fov, LogEntry, LogSeverity, Pose, ToAny,
+@@ -21,6 +21,69 @@ pub const AUDIO: u16 = 2;
+ pub const VIDEO: u16 = 3;
+ pub const STATISTICS: u16 = 4;
+ 
++/// A crop expressed in tangent space, so both the server and the OpenXR projection
++/// layer use the same physical field of view. Values are fractions of the runtime
++/// FOV, not degrees; applying them about zero retains asymmetric eye frusta.
++#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
++pub struct FovTangentMultipliers {
++    pub horizontal: f32,
++    pub vertical: f32,
++}
++
++impl Default for FovTangentMultipliers {
++    fn default() -> Self {
++        Self {
++            horizontal: 1.0,
++            vertical: 1.0,
++        }
++    }
++}
++
++impl FovTangentMultipliers {
++    pub const MIN: f32 = 0.5;
++    pub const MAX: f32 = 1.0;
++
++    pub fn validate(self) -> Result<Self> {
++        if !self.horizontal.is_finite()
++            || !self.vertical.is_finite()
++            || !(Self::MIN..=Self::MAX).contains(&self.horizontal)
++            || !(Self::MIN..=Self::MAX).contains(&self.vertical)
++        {
++            bail!(
++                "FOV tangent multipliers must be finite values in [{}, {}]",
++                Self::MIN,
++                Self::MAX
++            );
++        }
++
++        Ok(self)
++    }
++
++    /// Scale a four-sided OpenXR FOV around the optical axis. Scaling tangents,
++    /// rather than angles, keeps the requested pixel density and eye asymmetry.
++    pub fn scale_fov(self, fov: Fov) -> Fov {
++        let h = self.horizontal;
++        let v = self.vertical;
++        Fov {
++            left: (fov.left.tan() * h).atan(),
++            right: (fov.right.tan() * h).atan(),
++            up: (fov.up.tan() * v).atan(),
++            down: (fov.down.tan() * v).atan(),
++        }
++    }
++
++    /// Scale one eye's source dimensions and pad upward for encoder alignment.
++    /// Padding never reduces the requested FOV crop or source density.
++    pub fn scale_aligned_view_resolution(self, resolution: UVec2, alignment: u32) -> UVec2 {
++        assert!(alignment > 0);
++        let align = |value: f32| (value / alignment as f32).ceil() as u32 * alignment;
++        UVec2::new(
++            align(resolution.x as f32 * self.horizontal).max(alignment),
++            align(resolution.y as f32 * self.vertical).max(alignment),
++        )
++    }
++}
++
+ // todo: use simple string
+ #[derive(Serialize, Deserialize, Clone)]
+ pub struct VideoStreamingCapabilitiesLegacy {
+@@ -133,6 +196,9 @@ pub struct NegotiatedStreamingConfig {
+     pub encoding_gamma: f32,
+     pub enable_hdr: bool,
+     pub wired: bool,
++    /// Authoritative effective tangent-space crop for the client. Missing fields
++    /// from older servers decode to identity to preserve protocol compatibility.
++    pub fov_tangent_multipliers: FovTangentMultipliers,
+ }
+ 
+ #[derive(Serialize, Deserialize)]
+@@ -179,6 +245,11 @@ pub fn decode_stream_config(packet: &StreamConfigPacket) -> Result<StreamConfig>
+     let encoding_gamma = json::from_value(negotiated_json["encoding_gamma"].clone()).unwrap_or(1.0);
+     let enable_hdr = json::from_value(negotiated_json["enable_hdr"].clone()).unwrap_or(false);
+     let wired = json::from_value(negotiated_json["wired"].clone()).unwrap_or(false);
++    let fov_tangent_multipliers = json::from_value(
++        negotiated_json["fov_tangent_multipliers"].clone(),
++    )
++    .unwrap_or_default()
++    .validate()?;
+ 
+     Ok(StreamConfig {
+         server_version: session_config.server_version,
+@@ -193,6 +264,7 @@ pub fn decode_stream_config(packet: &StreamConfigPacket) -> Result<StreamConfig>
+             encoding_gamma,
+             enable_hdr,
+             wired,
++            fov_tangent_multipliers,
+         },
+     })
+ }
+@@ -318,6 +390,12 @@ pub struct HeadsetTelemetry {
      pub battery_temperature_c: Option<f32>,
      pub battery_level: Option<f32>,
      pub pyrowave: Option<PyroWaveDecodeStats>,
@@ -775,7 +947,99 @@ index 57060522d6aa0e566e0200b6838ca3cb0e2b152c..39b311dfda24ec23a99bd66357b3c4cd
  }
  
  #[derive(Serialize, Deserialize, Clone, Default)]
-@@ -636,6 +642,8 @@ mod beta_telemetry_tests {
+@@ -610,6 +688,91 @@ mod pyrowave_udp_tests {
+     }
+ }
+ 
++#[cfg(test)]
++mod fov_crop_tests {
++    use super::*;
++
++    const EPSILON: f32 = 0.000_01;
++
++    fn fov(left: f32, right: f32, down: f32, up: f32) -> Fov {
++        Fov {
++            left: left.atan(),
++            right: right.atan(),
++            down: down.atan(),
++            up: up.atan(),
++        }
++    }
++
++    #[test]
++    fn tangent_crop_preserves_each_eye_asymmetric_frustum() {
++        // Session-07 measured OpenVR tangents. The right eye mirrors only the
++        // horizontal sides; both eyes retain their original optical-axis offset.
++        let crop = FovTangentMultipliers {
++            horizontal: 0.854,
++            vertical: 0.850,
++        }
++        .validate()
++        .unwrap();
++        let left = crop.scale_fov(fov(-1.3763819, 0.8390996, -1.4281479, 0.9656888));
++        let right = crop.scale_fov(fov(-0.8390996, 1.3763819, -1.4281479, 0.9656888));
++
++        for (actual, expected) in [
++            (left.left.tan(), -1.3763819 * 0.854),
++            (left.right.tan(), 0.8390996 * 0.854),
++            (right.left.tan(), -0.8390996 * 0.854),
++            (right.right.tan(), 1.3763819 * 0.854),
++            (left.down.tan(), -1.4281479 * 0.850),
++            (right.up.tan(), 0.9656888 * 0.850),
++        ] {
++            assert!((actual - expected).abs() < EPSILON, "{actual} != {expected}");
++        }
++        assert_ne!(left.left, left.right, "left-eye asymmetry must survive");
++        assert_ne!(right.left, right.right, "right-eye asymmetry must survive");
++        assert!((left.left + right.right).abs() < EPSILON);
++        assert!((left.right + right.left).abs() < EPSILON);
++    }
++
++    #[test]
++    fn crop_sizes_preserve_density_and_align_upward() {
++        let crop = FovTangentMultipliers {
++            horizontal: 0.854,
++            vertical: 0.850,
++        };
++        // 3072 * .854 = 2623.488 and 3232 * .85 = 2747.2, so alignment gives
++        // 2624x2752. Runtime intentionally does not force Q3's offline 2776
++        // crop height, which is a separately centred comparison rectangle.
++        assert_eq!(
++            crop.scale_aligned_view_resolution(UVec2::new(3072, 3232), 32),
++            UVec2::new(2624, 2752)
++        );
++        assert_eq!(
++            crop.scale_aligned_view_resolution(UVec2::new(2560, 2688), 32),
++            UVec2::new(2208, 2304)
++        );
++    }
++
++    #[test]
++    fn identity_and_invalid_multipliers_are_safe() {
++        let full = UVec2::new(3072, 3232);
++        assert_eq!(
++            FovTangentMultipliers::default().scale_aligned_view_resolution(full, 32),
++            full
++        );
++        assert!(FovTangentMultipliers {
++            horizontal: 1.01,
++            vertical: 1.0
++        }
++        .validate()
++        .is_err());
++        assert!(FovTangentMultipliers {
++            horizontal: f32::NAN,
++            vertical: 1.0
++        }
++        .validate()
++        .is_err());
++    }
++}
++
+ #[cfg(test)]
+ mod beta_telemetry_tests {
+     use super::*;
+@@ -636,6 +799,8 @@ mod beta_telemetry_tests {
                  staging_eye_copies: 200,
                  ..Default::default()
              }),
@@ -784,6 +1048,82 @@ index 57060522d6aa0e566e0200b6838ca3cb0e2b152c..39b311dfda24ec23a99bd66357b3c4cd
          };
          let packet = ClientControlPacket::HeadsetTelemetry(t.clone());
          let bytes = bincode::serialize(&packet).unwrap();
+diff --git a/alvr/server_core/src/connection.rs b/alvr/server_core/src/connection.rs
+index 1054e0fe37a394e3ecfdefdf923eaf6c0f3c74e8..2cebb8a3e89136ab497b30ba86086f5daca23588 100644
+--- a/alvr/server_core/src/connection.rs
++++ b/alvr/server_core/src/connection.rs
+@@ -20,7 +20,7 @@ use alvr_common::{
+ use alvr_events::{AdbEvent, ButtonEvent, EventType};
+ use alvr_packets::{
+     BatteryInfo, ClientConnectionResult, ClientControlPacket, ClientListAction, ClientStatistics,
+-    NegotiatedStreamingConfig, RealTimeConfig, ReservedClientControlPacket, ServerControlPacket,
++    FovTangentMultipliers, NegotiatedStreamingConfig, RealTimeConfig, ReservedClientControlPacket, ServerControlPacket,
+     Tracking, VideoPacketHeader, AUDIO, HAPTICS, STATISTICS, TRACKING, VIDEO,
+ };
+ use alvr_session::{
+@@ -609,12 +609,22 @@ fn connection_pipeline(
+         UVec2::new(align32(res.x), align32(res.y))
+     }
+ 
+-    let stream_view_resolution = get_view_res(
++    let fov_tangent_multipliers = match &initial_settings.video.fov_crop {
++        Switch::Enabled(config) => FovTangentMultipliers {
++            horizontal: config.horizontal_tangent_multiplier,
++            vertical: config.vertical_tangent_multiplier,
++        },
++        Switch::Disabled => FovTangentMultipliers::default(),
++    }
++    .validate()
++    .to_con()?;
++
++    let requested_stream_view_resolution = get_view_res(
+         initial_settings.video.transcoding_view_resolution.clone(),
+         streaming_caps.default_view_resolution,
+     );
+ 
+-    let target_view_resolution = get_view_res(
++    let requested_target_view_resolution = get_view_res(
+         initial_settings
+             .video
+             .emulated_headset_view_resolution
+@@ -622,6 +632,29 @@ fn connection_pipeline(
+         streaming_caps.default_view_resolution,
+     );
+ 
++    // The FOV is cropped on the client in tangent space. Scale both source sizes
++    // by the same tangent factors so full-FOV settings retain their configured
++    // density, then pad upward for the encoder's 32-pixel alignment.
++    let stream_view_resolution =
++        fov_tangent_multipliers.scale_aligned_view_resolution(requested_stream_view_resolution, 32);
++    let target_view_resolution =
++        fov_tangent_multipliers.scale_aligned_view_resolution(requested_target_view_resolution, 32);
++
++    info!(
++        "[FOV-CROP] active={} tangents=h{:.4}/v{:.4} stream={}x{}->{}x{} target={}x{}->{}x{}",
++        !matches!(&initial_settings.video.fov_crop, Switch::Disabled),
++        fov_tangent_multipliers.horizontal,
++        fov_tangent_multipliers.vertical,
++        requested_stream_view_resolution.x,
++        requested_stream_view_resolution.y,
++        stream_view_resolution.x,
++        stream_view_resolution.y,
++        requested_target_view_resolution.x,
++        requested_target_view_resolution.y,
++        target_view_resolution.x,
++        target_view_resolution.y,
++    );
++
+     if !streaming_caps.supported_refresh_rates.iter().any(|rate| {
+         rate.is_finite()
+             && *rate > 0.0
+@@ -783,6 +816,7 @@ fn connection_pipeline(
+             encoding_gamma,
+             enable_hdr,
+             wired,
++            fov_tangent_multipliers,
+         },
+     )
+     .to_con()?;
 diff --git a/alvr/server_openvr/cpp/alvr_server/alvr_server.cpp b/alvr/server_openvr/cpp/alvr_server/alvr_server.cpp
 index 184e7552545889824b525400a74813ff2ce239cc..37a853654ce6978edb8e81ab67b7788362ec604c 100644
 --- a/alvr/server_openvr/cpp/alvr_server/alvr_server.cpp
@@ -1547,3 +1887,97 @@ index 861f726c74e38cec9058513ab412ceb08ae2e8bf..b54c2e722b9df8499013802466c7afa4
  }
  
  /// This is the SteamVR/OpenVR entry point
+diff --git a/alvr/session/src/beta.rs b/alvr/session/src/beta.rs
+index c98098df355e98af740663365428fbdf6fa5f69b..11ea6fddaf8c20e5a04f2223f368f2ce03f46613 100644
+--- a/alvr/session/src/beta.rs
++++ b/alvr/session/src/beta.rs
+@@ -133,6 +133,17 @@ fn shared(codec: &str, mbps: u64, fps: f32, percent: u32) -> Vec<(String, json::
+         assign("video.preferred_fps", json::json!(fps)),
+         assign("video.foveated_encoding.enabled", false.into()),
+         assign("video.clientside_foveation.enabled", false.into()),
++        // Keep all shipped profiles full-FOV. FOV crop is an explicit experiment,
++        // never an inherited setting from a tester's previous profile.
++        assign("video.fov_crop.enabled", false.into()),
++        assign(
++            "video.fov_crop.content.horizontal_tangent_multiplier",
++            json::json!(1.0),
++        ),
++        assign(
++            "video.fov_crop.content.vertical_tangent_multiplier",
++            json::json!(1.0),
++        ),
+         assign(
+             "video.foveated_encoding.content.center_size_x",
+             json::json!(0.20),
+diff --git a/alvr/session/src/beta_tests.rs b/alvr/session/src/beta_tests.rs
+index 3af8fce6c7444c43ccc2f03e1878fa8bbbdc7e6a..ab2499d317efdefe913de153396acbb7b43a2d71 100644
+--- a/alvr/session/src/beta_tests.rs
++++ b/alvr/session/src/beta_tests.rs
+@@ -141,6 +141,7 @@ fn fresh_install_streams_the_recommended_profile() {
+         ));
+     }
+     assert!(!s.video.foveated_encoding.enabled());
++    assert!(!s.video.fov_crop.enabled());
+     assert_eq!(s.video.pyrowave.transport, PyroWaveTransport::Tcp);
+     assert_eq!(s.video.pyrowave.wavelet, PyroWaveWavelet::Cdf97);
+     assert_eq!(s.video.pyrowave.decode_path, PyroWaveDecodePath::Auto);
+diff --git a/alvr/session/src/settings.rs b/alvr/session/src/settings.rs
+index 70ed8209fcfd1ca3d1bb24f2c60380539b29b7ef..eadd492ea002ba519615e8d5153b4bd1f204bd4e 100644
+--- a/alvr/session/src/settings.rs
++++ b/alvr/session/src/settings.rs
+@@ -650,6 +650,27 @@ pub struct PyroWaveConfig {
+     pub decode_path: PyroWaveDecodePath,
+ }
+ 
++/// Crops the client-reported OpenXR frustum about each eye's optical axis.
++/// The server applies the same factors to the render and stream dimensions, so
++/// enabling this preserves the configured pixel density rather than stretching
++/// a full-FOV image into a narrower projection layer.
++#[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq, Debug)]
++pub struct FovCropConfig {
++    #[schema(strings(
++        display_name = "Horizontal tangent multiplier",
++        help = "Fraction of each eye's horizontal tangent span. 1.0 keeps the runtime FOV; 0.854 is the Virtual Desktop-sized candidate."
++    ))]
++    #[schema(gui(slider(min = 0.5, max = 1.0, step = 0.001)))]
++    pub horizontal_tangent_multiplier: f32,
++
++    #[schema(strings(
++        display_name = "Vertical tangent multiplier",
++        help = "Fraction of each eye's vertical tangent span. 1.0 keeps the runtime FOV; 0.850 is the candidate."
++    ))]
++    #[schema(gui(slider(min = 0.5, max = 1.0, step = 0.001)))]
++    pub vertical_tangent_multiplier: f32,
++}
++
+ #[repr(u8)]
+ #[derive(SettingsSchema, Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq)]
+ #[schema(gui = "button_group")]
+@@ -815,6 +836,13 @@ pub struct VideoConfig {
+     #[schema(flag = "steamvr-restart")]
+     pub pyrowave: PyroWaveConfig,
+ 
++    #[schema(strings(
++        display_name = "FOV crop",
++        help = "Opt-in tangent-space crop. When enabled, the client reports and presents the cropped FOV while the server reduces render and stream dimensions by the same factors. Disabled keeps the full runtime FOV."
++    ))]
++    #[schema(flag = "steamvr-restart")]
++    pub fov_crop: Switch<FovCropConfig>,
++
+     // Disabled in this Quest fork; retained in serialization for upstream compatibility.
+     #[schema(flag = "hidden")]
+     pub foveated_encoding: Switch<FoveatedEncodingConfig>,
+@@ -1808,6 +1836,13 @@ pub fn session_settings_default() -> SettingsDefault {
+                     variant: PyroWaveDecodePathDefaultVariant::Auto,
+                 },
+             },
++            fov_crop: SwitchDefault {
++                enabled: false,
++                content: FovCropConfigDefault {
++                    horizontal_tangent_multiplier: 1.0,
++                    vertical_tangent_multiplier: 1.0,
++                },
++            },
+             encoder_config: EncoderConfigDefault {
+                 gui_collapsed: true,
+                 rate_control_mode: RateControlModeDefault {
