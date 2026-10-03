@@ -35,7 +35,12 @@ class NvencFramebankTests(unittest.TestCase):
             self.assertEqual(args[args.index("-bf") + 1], "0")
             self.assertEqual(args[args.index("-bufsize") + 1], "12222223")
             self.assertIn("offline_nvenc_proxy", value["comparison_scope"])
-        with self.assertRaises(ValueError): nf.profile("h264", 500)
+        h264 = nf.profile("h264", 700, preset="p7", spatial_aq=True, layout="dual_eye")
+        self.assertEqual(h264["encoder"], "h264_nvenc")
+        self.assertEqual(h264["stream_count"], 2)
+        self.assertTrue(h264["spatial_aq"])
+        self.assertEqual(nf.profile("hevc", 200)["pixel_format"], "p010le")
+        self.assertIn("in_range=full", nf.profile("av1", 200)["score_downconvert_filter"])
 
     def test_frozen_plan_reuses_framebank_geometry_crops_and_calibration(self):
         with tempfile.TemporaryDirectory() as root:
@@ -45,10 +50,10 @@ class NvencFramebankTests(unittest.TestCase):
                                  crop_evidence="test crop", crops=[crop], fixture=True,
                                  rates_mbps=(200,), geometries=((2, 4),), codecs=nf.CODECS, display_eye=(2, 4))
             self.assertEqual(plan["kind"], "nvenc_frame_bank")
-            self.assertEqual(plan["cells"][0]["codec"], "hevc")
-            self.assertEqual(plan["cells"][0]["nvenc_profile"], nf.profile("hevc", 200))
-            self.assertEqual(len(plan["cells"]), 2)
-            self.assertEqual(len(plan["hvs_calibration"]["codec_cells"]), 2)
+            self.assertEqual(plan["cells"][0]["codec"], "h264")
+            self.assertEqual(plan["cells"][0]["nvenc_profile"], nf.profile("h264", 200))
+            self.assertEqual(len(plan["cells"]), 3)
+            self.assertEqual(len(plan["hvs_calibration"]["codec_cells"]), 3)
             self.assertEqual(plan["hvs_calibration"]["display"]["vertical_pixels_per_degree"], 23.5)
             self.assertEqual(plan["crops"][0]["resolved_pixels"]["width"], 2)
             self.assertIs(nf.validate_plan(plan), plan)
@@ -62,11 +67,12 @@ class NvencFramebankTests(unittest.TestCase):
             plan = nf.build_plan(source, 23.5, projection_evidence="p", crop_evidence="c", fixture=True,
                                  rates_mbps=nf.RATES_MBPS, geometries=((2, 4), (4, 4)), codecs=nf.CODECS,
                                  crops=[crop], display_eye=(2, 4))
-            self.assertEqual(len(plan["cells"]), 16)
-            self.assertEqual(len(plan["hvs_calibration"]["codec_cells"]), 16)
-            self.assertEqual([cell["codec"] for cell in plan["cells"][:8]], ["hevc"] * 8)
-            self.assertEqual([cell["codec"] for cell in plan["cells"][8:]], ["av1"] * 8)
-            self.assertEqual(plan["hvs_calibration"]["codec_cells"][:8], plan["hvs_calibration"]["codec_cells"][8:])
+            self.assertEqual(len(plan["cells"]), 24)
+            self.assertEqual(len(plan["hvs_calibration"]["codec_cells"]), 24)
+            self.assertEqual([cell["codec"] for cell in plan["cells"][:8]], ["h264"] * 8)
+            self.assertEqual([cell["codec"] for cell in plan["cells"][8:16]], ["hevc"] * 8)
+            self.assertEqual([cell["codec"] for cell in plan["cells"][16:]], ["av1"] * 8)
+            self.assertEqual(plan["hvs_calibration"]["codec_cells"][:8], plan["hvs_calibration"]["codec_cells"][8:16])
             nf.validate_plan(plan)
 
     def test_bitstream_probe_accepts_unknown_metadata_and_rejects_b_frames_or_count_drift(self):
@@ -136,6 +142,53 @@ class NvencFramebankTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "byte_count"):
                 nf.wrap_raw_payload(raw, info, root / "bad.y4m")
 
+    def test_dual_eye_h264_uses_even_total_rate_and_joins_eye_payloads(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            profile = nf.profile("h264", 350, preset="p7", layout="dual_eye")
+            cell = {"codec": "h264", "identity_count": 2, "nvenc_profile": profile}
+            command = nf.encode_command("ffmpeg", root / "left.y4m", root / "left.h264", cell)
+            self.assertEqual(command[command.index("-b:v") + 1], "350M")
+            self.assertIn("h264", command)
+            eye = fb.Y4MInfo(2, 2, 90, 1, "420", "FULL", 6, 2)
+            left, right, joined = root / "left.raw", root / "right.raw", root / "joined.raw"
+            left.write_bytes(bytes((1, 2, 3, 4, 10, 20)) * 2)
+            right.write_bytes(bytes((5, 6, 7, 8, 30, 40)) * 2)
+            nf._join_stereo_raw(left, right, eye, joined)
+            # Each 2x2 luma eye and its chroma samples remain in eye order.
+            self.assertEqual(joined.read_bytes()[:12], bytes((1, 2, 5, 6, 3, 4, 7, 8, 10, 30, 20, 40)))
+
+    def test_cropped_cells_exclude_partial_fixed_crops_without_rescaling(self):
+        geometry = {"kind": "per_eye_crop", "target_eye": [4, 4], "eyes": [
+            {"eye": "left", "x": 2, "y": 2, "width": 4, "height": 4},
+            {"eye": "right", "x": 2, "y": 2, "width": 4, "height": 4}]}
+        full = {"name": "inside", "eye": "left", "x": .25, "y": .25, "w": .25, "h": .25,
+                "resolved_pixels": {"eye_x": 2, "stereo_x": 2, "y": 2, "width": 2, "height": 2, "chroma_aligned": True}}
+        partial = {"name": "partial", "eye": "left", "x": 0, "y": 0, "w": .5, "h": .5,
+                   "resolved_pixels": {"eye_x": 0, "stereo_x": 0, "y": 0, "width": 4, "height": 4, "chroma_aligned": True}}
+        plan = {"crops": [full, partial], "source_adapter": {"geometry": geometry}}
+        usable, excluded = nf._crop_context_for_cell(plan, {"source_geometry": "crop"})
+        self.assertEqual(usable[0]["resolved_pixels"]["eye_x"], 0)
+        self.assertEqual(excluded["partial"]["status"], "excluded_from_cropped_score")
+        self.assertEqual(excluded["partial"]["coverage_fraction"], .25)
+
+    def test_ten_bit_scoring_conversion_is_explicit_full_range_and_non_dithered(self):
+        record = nf.profile("av1", 200, preset="p7")
+        command = nf.decode_for_scoring_command("ffmpeg", Path("in.av1"), Path("out.raw"), 90, "p010le", record)
+        self.assertIn("scale=in_range=full:out_range=full:flags=bilinear+accurate_rnd:sws_dither=none,format=yuv420p", command)
+        self.assertEqual(command[command.index("-pix_fmt") + 1], "yuv420p")
+        self.assertEqual(command[command.index("-color_range") + 1], "pc")
+
+    def test_revised_matrix_lists_all_crop_and_full_reference_cells(self):
+        cells = nf.revised_q3a_cells()
+        self.assertEqual(len(cells), 15)
+        self.assertEqual(sum(c["geometry"] == "crop" for c in cells), 13)
+        self.assertEqual(sum(c["geometry"] == "full_fov" for c in cells), 2)
+        self.assertEqual(sum(c["runner"] == "pyrowave" for c in cells), 5)
+        h264 = next(c for c in cells if c["label"] == "h264-dual-p7-700")
+        self.assertEqual(h264["mbps"], 700)
+        self.assertEqual(h264["layout"], "dual_eye")
+
     def test_mocked_runner_wraps_raw_planes_and_keeps_observed_metadata(self):
         with tempfile.TemporaryDirectory() as root:
             root = Path(root); source = self.source(root)
@@ -144,11 +197,11 @@ class NvencFramebankTests(unittest.TestCase):
                                  rates_mbps=(200,), geometries=((2, 4),), codecs=("hevc",), crops=[crop], display_eye=(2, 4))
             plan_path = root / "plan.json"; plan_path.write_text(json.dumps(plan))
             output = root / "out"; metadata = root / "FRAMEBANK-TOOLS-BUILD-METADATA.json"; metadata.write_text("{}")
-            observed = {"streams":[{"codec_name":"hevc", "width":4, "height":4, "pix_fmt":"yuv420p",
+            observed = {"streams":[{"codec_name":"hevc", "width":4, "height":4, "pix_fmt":"p010le",
                 "color_range":"unknown", "chroma_location":"left", "color_space":"unknown", "color_primaries":"unknown",
                 "color_transfer":"unknown", "avg_frame_rate":"0/0", "r_frame_rate":"0/0", "nb_read_frames":"90"}],
-                "frames":[{"pict_type":"I", "width":4, "height":4, "pix_fmt":"yuv420p"}] +
-                [{"pict_type":"P", "width":4, "height":4, "pix_fmt":"yuv420p"}] * 89}
+                "frames":[{"pict_type":"I", "width":4, "height":4, "pix_fmt":"p010le"}] +
+                [{"pict_type":"P", "width":4, "height":4, "pix_fmt":"p010le"}] * 89}
             class Guard:
                 def status(self): return {}
                 def run(self, argv, *, cwd, env, timeout_s):
@@ -200,7 +253,7 @@ class NvencFramebankTests(unittest.TestCase):
             plan = nf.build_plan(source, 23.5, projection_evidence="p", crop_evidence="c", fixture=True,
                                  rates_mbps=(200,), geometries=((2, 4),), codecs=("hevc",), crops=[crop], display_eye=(2, 4))
             plan_path = root / "plan.json"; plan_path.write_text(json.dumps(plan)); metadata = root / "metadata.json"; metadata.write_text("{}")
-            observed = {"streams":[{"codec_name":"hevc","width":4,"height":4,"pix_fmt":"yuv420p","color_range":"unknown","chroma_location":"left","color_space":"unknown","color_primaries":"unknown","color_transfer":"unknown","avg_frame_rate":"0/0","r_frame_rate":"0/0","nb_read_frames":"90"}],"frames":[{"pict_type":"I","width":4,"height":4,"pix_fmt":"yuv420p"}]+[{"pict_type":"P","width":4,"height":4,"pix_fmt":"yuv420p"}]*89}
+            observed = {"streams":[{"codec_name":"hevc","width":4,"height":4,"pix_fmt":"p010le","color_range":"unknown","chroma_location":"left","color_space":"unknown","color_primaries":"unknown","color_transfer":"unknown","avg_frame_rate":"0/0","r_frame_rate":"0/0","nb_read_frames":"90"}],"frames":[{"pict_type":"I","width":4,"height":4,"pix_fmt":"p010le"}]+[{"pict_type":"P","width":4,"height":4,"pix_fmt":"p010le"}]*89}
             class Guard:
                 calls = 0
                 def status(self):

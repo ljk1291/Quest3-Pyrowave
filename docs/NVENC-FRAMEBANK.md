@@ -5,7 +5,7 @@
 > [the active artifact-quality plan](ARTIFACT-QUALITY-PLAN.md). Do not execute the
 > old frozen plan. Revised Q3a/Q3b support and fence-first scoring are required.
 
-`tools/xrbench/nvenc_framebank.py` compares NVENC HEVC and AV1 with PyroWave
+`tools/xrbench/nvenc_framebank.py` compares NVENC H.264, HEVC and AV1 with PyroWave
 on the same frozen 90-frame stereo Y4M input. It is an **offline encode proxy**:
 it does not configure ALVR, connect a Quest, or establish Quest hardware-decoder
 throughput, fresh submissions, display FPS, or optical latency.
@@ -15,6 +15,38 @@ The planned Q3 matrix is HEVC and AV1 at 200, 500, 800 and 1000 Mbps, each at
 Lanczos display normalization, four frozen crops, and calibrated PSNR-HVS-M-H
 from the PyroWave frame bank. A report must keep Q3 results distinct from a
 verified live ALVR configuration.
+
+## Revised Q3 adapter contract
+
+The active Q3a NVENC subset is frozen by `build_revised_q3a_plan`. It has eight
+crop cells and two full-FOV references: H.264 High 8-bit as two per-eye streams
+(400/700 Mbps P7, 700 Mbps P4, and P7 with spatial AQ), HEVC Main10 at 200 Mbps
+(P7/P4), AV1 Main 10-bit at 200 Mbps (P7/P4), plus full-FOV H.264 P7/700 and
+HEVC Main10 P7/200. H.264's total target splits exactly across its two streams;
+the report retains each stream's rate, elementary-stream bytes and process-wall
+completion diagnostic. It is explicitly invalid for timing ranking and is never
+divided by frames. Sequential offline invocation is recorded as such and is not
+a claim about parallel encoder or GPU execution.
+
+`revised_q3a_cells()` publishes the whole 15-cell Q3a contract: those ten NVENC
+cells plus five PyroWave rows. The PyroWave runner owns those five rows; a
+combined report must preserve the runner identity and cannot describe the NVENC
+result alone as a complete Q3a result.
+
+The plan accepts only a frozen per-eye crop geometry made by
+`fence_metrics.crop_geometry`. It carries the original, scaled and effective
+tangent bounds and uses raw C420 slices without a resample. Fixed quality crops
+that are outside or partly outside the crop are reported as excluded with their
+coverage fraction; they are never moved, intersected or resized. Q3b uses
+`with_foveation_source` after WO-8 lands. Its transform descriptor is opt-in,
+records profile/softness/blur-only mode, and applies only after this crop.
+
+HEVC and AV1 encode and natively decode as `p010le`. The score-only conversion
+is one explicit full-range, non-dithered filter:
+`scale=in_range=full:out_range=full:flags=bilinear+accurate_rnd:sws_dither=none,format=yuv420p`.
+The native probe must first prove `p010le`; no format or range fallback is used.
+Each report labels 1–90 and 10–89 score windows. Fence metrics are supplied by
+`fence_metrics`, rather than inferred from aggregate HVS or VMAF.
 
 ## Profile
 
