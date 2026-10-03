@@ -97,3 +97,29 @@ Take the first unblocked item. Items marked ∥ are independent.
   remains queued for a valid owner-armed `frame_bank_pc` window after WO-0.
   No arm file exists and no further hardware test is running. Source work is
   unblocked; no optimization or stable-rate profile has been promoted.
+
+- 2026-10-03, checkpoint source review and owner duration approval:
+  The owner reports clear compression in the new Metro capture. Inspection of
+  source frames 0/44/89 confirms tunnel detail and a later menu-board view;
+  these are encoder-input planes, so paired decoded frames are still required
+  to attribute codec damage. [Review boundaries](../results/metro-capture-visual-review-2026-10-03.json).
+  [WO-3](https://github.com/ljk1291/Quest3-Pyrowave/pull/3),
+  [the capture record](https://github.com/ljk1291/Quest3-Pyrowave/pull/4),
+  [WO-2](https://github.com/ljk1291/Quest3-Pyrowave/pull/5) and
+  [WO-5](https://github.com/ljk1291/Quest3-Pyrowave/pull/7) have merged into the
+  experimental integration branch after their full workflows passed; relevant
+  [geometry CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37074406100)
+  and [PC-filter CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37076371392).
+  WO-5's shader checks include tiny software-WARP pixel readbacks and preserve
+  the default shader binaries; no Quest improvement is proved. WO-4 is still
+  building. WO-1 now requires actual selected crop rectangles and packages
+  pinned offline codec tools plus a separately calibrated HVS scorer; source
+  review and CI remain. WO-0's cross-process mutation/rollback integration
+  remains under review.
+  An owner arm file now exists for PC frame-bank work. The owner explicitly
+  approved its **eight-hour** once interval ending **08:44:31 Europe/Berlin**;
+  [the narrow exception](UNATTENDED.md#owner-exception-2026-10-03) is recorded
+  without editing that file. Its duration validation and CPU regressions pass.
+  No unattended window has opened: WO-0 must first pass review, full CI and its
+  dry run. The installed d1 pair, baseline defaults and VD settings are
+  unchanged. Source work is unblocked; no optimization has been promoted.

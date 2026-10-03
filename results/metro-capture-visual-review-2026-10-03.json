@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "kind": "metro_source_capture_visual_review",
+  "capture_record": "metro-source-capture-2026-10-03.json",
+  "source_sha256": "e61163143ec9e75634fc89fcc06b3bb007667a53d94a0cbf97a39c09b452a0c2",
+  "owner_observation": {
+    "reported_symptom": "clear visible compression in the new Metro capture",
+    "subjective_quality_acceptance": false
+  },
+  "inspection": {
+    "reviewed_source_frame_indices": [0, 44, 89],
+    "eye": "left",
+    "preview_origin": "native full-range C420 encoder-input planes; CPU RGB preview",
+    "capture_stage": "before PyroWave encoding, after PC composition and RGB-to-YUV conversion",
+    "content": "Tunnel structure, rails, dark textured surfaces and fog; later view includes the Metro menu board.",
+    "view_changes_during_capture": true,
+    "foliage_verified": false,
+    "matching_live_decoded_frame_capture_present": false
+  },
+  "evidence_limits": [
+    "The source preview does not establish the magnitude or cause of PyroWave codec damage.",
+    "The source already includes game rendering, PC composition and 4:2:0 conversion; it is not an untouched RGB game render.",
+    "Offline paired decode comparisons are pending; no numerical image-quality gain is claimed.",
+    "Neither this dump nor the preview establishes stable 90 Hz or optical display FPS."
+  ],
+  "next_gate": "Freeze honest fixed-position crops and compare the same native source frames with baseline and candidate offline encode/decode profiles.",
+  "quality_metrics": null,
+  "optical_display_fps": null,
+  "optimization_promoted": false
+}
