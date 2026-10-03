@@ -203,6 +203,9 @@ class FrameBankTests(unittest.TestCase):
             try:
                 with mock.patch.object(fb.WindowGuard,"status",fake_status),mock.patch.object(fb.WindowGuard,"run",fake_child):
                     result=fb.run_plan(plan_path,src,out,tools,t/"window",allow_fixture=True, score_fn=fake_score)
+                    saved=(out/'framebank-private.json').read_bytes()
+                    with self.assertRaises(FileExistsError): fb.run_plan(plan_path,src,out,tools,t/'window',allow_fixture=True,score_fn=fake_score)
+                    self.assertEqual((out/'framebank-private.json').read_bytes(),saved)
                 self.assertTrue(result["complete"]);self.assertEqual(result["cells"][0]["identity_count"],2)
                 self.assertEqual(plan["source"]["color_range"],"LIMITED");self.assertEqual(plan["cells"][0]["encoded_chroma"],"420")
                 self.assertEqual(calls[0][1:], [str(out/"cell-00-haar-300-4x4"/"reference-c420.y4m"),str(out/"cell-00-haar-300-4x4"/"encoded.wave"),str(fb.cap_bytes(300,90))])
@@ -287,5 +290,15 @@ class FrameBankTests(unittest.TestCase):
                 return 0,'ScoredFrames = 89 || PixelsPerDegree = 23.6 || HeightFactor = 0.41837265 || PSNR-HVS-M-H: (Y) 31.2 dB',''
         with self.assertRaisesRegex(ValueError,'frame count'):
             fb._score_hvs_m_h(Path('scorer'),Path('ref'),Path('dist'),90,23.6,3232,Guard(),Path.cwd(),{},1)
+
+    def test_hvs_gpu_gate_requires_identity_and_known_error_ratio(self):
+        def good(tool,reference,distorted,*args):
+            return {'value':{'zero':math.inf,'shift32':30.0,'shift64':30.0-20*math.log10(2)}[distorted.stem]}
+        with self.tmp() as t,mock.patch.object(fb,'_score_hvs_m_h',side_effect=good):
+            report=fb.hvs_gpu_sanity('fake',Path(t)/'sanity',23.6,None,{},1)
+            self.assertTrue(report['passed'])
+            self.assertEqual(fb.inspect_y4m(Path(t)/'sanity/zero.y4m').frames,3)
+        with self.tmp() as t,mock.patch.object(fb,'_score_hvs_m_h',return_value={'value':math.inf}):
+            with self.assertRaisesRegex(ValueError,'sanity gate'): fb.hvs_gpu_sanity('fake',Path(t)/'sanity',23.6,None,{},1)
 
 if __name__ == "__main__": unittest.main()

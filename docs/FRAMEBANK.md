@@ -35,3 +35,11 @@ to the build metadata; missing bundled dependencies refuse execution. Its Linux
 reader and Windows input-only checks use no Vulkan device. An armed GPU sanity
 check remains necessary before accepting actual HVS results. Crop Y4M files are
 deleted after scoring unless `--keep-artifacts` is requested.
+
+Every production run first performs three tiny owned-GPU HVS sanity cases under
+the same lease: identity, a uniform 32-level luma shift and a 64-level shift.
+Identity must produce infinite PSNR; doubling this signal/error amplitude must
+reduce the weighted score by 20·log10(2), within 0.03 dB. A failed gate prevents
+all Metro cells and a passing report. The sanity result is retained separately;
+it checks execution/accumulation, not the perceptual model's suitability for VR.
+Each run requires a fresh private output directory to exclude stale tool output.

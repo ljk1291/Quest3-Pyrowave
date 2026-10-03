@@ -426,6 +426,28 @@ def _score_hvs_m_h(tool,reference,distorted,frames,vertical_ppd,image_height,gua
     result['scored_frames']=frames
     return result
 
+def hvs_gpu_sanity(tool,directory,vertical_ppd,guard,env,timeout):
+    """Finite owned-GPU gate: identity and a known 2x-amplitude error ratio."""
+    directory=Path(directory); directory.mkdir()
+    info=Y4MInfo(64,64,90,1,'420','FULL',64*64*3//2,3)
+    paths={}
+    for name,value in (('zero',0),('shift32',32),('shift64',64)):
+        path=directory/(name+'.y4m'); paths[name]=path
+        planes=[np.full((64,64),value,np.uint8),np.full((32,32),128,np.uint8),np.full((32,32),128,np.uint8)]
+        with _open_writer(path,info) as stream:
+            for _ in range(info.frames): _write_frame(stream,info,planes)
+    scores={}
+    for name in paths:
+        scores[name]=_score_hvs_m_h(tool,paths['zero'],paths[name],info.frames,vertical_ppd,
+                                  info.height,guard,directory,env,min(timeout,60))['value']
+    expected=20*math.log10(2); observed=scores['shift32']-scores['shift64']
+    if (scores['zero']!=math.inf or not all(math.isfinite(scores[k]) for k in ('shift32','shift64'))
+            or not math.isclose(observed,expected,rel_tol=0,abs_tol=.03)):
+        raise ValueError('HVS GPU identity or amplitude sanity gate failed')
+    return {'passed':True,'frames_per_case':info.frames,'geometry':[64,64],
+            'identity_psnr_db':scores['zero'],'uniform_shift_scores_db':{k:scores[k] for k in ('shift32','shift64')},
+            'amplitude_ratio_delta_db':observed,'expected_delta_db':expected,'tolerance_db':.03}
+
 def _valid_metric(k,v): return isinstance(v,(int,float)) and not math.isnan(v) and (math.isfinite(v) or k.startswith("psnr"))
 def _score_ffmpeg(tool,distorted,reference,workdir,guard,env,timeout_s):
     # This is rdmatrix.score's established ffmpeg graph, but the process is run
@@ -483,6 +505,7 @@ def _assert_same_frames(reference,decoded,ref_info):
 
 def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,*,arm:Path|None=None,status_command:Sequence[str]|None=None,command_timeout_s:float=900,keep_artifacts:bool=False,allow_fixture:bool=False,score_fn=score_pair,tools_metadata:Path|None=None):
     raw_plan=Path(plan_path).read_bytes();plan=validate_plan(json.loads(raw_plan)); source=Path(source); private_out=_private_path(private_out); guard=WindowGuard(window,arm,status_command)
+    if private_out.exists(): raise FileExistsError('private output must be a fresh directory')
     if plan.get("fixture_only") and not allow_fixture: raise ValueError("fixture-only plans cannot run outside a CPU test")
     required_tools(tools); guard.status(); initial={n:sha256_file(_tool_path(v)) for n,v in tools.items()};
     if sha256_file(source)!=plan["source"]["sha256"]: raise ValueError("source dump hash differs from frozen plan")
@@ -490,8 +513,15 @@ def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,
     if source_info.frames!=plan["source"]["frames"]: raise ValueError("source dump frame count differs from frozen plan")
     if not plan.get('fixture_only') and tools_metadata is None: raise ValueError('packaged offline tools metadata is required')
     build_provenance=verify_tools_build(tools,tools_metadata) if tools_metadata is not None else None
-    private_out.mkdir(parents=True,exist_ok=True); result={"schema":SCHEMA,"kind":"pyrowave_frame_bank_result","frozen_plan_sha256":hashlib.sha256(raw_plan).hexdigest(),"source_sha256_start":sha256_file(source),"source_sha256_end":None,"tool_provenance_start":initial,"tool_provenance_end":None,"tools_build_provenance":build_provenance,"projection":plan["projection"],"projection_evidence":plan["projection_evidence"],"crop_definitions":plan["crops"],"cells":[],"complete":False,"failure_reasons":[]}
-    for index,cell in enumerate(plan["cells"]):
+    private_out.mkdir(parents=True,exist_ok=False); result={"schema":SCHEMA,"kind":"pyrowave_frame_bank_result","frozen_plan_sha256":hashlib.sha256(raw_plan).hexdigest(),"source_sha256_start":sha256_file(source),"source_sha256_end":None,"tool_provenance_start":initial,"tool_provenance_end":None,"tools_build_provenance":build_provenance,"projection":plan["projection"],"projection_evidence":plan["projection_evidence"],"crop_definitions":plan["crops"],"cells":[],"complete":False,"failure_reasons":[]}
+    if not plan.get('fixture_only'):
+        try:
+            env,_=codec_environment(os.environ,'haar')
+            result['hvs_gpu_sanity']=hvs_gpu_sanity(tools['psnr_hvs_m_h'],private_out/'scorer-sanity',
+                plan['projection']['vertical_pixels_per_degree'],guard,env,command_timeout_s)
+        except (PermissionError,TimeoutError,ValueError,RuntimeError):
+            result['failure_reasons'].append('hvs_gpu_sanity_failed')
+    for index,cell in enumerate(plan["cells"] if not result['failure_reasons'] else []):
         directory=private_out/f"cell-{index:02d}-{cell['wavelet']}-{cell['rate_mbps']}-{cell['eye_width']}x{cell['eye_height']}";directory.mkdir(parents=True,exist_ok=True); ref=directory/f"reference-c{cell['encoded_chroma']}.y4m";wave=directory/"encoded.wave";decoded=directory/f"decoded-c{cell['encoded_chroma']}.y4m"; row=dict(cell)
         try:
             ref_info,ids=_stream_reference(source,source_info,cell,ref); row["identity_count"]=len(ids)
@@ -555,7 +585,7 @@ def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,
 
 def sanitized_report(result):
     keep=("wavelet","rate_mbps","fps","eye_width","eye_height","encoded_chroma","cap_bytes","bits_per_pixel","actual_container_bytes","codec_environment","codec_only","displayed","crops","error")
-    return {"schema":SCHEMA,"kind":"pyrowave_frame_bank_sanitized","complete":result.get("complete") is True,"failure_reasons":list(result.get("failure_reasons",[])),"frozen_plan_sha256":result.get("frozen_plan_sha256"),"source_sha256":result.get("source_sha256_end"),"tool_provenance":result.get("tool_provenance_end"),"tools_build_provenance":result.get('tools_build_provenance'),"projection":result.get("projection"),"crop_definitions":result.get("crop_definitions"),"cells":[{k:r.get(k) for k in keep} for r in result.get("cells",[])],"optical_latency_ms":None,"display_fps":None}
+    return {"schema":SCHEMA,"kind":"pyrowave_frame_bank_sanitized","complete":result.get("complete") is True,"failure_reasons":list(result.get("failure_reasons",[])),"frozen_plan_sha256":result.get("frozen_plan_sha256"),"source_sha256":result.get("source_sha256_end"),"tool_provenance":result.get("tool_provenance_end"),"tools_build_provenance":result.get('tools_build_provenance'),"hvs_gpu_sanity":result.get('hvs_gpu_sanity'),"projection":result.get("projection"),"crop_definitions":result.get("crop_definitions"),"cells":[{k:r.get(k) for k in keep} for r in result.get("cells",[])],"optical_latency_ms":None,"display_fps":None}
 def parse_crops_argument(value:str):
     try:
         raw=Path(value[1:]).read_text(encoding="utf-8") if value.startswith("@") else value
