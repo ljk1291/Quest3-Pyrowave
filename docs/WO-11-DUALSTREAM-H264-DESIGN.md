@@ -6,10 +6,13 @@ contract. No client, server, packet, or default-setting behavior changes here.
 
 ## Trigger
 
-Implement only after Q3 shows that full-density per-eye H.264 at 700 Mbps clearly
-beats both stock one-stream `h264fit` and the best PyroWave candidate on fence
-metrics first, then HVS, while meeting the live rate and latency constraints. A
-proxy score or single-eye encode does not meet that trigger.
+Consider an opt-in prototype only after the paired-eye Q3 comparison shows that
+full-density per-eye H.264 at 700 Mbps total (350 Mbps per eye) clearly beats both
+stock one-stream `h264fit` and the best PyroWave candidate on fence metrics first,
+then HVS. Offline quality decides whether a prototype is warranted; it cannot
+prove live rate or latency. The prototype must subsequently pass those live
+qualification gates before promotion. A single-eye encode is insufficient, and
+this design note does not authorize implementation or hardware tests.
 
 ## Wire, pose, and scheduling contract
 
@@ -36,7 +39,7 @@ output, pair wait, compositor submit, and display selection are reported separat
 Frame identity proves provenance, not optical latency.
 
 Two H.264 NVENC sessions encode 3072x3232 eyes in parallel. Preflight verifies each
-stream remains within the 4096-pixel NVENC side limit and logs profile, level, preset,
+stream remains within the GPU's queried NVENC width and height caps and logs profile, level, preset,
 AQ, bit depth, bitrate allocation, GPU encoder utilization, VRAM, and CPU use. The
 700 Mbps Q3 value is total until a later plan explicitly changes the split. Two Quest
 decoder sessions require capability confirmation; one session or a software fallback
