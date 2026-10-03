@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "kind": "qualified_framebank_tools_and_readiness",
+  "tools": {
+    "ci_run": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37092386837",
+    "ci_event": "pull_request",
+    "ci_head_commit": "366eebbef9008fae607a0bccf49f1de31392c6aa",
+    "artifact_repository_commit": "9641944125ddb0d9ee864294ff02c3d73f8e84a1",
+    "tested_merge_parents": [
+      "29f4d3f09e2ea4e86a29919e9cedb18dd80b6297",
+      "366eebbef9008fae607a0bccf49f1de31392c6aa"
+    ],
+    "integration_merge_commit": "98151534f04ed60fa7626c97300319fa60ce2581",
+    "all_four_ci_jobs_passed": true,
+    "windows_archive_sha256": "201e09786d8f8b1b725b7f3535a2c6483e259daa579915b9454cc4d9321672b1",
+    "android_archive_sha256": "c3bd62664b839caf8946d5f7ccdbf92c1855e827178e152ef5ead5830f9c2144",
+    "matching_pair_verified_locally": true,
+    "tools_verified_locally": true,
+    "tools_metadata_sha256": "faf5bd165b449a43f1ee02ad3bb3f5f7dff52a44efcde0a64d7e0d50947fbfdc",
+    "native_input_only_tests_passed_locally": 3,
+    "native_input_only_tests_create_vulkan_device": false,
+    "hvs_gpu_sanity_passed": null,
+    "metric_algorithm_or_shader_changed": false,
+    "dependency_pins_changed": false
+  },
+  "previous_record_clarification": {
+    "path": "results/framebank-tool-preflight-2026-10-03.json",
+    "repository_commit_field_denoted": "CI pull-request head",
+    "previous_artifact_repository_commit": "6316110df2e2231bf77155754d2e963d45392e16",
+    "reason": "GitHub PR builds check out a tested merge commit; retain it separately from the CI head and final integration merge"
+  },
+  "supervisor": {
+    "ci_run": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37092388291",
+    "ci_head_commit": "32fb02445d5d83025fcf00b9870d1fac7d4ad5c8",
+    "integration_merge_commit": "bc2178842e0c48ada75b2179c56cae06b6204e61",
+    "all_four_ci_jobs_passed": true,
+    "windows_owned_cpu_process_tests_passed": 4
+  },
+  "readiness": {
+    "checked_utc": "2026-10-03T03:54:35.711485+00:00",
+    "passed": false,
+    "failures": ["vr_or_virtual_desktop_connected"],
+    "reason": "VD Streamer resident; current disconnected state unverified",
+    "pinned_quest_verified": true,
+    "battery_percent": 57,
+    "battery_temperature_c": 37,
+    "thermal_status": 0,
+    "charging": true,
+    "charging_evidence": "Android charging plus pinned physical USB presence",
+    "owner_idle_gate_passed": true,
+    "gpu_activity_telemetry_known": true,
+    "active_engine_pid_count": 0,
+    "competing_gpu_workload_count": 0,
+    "comfy_queue_known": true,
+    "comfy_running": 0,
+    "comfy_pending": 0,
+    "window_opened": false,
+    "before_snapshot_created": false,
+    "guard_start_utc": null,
+    "settings_mutated": false,
+    "arm_unchanged": true,
+    "apk_installed": false,
+    "vr_launched": false,
+    "gpu_workload_started": false,
+    "restoration_required": false,
+    "vd_hash_verification": null
+  },
+  "metro_quality_improvement": null,
+  "fresh_submissions_per_s": null,
+  "display_fps": null,
+  "optical_latency_ms": null
+}
