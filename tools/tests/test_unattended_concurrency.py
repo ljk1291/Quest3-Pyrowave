@@ -169,3 +169,107 @@ def test_late_runtime_claim_preserves_final_bytes(tmp_path):
     before=path.read_bytes()
     with pytest.raises(u.Refusal): u.record_owned_runtime(path,{},RestoreHost())
     assert path.read_bytes()==before
+
+
+@pytest.mark.parametrize('stage', ['restorer', 'monitor'])
+def test_startup_publication_cannot_revive_a_restored_window(monkeypatch, tmp_path, stage):
+    """Race a real CPU-thread restoration against each CLI startup state write."""
+    from datetime import timedelta
+    from pathlib import Path
+    from types import SimpleNamespace
+    from tools.quest3 import preflight
+    path=tmp_path/'state.json'; arm_path=tmp_path/'arm.json'
+    arm={'headset_serial':'Q3','allow':['frame_bank_pc']}; arm_path.write_text('{}')
+    deadline=u.utc_now()+timedelta(hours=1)
+    snapshot={'headset_properties':{'managed':{}},'configuration_snapshots':[], 'preflight':{}}
+    u.atomic_write(tmp_path/'check.json', {'passed':True,'snapshot':snapshot,'serial':'Q3',
+        'arm_sha256':u.arm_digest(arm),'checked_utc':u.utc_now().isoformat(),
+        'window':{'deadline_utc':deadline.isoformat()}})
+    original_write=u.atomic_write; finished=threading.Event(); threads=[]; errors=[]
+    def restore():
+        try: u.restore(path, RestoreHost())
+        except Exception as exc: errors.append(exc)
+        finally: finished.set()
+    def write(target, value):
+        guards=value.get('guard_pids', {}) if isinstance(value,dict) else {}
+        if Path(target)==path and stage in guards and not threads:
+            thread=threading.Thread(target=restore); threads.append(thread); thread.start()
+            until=time.monotonic()+1
+            while not (tmp_path/'stop').exists() and time.monotonic()<until: time.sleep(.005)
+            assert (tmp_path/'stop').exists(), 'restoration must revoke before its lock wait'
+            # Without the startup mutex the restorer can finish before this stale
+            # write. With it, the restorer waits and reloads the published state.
+            finished.wait(.15)
+        original_write(target,value)
+    def spawn(state_path, monitor):
+        role='monitor' if monitor else 'restorer'; pid=20 if monitor else 10
+        state=u.json_read(state_path)
+        original_write(tmp_path/(role+'.ready'), {'pid':pid,'role':role,
+            'nonce':state['guard_nonce'],'ready_utc':u.utc_now().isoformat()})
+        return SimpleNamespace(pid=pid)
+    monkeypatch.setattr(u,'atomic_write',write)
+    monkeypatch.setattr(u,'load_arm',lambda _: (arm, {'deadline':deadline}))
+    monkeypatch.setattr(u,'spawn_worker',spawn)
+    monkeypatch.setattr(u,'pid_alive',lambda _: True)
+    monkeypatch.setattr(u,'live_preconditions',lambda *args: ([],{},0))
+    monkeypatch.setattr(preflight,'verify_snapshot',lambda _: [])
+    monkeypatch.setattr('sys.argv',['unattended.py','start','--arm',str(arm_path),'--window',str(tmp_path)])
+    try:
+        with pytest.raises(SystemExit): u.main()
+    finally:
+        for thread in threads: thread.join(3)
+    assert threads and all(not t.is_alive() for t in threads) and not errors
+    final=u.json_read(path)
+    assert final['restoration']['status']=='restored'
+    assert u.json_read(tmp_path/'restoration.json')==final['restoration']
+    status=u.status_payload(tmp_path,arm_path)
+    assert not status['lease']['active']
+    assert {'stop_requested','restoration_started'} <= set(status['lease']['blockers'])
+    before=path.read_bytes()
+    with pytest.raises(u.Refusal,match='cancelled'):
+        u.publish_started_guard(path,'monitor',20,final['guard_nonce'],all_ready=True)
+    assert path.read_bytes()==before
+
+
+def test_two_startup_creators_cannot_claim_the_same_window(tmp_path):
+    path=tmp_path/'state.json'; barrier=threading.Barrier(2); created=[]; refused=[]; errors=[]
+    def create(nonce):
+        try:
+            barrier.wait(timeout=2)
+            u.create_startup_state(path,{'guard_nonce':nonce,'restoration':{'status':'pending'}})
+            created.append(nonce)
+        except u.Refusal: refused.append(nonce)
+        except Exception as exc: errors.append(exc)
+    threads=[threading.Thread(target=create,args=(nonce,)) for nonce in ('first','second')]
+    for thread in threads: thread.start()
+    for thread in threads: thread.join(3)
+    assert all(not t.is_alive() for t in threads) and not errors
+    assert len(created)==len(refused)==1 and u.json_read(path)['guard_nonce']==created[0]
+
+
+@pytest.mark.parametrize('existing', ['state', 'stop', 'pause'])
+def test_startup_creation_retains_existing_window_and_markers(tmp_path, existing):
+    path=tmp_path/'state.json'; ready=tmp_path/'restorer.ready'; ready.write_text('original readiness')
+    if existing=='state': u.atomic_write(path,{'restoration':{'status':'restored'}})
+    else: (tmp_path/existing).write_text('owner cancellation')
+    saved={p.name:p.read_bytes() for p in tmp_path.iterdir()}
+    with pytest.raises(u.Refusal,match='already'):
+        u.create_startup_state(path,{'restoration':{'status':'pending'}})
+    assert all((tmp_path/name).read_bytes()==contents for name,contents in saved.items())
+    if existing!='state': assert not path.exists()
+
+
+@pytest.mark.parametrize('changed', ['nonce', 'restorer_died'])
+def test_final_startup_claim_rechecks_both_guard_proofs(monkeypatch, tmp_path, changed):
+    path=tmp_path/'state.json'; now=u.utc_now()
+    state={'guard_nonce':'current','guard_started_epoch_s':now.timestamp(),
+           'guard_pids':{'restorer':10},'guards_ready':False,'restoration':{'status':'pending'}}
+    u.atomic_write(path,state)
+    for role,pid in [('restorer',10),('monitor',20)]:
+        u.atomic_write(tmp_path/(role+'.ready'), {'role':role,'pid':pid,
+            'nonce':'current','ready_utc':now.isoformat()})
+    monkeypatch.setattr(u,'pid_alive',lambda pid: not (changed=='restorer_died' and pid==10))
+    before=path.read_bytes()
+    with pytest.raises(u.Refusal):
+        u.publish_started_guard(path,'monitor',20,'stale' if changed=='nonce' else 'current',all_ready=True)
+    assert path.read_bytes()==before

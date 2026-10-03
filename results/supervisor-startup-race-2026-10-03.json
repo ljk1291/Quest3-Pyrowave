@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "kind": "cpu_only_supervisor_startup_restoration_race",
+  "source_base": "1347ae23b263a50163e51922f81d4026b7fdc973",
+  "before": [
+    {
+      "stage": "restorer",
+      "state_restoration_status": "pending",
+      "final_report_status": "restored",
+      "guards_ready": true,
+      "state_matches_final_report": false
+    },
+    {
+      "stage": "monitor",
+      "state_restoration_status": "pending",
+      "final_report_status": "restored",
+      "guards_ready": true,
+      "state_matches_final_report": false
+    }
+  ],
+  "after": {
+    "focused_cpu_checks_passed": 105,
+    "new_regressions": 8,
+    "startup_race_cases": 2,
+    "concurrent_window_creation_case": 1,
+    "existing_window_or_marker_cases": 3,
+    "changed_guard_proof_cases": 2,
+    "final_restoration_state_retained": true,
+    "cancelled_lease_inactive": true,
+    "late_guard_publication_refused": true,
+    "validation_host": "Windows",
+    "full_ci_required_before_merge": true
+  },
+  "hardware_window_started": false,
+  "adb_used": false,
+  "settings_changed": false,
+  "gpu_work_started": false,
+  "fresh_submissions_per_s": null,
+  "optical_fps": null
+}
