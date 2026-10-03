@@ -33,10 +33,21 @@ index c7ea7e2f6d94c02bc5c74c4cf752f39e2db9bced..ff8d8b06913e4e4612a957f563c6deb6
              upscaling: config.settings.video.upscaling.as_option().cloned(),
              force_software_decoder: config.settings.video.force_software_decoder,
 diff --git a/alvr/server_core/src/connection.rs b/alvr/server_core/src/connection.rs
-index 1054e0fe37a394e3ecfdefdf923eaf6c0f3c74e8..526d1f53970bb0a16f93d576e61ebefc966f1618 100644
+index 1054e0fe37a394e3ecfdefdf923eaf6c0f3c74e8..121a9df8bdb635e17277a4ace26124af98ed1d80 100644
 --- a/alvr/server_core/src/connection.rs
 +++ b/alvr/server_core/src/connection.rs
-@@ -134,15 +134,16 @@ fn openvr_config_with_env(
+@@ -24,8 +24,8 @@ use alvr_packets::{
+     Tracking, VideoPacketHeader, AUDIO, HAPTICS, STATISTICS, TRACKING, VIDEO,
+ };
+ use alvr_session::{
+-    BodyTrackingBDConfig, BodyTrackingSinkConfig, CodecType, ControllersEmulationMode, FrameSize,
+-    H264Profile, OpenvrConfig, SessionConfig, SocketProtocol,
++    BodyTrackingBDConfig, BodyTrackingSinkConfig, CodecType, ControllersEmulationMode,
++    FoveationProfile, FrameSize, H264Profile, OpenvrConfig, SessionConfig, SocketProtocol,
+ };
+ use alvr_sockets::{
+     PeerType, ProtoControlSocket, StreamSocketBuilder, CONTROL_PORT, KEEPALIVE_INTERVAL,
+@@ -134,15 +134,47 @@ fn openvr_config_with_env(
          })
          .unwrap_or(false);
  
@@ -55,14 +66,45 @@ index 1054e0fe37a394e3ecfdefdf923eaf6c0f3c74e8..526d1f53970bb0a16f93d576e61ebefc
 +        foveation_center_shift_x, foveation_center_shift_y, foveation_edge_ratio_x,
 +        foveation_edge_ratio_y, foveation_peripheral_softness, foveation_blur_only) =
 +        if let Switch::Enabled(config) = &settings.video.foveated_encoding {
-+            (true, config.center_size_x, config.center_size_y, config.center_shift_x,
-+             config.center_shift_y, config.edge_ratio_x, config.edge_ratio_y,
-+             config.peripheral_softness.clamp(0., 1.), config.blur_only)
++            let (center, edge, shift) = match config.profile {
++                // These named profiles are deliberately fixed-centre. The shader mirrors
++                // right-eye UVs itself, so a zero shift is the live profile baseline.
++                FoveationProfile::Light => (0.8, 1.5, (0., 0.)),
++                FoveationProfile::Medium => (0.6, 2.0, (0., 0.)),
++                FoveationProfile::H264Fit => (0.5, 2.0, (0., 0.)),
++                FoveationProfile::Custom => (config.center_size_x, config.edge_ratio_x,
++                    (config.center_shift_x, config.center_shift_y)),
++            };
++            // A malformed persisted session must fail closed. Do not clamp an
++            // experimental request into a different geometry or softness.
++            let valid = center.is_finite() && edge.is_finite() && edge >= 1.
++                && shift.0.is_finite() && shift.1.is_finite()
++                && shift.0.abs() < 1. && shift.1.abs() < 1.
++                && config.peripheral_softness.is_finite()
++                && (0.0..=1.0).contains(&config.peripheral_softness)
++                && (!matches!(config.profile, FoveationProfile::Custom) ||
++                    (config.center_size_x.is_finite() && config.center_size_y.is_finite()
++                    && (0.0..=1.0).contains(&config.center_size_x)
++                    && (0.0..=1.0).contains(&config.center_size_y)
++                    && config.edge_ratio_y.is_finite() && config.edge_ratio_y >= 1.));
++            if !valid {
++                warn!("Rejecting malformed foveated encoding configuration");
++                (false, 0., 0., 0., 0., 1., 1., 0., false)
++            } else {
++                let center_y = if matches!(config.profile, FoveationProfile::Custom) {
++                    config.center_size_y
++                } else { center };
++                let edge_y = if matches!(config.profile, FoveationProfile::Custom) {
++                    config.edge_ratio_y
++                } else { edge };
++                (true, center, center_y, shift.0, shift.1, edge, edge_y,
++                 config.peripheral_softness, config.blur_only)
++            }
 +        } else { (false, 0., 0., 0., 0., 1., 1., 0., false) };
  
      let mut brightness = 0.0;
      let mut contrast = 0.0;
-@@ -200,6 +201,8 @@ fn openvr_config_with_env(
+@@ -200,6 +232,8 @@ fn openvr_config_with_env(
          foveation_center_shift_y,
          foveation_edge_ratio_x,
          foveation_edge_ratio_y,
@@ -71,7 +113,7 @@ index 1054e0fe37a394e3ecfdefdf923eaf6c0f3c74e8..526d1f53970bb0a16f93d576e61ebefc
          enable_color_correction,
          brightness,
          contrast,
-@@ -650,7 +653,11 @@ fn connection_pipeline(
+@@ -650,7 +684,23 @@ fn connection_pipeline(
          warn!("Chosen refresh rate not supported. Using {fps}Hz");
      }
  
@@ -80,6 +122,18 @@ index 1054e0fe37a394e3ecfdefdf923eaf6c0f3c74e8..526d1f53970bb0a16f93d576e61ebefc
 +    // client advertises support only after the user enabled the setting; no fallback
 +    // changes the requested profile.
 +    let enable_foveated_encoding = matches!(initial_settings.video.foveated_encoding, Switch::Enabled(_))
++        && initial_settings.video.foveated_encoding.as_option().is_some_and(|config| {
++            config.peripheral_softness.is_finite()
++                && (0.0..=1.0).contains(&config.peripheral_softness)
++                && (!matches!(config.profile, FoveationProfile::Custom) ||
++                    (config.center_size_x.is_finite() && config.center_size_y.is_finite()
++                    && (0.0..=1.0).contains(&config.center_size_x)
++                    && (0.0..=1.0).contains(&config.center_size_y)
++                    && config.edge_ratio_x.is_finite() && config.edge_ratio_x >= 1.0
++                    && config.edge_ratio_y.is_finite() && config.edge_ratio_y >= 1.0
++                    && config.center_shift_x.is_finite() && config.center_shift_y.is_finite()
++                    && config.center_shift_x.abs() < 1.0 && config.center_shift_y.abs() < 1.0))
++        })
 +        && (streaming_caps.supports_foveated_encoding || initial_settings.video.foveated_encoding.as_option().is_some_and(|c| c.force_enable));
  
      let encoder_profile = if initial_settings.video.encoder_config.h264_profile == H264Profile::High
@@ -111,7 +165,7 @@ index c3b4f9e9629037a7a0dd2b6ab5776765ff4770a3..e42d6c87cacc1725bcbb631f5783a979
      bool m_enableColorCorrection;
      float m_brightness;
 diff --git a/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl b/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl
-index e77a8ab6a2f6820f385524a4baa12e3b95038891..ba7bcf578a695cdc99566834bbbaabbccb76b7a7 100644
+index e77a8ab6a2f6820f385524a4baa12e3b95038891..5aa39250b35c15b48aa9daf77ac5ed3ddffa47a1 100644
 --- a/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl
 +++ b/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl
 @@ -14,7 +14,8 @@ SamplerState trilinearSampler {
@@ -124,7 +178,7 @@ index e77a8ab6a2f6820f385524a4baa12e3b95038891..ba7bcf578a695cdc99566834bbbaabbc
  
  	float2 shift = CenterShiftForEye(isRightEye);
  
-@@ -39,6 +40,31 @@ float4 main(float2 uv : TEXCOORD0) : SV_Target {
+@@ -39,6 +40,45 @@ float4 main(float2 uv : TEXCOORD0) : SV_Target {
  	float2 rightEdge = g2 * center + (1. - g2) * d3;
  
  	float2 compressedUV = underBound * leftEdge + inBound * center + overBound * rightEdge;
@@ -132,20 +186,34 @@ index e77a8ab6a2f6820f385524a4baa12e3b95038891..ba7bcf578a695cdc99566834bbbaabbc
  
 -	return compositionTexture.Sample(trilinearSampler, EyeToTextureUV(compressedUV, isRightEye));
 +	// One bilinear source tap aliases a 1.5–2x squeezed band. Integrate the
-+	// source-pixel box with exact overlap weights. The bounded 7x7 support covers
++	// source-pixel box with exact overlap weights. The bounded 9x9 support covers
 +	// the 2x profile plus s=1 while smoothstep is C1 at the centre-band join.
 +	float edge = max(abs(outputEyeUV.x - .5), abs(outputEyeUV.y - .5)) * 2.;
 +	float ramp = smoothstep(centerSize.x, 1., edge);
 +	float2 texel = float2(1. / targetResolution.x, 1. / targetResolution.y);
-+	float2 sourceStep = max(abs(ddx(compressedUV)), abs(ddy(compressedUV)));
-+	float2 localSqueeze = max(float2(1., 1.), sourceStep / texel);
++	// Keep the footprint algebra explicit rather than deriving it from the
++	// hardware derivative of the mapped UV. This is d(sourceUV)/d(eyeUV),
++	// multiplied once by d(outputEyeUV) and the source texel density. The
++	// Python frame-bank port uses the same expression and constants.
++	float2 leftDerivative = (center - d2) / loBound
++		+ (eyeUV / loBound) * (c2 / edgeRatio)
++		+ (1. - eyeUV / loBound) * c2;
++	float2 rightDerivative = -(center - d3) / (1. - hiBound)
++		+ ((1. - eyeUV) / (1. - hiBound)) * (c2 / edgeRatio)
++		+ (1. - (1. - eyeUV) / (1. - hiBound)) * c2;
++	float2 mappingDerivative = underBound * leftDerivative
++		+ inBound * (c2 / edgeRatio) + overBound * rightDerivative;
++	if (blurOnly > .5) mappingDerivative = float2(1., 1.);
++	float2 outputStep = max(abs(ddx(outputEyeUV)), abs(ddy(outputEyeUV)));
++	float2 localSqueeze = max(float2(1., 1.),
++		abs(mappingDerivative / eyeSizeRatio) * outputStep / texel);
 +	float2 footprint = localSqueeze * (1. + peripheralSoftness * ramp) * texel;
 +	float2 centrePx = compressedUV * targetResolution;
 +	float2 loPx = centrePx - footprint * targetResolution * .5;
 +	float2 hiPx = centrePx + footprint * targetResolution * .5;
 +	int2 basePx = int2(floor(centrePx));
 +	float4 colour = 0.; float totalWeight = 0.;
-+	[unroll] for (int x = -3; x <= 3; ++x) [unroll] for (int y = -3; y <= 3; ++y) {
++	[unroll] for (int x = -4; x <= 4; ++x) [unroll] for (int y = -4; y <= 4; ++y) {
 +		int2 pixel = basePx + int2(x, y);
 +		float2 p0 = float2(pixel); float2 p1 = p0 + 1.;
 +		float2 overlap = max(0., min(hiPx, p1) - max(loPx, p0));
@@ -337,10 +405,40 @@ index d382c8f06112881f0e5cc5e5524ef438f259a06b..b03b3ca73d1e369e026ae0e029ff357a
      pub brightness: f32,
      pub contrast: f32,
 diff --git a/alvr/session/src/settings.rs b/alvr/session/src/settings.rs
-index 989c74f5918bb38458259d05cee0e12a3a543156..647fa3e580f48a4258df877903ed71effc3d522e 100644
+index 989c74f5918bb38458259d05cee0e12a3a543156..6538bee272839a1042327e99597d83bf83ff7b7c 100644
 --- a/alvr/session/src/settings.rs
 +++ b/alvr/session/src/settings.rs
-@@ -540,6 +540,15 @@ pub struct FoveatedEncodingConfig {
+@@ -502,12 +502,29 @@ pub struct ClientsideFoveationConfig {
+     pub vertical_offset_deg: f32,
+ }
+ 
++#[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq, Debug)]
++#[schema(gui = "button_group")]
++pub enum FoveationProfile {
++    #[schema(strings(display_name = "Light (0.8 / 1.5x)"))]
++    Light,
++    #[schema(strings(display_name = "Medium (0.6 / 2x)"))]
++    Medium,
++    #[schema(strings(display_name = "H.264 fit (0.5 / 2x)"))]
++    H264Fit,
++    #[schema(strings(display_name = "Custom"))]
++    Custom,
++}
++
+ #[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq)]
+ pub struct FoveatedEncodingConfig {
+     #[schema(strings(help = "Force enable on smartphone clients"))]
+     #[schema(flag = "hidden")]
+     pub force_enable: bool,
+ 
++    #[schema(strings(display_name = "Foveation profile", help = "Light, Medium and H.264 fit pin the documented fixed centre and edge values. Custom exposes the advanced values below. The feature remains disabled until its parent switch is enabled."))]
++    #[schema(flag = "steamvr-restart")]
++    pub profile: FoveationProfile,
++
+     #[schema(strings(display_name = "Center region width"))]
+     #[schema(gui(slider(min = 0.0, max = 1.0, step = 0.01)))]
+     #[schema(flag = "steamvr-restart")]
+@@ -540,6 +557,15 @@ pub struct FoveatedEncodingConfig {
      #[schema(flag = "steamvr-restart")]
      pub edge_ratio_y: f32,
  
@@ -356,7 +454,16 @@ index 989c74f5918bb38458259d05cee0e12a3a543156..647fa3e580f48a4258df877903ed71ef
      #[schema(strings(
          display_name = "Follow gaze",
          help = "Moves the full-resolution centre to where the eyes are looking, per eye, using the headset's eye tracking. Off pins it to the middle of the view."
-@@ -1912,6 +1921,8 @@ pub fn session_settings_default() -> SettingsDefault {
+@@ -1906,12 +1932,17 @@ pub fn session_settings_default() -> SettingsDefault {
+                 enabled: false,
+                 content: FoveatedEncodingConfigDefault {
+                     force_enable: false,
++                    profile: FoveationProfileDefault {
++                        variant: FoveationProfileDefaultVariant::Light,
++                    },
+                     center_size_x: 0.20,
+                     center_size_y: 0.178,
+                     center_shift_x: 0.0,
                      center_shift_y: 0.0,
                      edge_ratio_x: 3.,
                      edge_ratio_y: 4.,

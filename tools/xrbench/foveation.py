@@ -16,8 +16,13 @@ PROFILE_CONSTANTS = {
     "medium": (0.6, 2.0),
     "h264fit": (0.5, 2.0),
 }
-_TAPS = (-0.375, -0.125, 0.125, 0.375)
-MAX_FOOTPRINT_PIXELS = 4.0
+# The unrounded ratio-2 derivative peaks at 2r-1 = 3 source pixels/output
+# pixel.  Allocation is rounded to 32 pixels, which raises the actual Q3
+# maximum to 3.18; at s=1 it is 6.35.  A nine-pixel support safely covers that
+# footprint at every subpixel phase.  This is a support bound, never a clamp:
+# an unsupported geometry fails before producing a different filter.
+MAX_FOOTPRINT_PIXELS = 7.0
+FILTER_RADIUS = 4
 TILE_ROWS = 96
 
 @dataclass(frozen=True)
@@ -79,10 +84,79 @@ def forward_map_uv(uv: np.ndarray, full_size: tuple[int,int], encoded_size_: tup
         out[...,axis]=np.where(x < lo,left,np.where(x > hi,right,center))
     return out
 
+def hlsl_forward_map_uv(uv: np.ndarray, full_size: tuple[int,int], encoded_size_: tuple[int,int], config: FoveationConfig) -> np.ndarray:
+    """Float32 evaluation of the compiled HLSL ``compressedUV`` algebra.
+
+    This is intentionally separate from :func:`forward_map_uv`.  The parity
+    test samples joins, asymmetric shifts and both ends with the shader's
+    float32 precision, while the normal frame-bank path retains float64 only
+    so that offline reference scores do not accumulate numerical noise.
+    """
+    uv=np.asarray(uv,dtype=np.float32)
+    if uv.shape[-1] != 2: raise ValueError("uv must end in xy")
+    if config.blur_only: return uv.copy()
+    out=np.empty_like(uv)
+    for axis,(full,enc,shift) in enumerate(zip(full_size,encoded_size_,config.center_shift)):
+        er,c1,c2,lo,hi=(np.float32(x) for x in _params(full,enc,config.center_fraction,config.edge_ratio,shift))
+        x=uv[...,axis]/er
+        center=x*c2/np.float32(config.edge_ratio)+c1
+        d2=x*c2; d3=(x-np.float32(1.0))*c2+np.float32(1.0)
+        left=(x/lo)*center+(np.float32(1.0)-x/lo)*d2
+        right=((np.float32(1.0)-x)/(np.float32(1.0)-hi))*center+(np.float32(1.0)-(np.float32(1.0)-x)/(np.float32(1.0)-hi))*d3
+        out[...,axis]=np.where(x < lo,left,np.where(x > hi,right,center))
+    return out
+
+def hlsl_area_weights(source_uv: np.ndarray, footprint: np.ndarray, size: tuple[int,int]) -> tuple[np.ndarray, np.ndarray]:
+    """Return the exact 9x9 overlap weights and source indices used by HLSL.
+
+    The result is used only by the CPU parity gate.  The image path keeps a
+    tile-local accumulation instead of materialising this tensor.
+    """
+    width,height=size
+    centre=np.asarray(source_uv,dtype=np.float32)*np.array((width,height),np.float32)
+    fp=np.asarray(footprint,dtype=np.float32)
+    left=centre-fp*.5; right=centre+fp*.5; base=np.floor(centre).astype(np.int32)
+    weights=[]; indices=[]
+    for ox in range(-FILTER_RADIUS,FILTER_RADIUS+1):
+        for oy in range(-FILTER_RADIUS,FILTER_RADIUS+1):
+            pixel=base+np.array((ox,oy),np.int32)
+            p0=pixel.astype(np.float32); p1=p0+1.
+            overlap=np.maximum(0.,np.minimum(right,p1)-np.maximum(left,p0))
+            weights.append(overlap[...,0]*overlap[...,1])
+            indices.append(np.stack((np.clip(pixel[...,0],0,width-1),np.clip(pixel[...,1],0,height-1)),axis=-1))
+    return np.stack(weights,axis=-1),np.stack(indices,axis=-2)
+
 def inverse_map_uv(uv: np.ndarray, full_size: tuple[int,int], encoded_size_: tuple[int,int], config: FoveationConfig) -> np.ndarray:
-    """Numerically stable inverse of :func:`forward_map_uv` for reconstruction."""
+    """Inverse of :func:`forward_map_uv` for reconstruction.
+
+    The normal live profile has a zero centre shift.  For it, use the exact
+    quadratic inverse from upstream 061dc0b rather than forty-two bisection
+    passes per pixel.  Non-zero diagnostic shifts retain bisection because the
+    shifted join algebra is deliberately kept in the shader forward form.
+    """
     uv=np.asarray(uv,dtype=np.float64); out=np.empty_like(uv)
     if config.blur_only: return uv.copy()
+    if config.center_shift == (0.0, 0.0):
+        for axis,(full,enc) in enumerate(zip(full_size,encoded_size_)):
+            ratio=config.edge_ratio; c=config.center_fraction
+            edge=full-c*full
+            center=1.0-math.ceil(edge/(ratio*2.0))*(ratio*2.0)/full
+            scale=(center+(1.0-center)/ratio)*full/enc
+            c0=(1.0-center)*.5
+            c1=(ratio-1.0)*c0/ratio
+            c2=(ratio-1.0)*center+1.0
+            loc=c0/c2; hic=1.0-c0/c2
+            al=c2*(1.0-ratio)/(ratio*loc)
+            bl=(c1+c2*loc)/loc
+            ar=c2*(ratio-1.0)/(ratio*(1.0-hic))
+            br=(c2-ratio*c1-2*ratio*c2+c2*ratio*(1.0-hic)+ratio)/(ratio*(1.0-hic))
+            cr=(c2*ratio-c2)*(c1-hic+c2*hic)/(ratio*(1.0-hic)**2)
+            source=uv[...,axis]
+            left=(-bl+np.sqrt(np.maximum(0.0,bl*bl+4.0*al*source)))/(2.0*al)
+            right=(-br+np.sqrt(np.maximum(0.0,br*br-4.0*(cr-ar*source))))/(2.0*ar)
+            middle=(source-c1)*ratio/c2
+            out[...,axis]=np.where(source < c0,left,np.where(source > 1.0-c0,right,middle))*scale
+        return out
     # Each axis is monotonic; bisection gives the exact same piecewise mapping without
     # duplicating algebra that is easy to get wrong at the aligned join.
     lo=np.zeros(uv.shape[:-1],dtype=np.float64); hi=np.ones_like(lo)
@@ -129,15 +203,18 @@ def _bilinear(image: np.ndarray, uv: np.ndarray) -> np.ndarray:
 def _area_box(image: np.ndarray, source_uv: np.ndarray, footprint: np.ndarray) -> np.ndarray:
     """Exact normalized overlap weights for a bounded source-pixel box footprint."""
     h,w=image.shape; cx=source_uv[...,0]*w; cy=source_uv[...,1]*h
-    fx=np.minimum(footprint[...,0],MAX_FOOTPRINT_PIXELS); fy=np.minimum(footprint[...,1],MAX_FOOTPRINT_PIXELS)
+    fx=footprint[...,0]; fy=footprint[...,1]
+    if np.any(fx > MAX_FOOTPRINT_PIXELS + 1e-8) or np.any(fy > MAX_FOOTPRINT_PIXELS + 1e-8):
+        raise ValueError("foveation footprint exceeds declared profile bound")
     left=cx-fx*.5; right=cx+fx*.5; top=cy-fy*.5; bottom=cy+fy*.5
     accum=np.zeros(cx.shape,np.float64); weight=np.zeros(cx.shape,np.float64)
-    # maximum [4x4] source-pixel footprint plus boundary pixels: bounded 6x6 work
+    # A seven-pixel box can overlap nine source cells at an adverse subpixel
+    # phase.  The same [-4, 4] support is unrolled by the native shader.
     bx=np.floor(cx).astype(int); by=np.floor(cy).astype(int)
-    for ox in range(-3,4):
+    for ox in range(-FILTER_RADIUS,FILTER_RADIUS+1):
         ix=np.clip(bx+ox,0,w-1); px0=bx+ox; px1=px0+1
         wx=np.maximum(0.,np.minimum(right,px1)-np.maximum(left,px0))
-        for oy in range(-3,4):
+        for oy in range(-FILTER_RADIUS,FILTER_RADIUS+1):
             iy=np.clip(by+oy,0,h-1); py0=by+oy; py1=py0+1
             wy=np.maximum(0.,np.minimum(bottom,py1)-np.maximum(top,py0)); ww=wx*wy
             accum += image[iy,ix]*ww; weight += ww
@@ -156,7 +233,7 @@ def forward_eye(image: np.ndarray, config: FoveationConfig, *, tile_rows: int=TI
         uv=np.stack((xx,yy),axis=-1); source=forward_map_uv(uv,(w,h),(ew,eh),config)
         footprint=local_squeeze(uv,(w,h),(ew,eh),config)*(1+config.softness*softness_ramp(uv,config)[...,None])
         out[start:stop]=_area_box(image,source,footprint)
-    return np.rint(np.clip(out,0,255)).astype(image.dtype)
+    return out
 
 def reconstruct_eye(encoded: np.ndarray, full_size: tuple[int,int], config: FoveationConfig, *, tile_rows: int=TILE_ROWS) -> np.ndarray:
     w,h=full_size; out=np.empty((h,w),np.float64); x=(np.arange(w)+.5)/w
@@ -164,7 +241,7 @@ def reconstruct_eye(encoded: np.ndarray, full_size: tuple[int,int], config: Fove
         stop=min(h,start+tile_rows); y=(np.arange(start,stop)+.5)/h; xx,yy=np.meshgrid(x,y)
         uv=np.stack((xx,yy),axis=-1)
         out[start:stop]=_bilinear(encoded,inverse_map_uv(uv,full_size,(encoded.shape[1],encoded.shape[0]),config))
-    return np.rint(np.clip(out,0,255)).astype(encoded.dtype)
+    return out
 
 def _resize_plane(image: np.ndarray, width: int, height: int) -> np.ndarray:
     yy,xx=np.mgrid[0:height,0:width]
@@ -213,8 +290,8 @@ def encode_planes(planes, config: FoveationConfig) -> EncodedPlanes:
     eyes,size,chroma420=_split_eyes(planes); enc=[]
     for eye in eyes:
         rgb=_decode_709_full(eye); out=[]
-        for channel in range(3): out.append(forward_eye(rgb[...,channel]*255.,config).astype(np.uint8))
-        enc.append(_encode_709_full(np.stack(out,axis=-1).astype(np.float64)/255.,chroma420))
+        for channel in range(3): out.append(forward_eye(rgb[...,channel],config))
+        enc.append(_encode_709_full(np.stack(out,axis=-1),chroma420))
     return EncodedPlanes(tuple(np.concatenate((enc[0][i],enc[1][i]),axis=1) for i in range(3)),size,encoded_size(*size,config),chroma420,config)
 
 def reconstruct_planes(decoded_planes, encoded: EncodedPlanes):
@@ -224,8 +301,8 @@ def reconstruct_planes(decoded_planes, encoded: EncodedPlanes):
     rebuilt=[]
     for eye in eyes:
         rgb=_decode_709_full(eye); out=[]
-        for channel in range(3): out.append(reconstruct_eye(np.rint(rgb[...,channel]*255).astype(np.uint8),encoded.expanded_eye,encoded.config))
-        rebuilt.append(_encode_709_full(np.stack(out,axis=-1).astype(np.float64)/255.,encoded.chroma420))
+        for channel in range(3): out.append(reconstruct_eye(rgb[...,channel],encoded.expanded_eye,encoded.config))
+        rebuilt.append(_encode_709_full(np.stack(out,axis=-1),encoded.chroma420))
     return [np.concatenate((rebuilt[0][i],rebuilt[1][i]),axis=1) for i in range(3)]
 
 def blur_reference(planes, config: FoveationConfig):

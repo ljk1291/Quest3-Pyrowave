@@ -15,12 +15,17 @@ Quest3-Pyrowave commits `061dc0b20cf7f30f2795e5484e28fce42e60fb37` and
 `2b87fc7`; this overlay extends them with medium, H.264-fit, softness and
 blur-only controls.
 
-The shader takes a 4x4 area-weighted footprint through its local Jacobian. The
+The shader integrates an exact source-pixel box through its local Jacobian. Its
+9x9 bounded support covers the aligned ratio-2 profile at maximum softness
+without clamping the requested footprint. The
 peripheral softness control multiplies it by `1 + s * smoothstep(...)`; `s=0`
 still enables anti-alias filtering. Blur-only retains full encoded geometry and
 uses the same smooth ramp. `tools.xrbench.foveation` is the matching native-8-bit
 C420 frame-bank transform; it receives an already WO-10-cropped frame and never
-reapplies crop factors.
+reapplies crop factors. The live composition texture is `UNORM_SRGB`, so the
+frame-bank path expands centred C420, converts full-range BT.709 R'G'B' to
+linear RGB for filtering, then converts and subsamples once. It does not claim
+parity for a nonlinear per-plane YUV average.
 
 Regenerate a patch with `git diff --binary --full-index --output=patches/<name>.patch` from the
 clone (`--output` rather than a shell redirect, so PowerShell cannot re-encode the bytes). Check one still
