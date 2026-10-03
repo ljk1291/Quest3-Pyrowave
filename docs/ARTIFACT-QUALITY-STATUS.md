@@ -200,3 +200,30 @@ Take the first unblocked item. Items marked ∥ are independent.
   pass. Final-head full CI and the guarded dry run remain required. The owner
   approved the existing eight-hour window, without extending its PC-only scope.
   No hardware workload has started, and no performance or quality gain is claimed.
+
+- 2026-10-03, checkpoint PC-only cleanup and scorer execution prerequisites:
+  The preceding documentation checkpoint merged after
+  [all four CI jobs](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37088044082)
+  passed. WO-0 head `ef9d8b0` retains the arm's action list for restoration:
+  a PC-only window verifies headset state without stopping the app or rewriting
+  properties. Unexpected drift is preserved and fails verification. **84 focused
+  CPU checks and three disposable Windows process checks pass**; its
+  [final-head Windows workflow](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37088239058)
+  is still running. Merge and the armed bounded dry run remain required.
+  WO-1's [next Windows build](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37087256877)
+  reached native compilation and exposed a Granite string/C-string API mismatch,
+  corrected without changing the metric algorithm, shader or dependency pins.
+  Head `c2c49f2` also retains private child logs and ends the matrix on its first
+  failed cell. A real three-frame 64×64 CPU FFmpeg identity check exposed null
+  optional PSNR-HVS fields; parsing now preserves the separate valid VMAF score,
+  while missing VMAF still fails the required-metric gate. **33 local harness/scorer
+  checks pass; three native-reader checks require CI's compiler**. The actual CPU
+  graph passes with infinite identity PSNR, SSIM 1 and finite VMAF. This checks
+  tool availability/parsing, not Metro quality or Quest performance. Final-head
+  Windows/full-pair CI and the guarded HVS GPU sanity gate remain.
+  The finite PC-only dry-run controller is prepared privately and binds its ALVR
+  snapshot to the reverified retained d1 installation. It has not been executed.
+  No ADB, unattended window, codec/scorer GPU run or VR launch occurred during this
+  checkpoint. The owner's arm remains unchanged and ends 08:44:31 Europe/Berlin.
+  Source/build work is unblocked; the goal remains active, with no optimization
+  promoted and no new quality, fresh-submission or stable-90-Hz claim.
