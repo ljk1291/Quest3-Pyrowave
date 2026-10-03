@@ -17,6 +17,7 @@ import hashlib
 import json
 import math
 import os
+import time
 from pathlib import Path
 
 from . import framebank as fb
@@ -261,6 +262,60 @@ def wrap_raw_payload(raw: Path, info: fb.Y4MInfo, out: Path) -> dict:
             "fps": [info.fps_num, info.fps_den]}}
 
 
+_STOP_REASONS = frozenset(("gpu_driver_or_device_error", "free_vram_below_margin", "stop_requested",
+                           "comfy_queue_active_or_unknown", "compute_backend_active_or_unknown"))
+_TIMING_REASONS = frozenset(("comfy_queue_active_or_unknown", "compute_backend_active_or_unknown",
+                             "timing_activity_unknown", "sustained_external_gpu_load"))
+
+
+def lease_telemetry(window: Path, start_epoch_s: float, end_epoch_s: float) -> dict:
+    """Return only sanitized, in-run quality-monitor evidence from a private lease."""
+    from tools.quest3 import unattended as u
+    if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in (start_epoch_s, end_epoch_s)) or end_epoch_s < start_epoch_s:
+        raise ValueError("invalid run interval")
+    state = u.json_read(Path(window) / "state.json")
+    policy = state.get("last_policy")
+    if not isinstance(policy, dict) or policy.get("mode") != "quality":
+        raise ValueError("lease quality policy missing")
+    margin = policy.get("free_vram_margin_mib")
+    if not isinstance(margin, (int, float)) or not math.isfinite(margin) or margin <= 0:
+        raise ValueError("lease VRAM margin missing")
+    def enum_list(value, allowed, label):
+        if not isinstance(value, list) or any(not isinstance(x, str) or x not in allowed for x in value):
+            raise ValueError("lease " + label + " invalid")
+        return list(value)
+    samples = []
+    for raw in state.get("gpu_load_samples", []):
+        if not isinstance(raw, dict):
+            continue
+        epoch = raw.get("epoch_s")
+        if not isinstance(epoch, (int, float)) or not math.isfinite(epoch) or not start_epoch_s <= epoch <= end_epoch_s:
+            continue
+        numeric = {}
+        for key, lower, upper in (("free_vram_mib", 0, float("inf")), ("total_vram_mib", 1, float("inf")),
+                                  ("overall_load_percent", 0, 100), ("external_max_engine_percent", 0, 100)):
+            value = raw.get(key)
+            if not isinstance(value, (int, float)) or not math.isfinite(value) or not lower <= value <= upper:
+                raise ValueError("lease sample numeric field invalid")
+            numeric[key] = float(value)
+        if numeric["free_vram_mib"] > numeric["total_vram_mib"]:
+            raise ValueError("lease sample VRAM invalid")
+        device = raw.get("device_error")
+        if device is not None and device not in ("gpu_driver_query_unavailable", "gpu_driver_query_failed"):
+            raise ValueError("lease device status invalid")
+        samples.append({"epoch_s": float(epoch), **numeric, "device_error": device,
+                        "compute_backend_reasons": enum_list(raw.get("compute_backend_reasons"), _STOP_REASONS, "compute reasons"),
+                        "stop_reasons": enum_list(raw.get("stop_reasons"), _STOP_REASONS, "stop reasons"),
+                        "timing_invalidation_reasons": enum_list(raw.get("timing_invalidation_reasons"), _TIMING_REASONS, "timing reasons")})
+    if not samples:
+        raise ValueError("lease telemetry missing for run interval")
+    return {"measurement_mode": "quality", "free_vram_margin_mib": float(margin),
+            "policy_stop_reasons": enum_list(policy.get("stop_reasons"), _STOP_REASONS, "policy stop reasons"),
+            "run_start_epoch_s": float(start_epoch_s), "run_end_epoch_s": float(end_epoch_s),
+            "samples": samples, "lease_closed_observed": state.get("closed") is True,
+            "cleanup_verified": False}
+
+
 def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, source_info,
                        decoded, decoded_info, reference, ref_info, timeout, keep_artifacts):
     """Use exactly the established display and fixed-crop score path."""
@@ -321,7 +376,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
     build_provenance = fb.verify_tools_build(build_tools, metadata)
     if fb.sha256_file(needed["psnr_hvs_m_h"]) != fb.sha256_file(build_tools["psnr_hvs_m_h"]):
         raise ValueError("selected HVS scorer differs from qualified frame-bank bundle")
-    guard = fb.WindowGuard(window, supervised=True); guard.status()
+    guard = fb.WindowGuard(window, supervised=True); guard.status(); run_start_epoch_s = time.time()
     source_header = _require_jpeg_full_y4m(source)
     source_info = fb.inspect_y4m(source)
     if fb.sha256_file(source) != plan["source"]["sha256"] or source_info.frames != plan["source"]["frames"]:
@@ -390,6 +445,17 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
     except (OSError, ValueError, KeyError):
         result["failure_reasons"].append("tool_build_provenance_changed_during_run")
     if hashlib.sha256(Path(plan_path).read_bytes()).hexdigest() != result["frozen_plan_sha256"]: result["failure_reasons"].append("plan_changed_during_run")
+    run_end_epoch_s = time.time()
+    try:
+        guard.status()
+        result["lease_final_health"] = "active"
+    except PermissionError:
+        result["failure_reasons"].append("lease_final_health_failed")
+        result["lease_final_health"] = "failed"
+    try:
+        result["lease_telemetry"] = lease_telemetry(window, run_start_epoch_s, run_end_epoch_s)
+    except (OSError, ValueError, KeyError):
+        result["failure_reasons"].append("lease_telemetry_missing_or_invalid")
     result["complete"] = not result["failure_reasons"] and len(result["cells"]) == len(plan["cells"])
     (private_out / "nvenc-framebank-private.json").write_text(fb.report_json(result), encoding="utf-8")
     return result
@@ -401,6 +467,7 @@ def sanitized_report(result: dict) -> dict:
             "failure_reasons": list(result.get("failure_reasons", [])), "frozen_plan_sha256": result.get("frozen_plan_sha256"),
             "source_sha256": result.get("source_sha256_end"), "source_y4m_header": result.get("source_y4m_header"), "tool_provenance": result.get("tool_provenance_end"), "tools_build_provenance": result.get("tools_build_provenance"),
             "hvs_gpu_sanity": result.get("hvs_gpu_sanity"), "projection": result.get("projection"), "crop_definitions": result.get("crop_definitions"), "proxy": result.get("proxy"),
+            "lease_final_health": result.get("lease_final_health"), "lease_telemetry": result.get("lease_telemetry"),
             "cells": [{key: row.get(key) for key in keep} for row in result.get("cells", [])],
             "optical_latency_ms": None, "display_fps": None}
 
