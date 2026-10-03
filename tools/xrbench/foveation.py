@@ -17,6 +17,8 @@ PROFILE_CONSTANTS = {
     "h264fit": (0.5, 2.0),
 }
 _TAPS = (-0.375, -0.125, 0.125, 0.375)
+MAX_FOOTPRINT_PIXELS = 4.0
+TILE_ROWS = 96
 
 @dataclass(frozen=True)
 class FoveationConfig:
@@ -124,21 +126,45 @@ def _bilinear(image: np.ndarray, uv: np.ndarray) -> np.ndarray:
     fx=x-x0; fy=y-y0
     return (image[y0,x0]*(1-fx)*(1-fy)+image[y0,x1]*fx*(1-fy)+image[y1,x0]*(1-fx)*fy+image[y1,x1]*fx*fy)
 
-def forward_eye(image: np.ndarray, config: FoveationConfig) -> np.ndarray:
-    """Area-prefilter and resample one plane into its encoded foveated representation."""
-    if image.ndim != 2: raise ValueError("one image plane expected")
-    h,w=image.shape; ew,eh=encoded_size(w,h,config); yy,xx=np.mgrid[0:eh,0:ew]; uv=np.stack(((xx+.5)/ew,(yy+.5)/eh),axis=-1)
-    squeeze=local_squeeze(uv,(w,h),(ew,eh),config); footprint=squeeze*(1+config.softness*softness_ramp(uv,config)[...,None])
-    out=np.zeros((eh,ew),np.float64)
-    for ox in _TAPS:
-        for oy in _TAPS:
-            sample_uv=uv+np.stack((ox*footprint[...,0]/ew,oy*footprint[...,1]/eh),axis=-1)
-            out += _bilinear(image,forward_map_uv(np.clip(sample_uv,0,1),(w,h),(ew,eh),config))
-    return (out/16).astype(image.dtype)
+def _area_box(image: np.ndarray, source_uv: np.ndarray, footprint: np.ndarray) -> np.ndarray:
+    """Exact normalized overlap weights for a bounded source-pixel box footprint."""
+    h,w=image.shape; cx=source_uv[...,0]*w; cy=source_uv[...,1]*h
+    fx=np.minimum(footprint[...,0],MAX_FOOTPRINT_PIXELS); fy=np.minimum(footprint[...,1],MAX_FOOTPRINT_PIXELS)
+    left=cx-fx*.5; right=cx+fx*.5; top=cy-fy*.5; bottom=cy+fy*.5
+    accum=np.zeros(cx.shape,np.float64); weight=np.zeros(cx.shape,np.float64)
+    # maximum [4x4] source-pixel footprint plus boundary pixels: bounded 6x6 work
+    bx=np.floor(cx).astype(int); by=np.floor(cy).astype(int)
+    for ox in range(-3,4):
+        ix=np.clip(bx+ox,0,w-1); px0=bx+ox; px1=px0+1
+        wx=np.maximum(0.,np.minimum(right,px1)-np.maximum(left,px0))
+        for oy in range(-3,4):
+            iy=np.clip(by+oy,0,h-1); py0=by+oy; py1=py0+1
+            wy=np.maximum(0.,np.minimum(bottom,py1)-np.maximum(top,py0)); ww=wx*wy
+            accum += image[iy,ix]*ww; weight += ww
+    return accum/np.maximum(weight,1e-12)
 
-def reconstruct_eye(encoded: np.ndarray, full_size: tuple[int,int], config: FoveationConfig) -> np.ndarray:
-    w,h=full_size; yy,xx=np.mgrid[0:h,0:w]; uv=np.stack(((xx+.5)/w,(yy+.5)/h),axis=-1)
-    return _bilinear(encoded,inverse_map_uv(uv,full_size,(encoded.shape[1],encoded.shape[0]),config)).astype(encoded.dtype)
+def forward_eye(image: np.ndarray, config: FoveationConfig, *, tile_rows: int=TILE_ROWS) -> np.ndarray:
+    """Area-prefilter and resample one plane into encoded space.
+
+    The filter integrates one source-pixel box exactly. The footprint is the
+    forward-map Jacobian once, not a Jacobian-sized offset fed through the map.
+    """
+    if image.ndim != 2: raise ValueError("one image plane expected")
+    h,w=image.shape; ew,eh=encoded_size(w,h,config); out=np.empty((eh,ew),np.float64); x=(np.arange(ew)+.5)/ew
+    for start in range(0,eh,tile_rows):
+        stop=min(eh,start+tile_rows); y=(np.arange(start,stop)+.5)/eh; xx,yy=np.meshgrid(x,y)
+        uv=np.stack((xx,yy),axis=-1); source=forward_map_uv(uv,(w,h),(ew,eh),config)
+        footprint=local_squeeze(uv,(w,h),(ew,eh),config)*(1+config.softness*softness_ramp(uv,config)[...,None])
+        out[start:stop]=_area_box(image,source,footprint)
+    return np.rint(np.clip(out,0,255)).astype(image.dtype)
+
+def reconstruct_eye(encoded: np.ndarray, full_size: tuple[int,int], config: FoveationConfig, *, tile_rows: int=TILE_ROWS) -> np.ndarray:
+    w,h=full_size; out=np.empty((h,w),np.float64); x=(np.arange(w)+.5)/w
+    for start in range(0,h,tile_rows):
+        stop=min(h,start+tile_rows); y=(np.arange(start,stop)+.5)/h; xx,yy=np.meshgrid(x,y)
+        uv=np.stack((xx,yy),axis=-1)
+        out[start:stop]=_bilinear(encoded,inverse_map_uv(uv,full_size,(encoded.shape[1],encoded.shape[0]),config))
+    return np.rint(np.clip(out,0,255)).astype(encoded.dtype)
 
 def _resize_plane(image: np.ndarray, width: int, height: int) -> np.ndarray:
     yy,xx=np.mgrid[0:height,0:width]
@@ -167,6 +193,46 @@ def _encode_709_full(linear, chroma420):
         cr=(cr[0::2,0::2]+cr[1::2,0::2]+cr[0::2,1::2]+cr[1::2,1::2])*.25
     return [q(y),q(cb),q(cr)]
 
+@dataclass(frozen=True)
+class EncodedPlanes:
+    """Small per-eye YUV representation; no implied reconstruction or codec result."""
+    planes: tuple[np.ndarray,np.ndarray,np.ndarray]
+    expanded_eye: tuple[int,int]
+    encoded_eye: tuple[int,int]
+    chroma420: bool
+    config: FoveationConfig
+
+def _split_eyes(planes):
+    y,cb,cr=planes; h,w2=y.shape; w=w2//2
+    chroma420=cb.shape == (h//2,w2//2) and cr.shape == (h//2,w2//2)
+    factor=2 if chroma420 else 1
+    return [(y[:,:w],cb[:,:w//factor],cr[:,:w//factor]),(y[:,w:],cb[:,w//factor:],cr[:,w//factor:])],(w,h),chroma420
+
+def encode_planes(planes, config: FoveationConfig) -> EncodedPlanes:
+    """Convert already-cropped stereo C420jpeg/FULL frames into smaller encoded planes."""
+    eyes,size,chroma420=_split_eyes(planes); enc=[]
+    for eye in eyes:
+        rgb=_decode_709_full(eye); out=[]
+        for channel in range(3): out.append(forward_eye(rgb[...,channel]*255.,config).astype(np.uint8))
+        enc.append(_encode_709_full(np.stack(out,axis=-1).astype(np.float64)/255.,chroma420))
+    return EncodedPlanes(tuple(np.concatenate((enc[0][i],enc[1][i]),axis=1) for i in range(3)),size,encoded_size(*size,config),chroma420,config)
+
+def reconstruct_planes(decoded_planes, encoded: EncodedPlanes):
+    """Expand codec-decoded small planes back to the already-cropped stereo reference size."""
+    eyes,small_size,chroma420=_split_eyes(decoded_planes)
+    if small_size != encoded.encoded_eye or chroma420 != encoded.chroma420: raise ValueError("decoded geometry/chroma drifted")
+    rebuilt=[]
+    for eye in eyes:
+        rgb=_decode_709_full(eye); out=[]
+        for channel in range(3): out.append(reconstruct_eye(np.rint(rgb[...,channel]*255).astype(np.uint8),encoded.expanded_eye,encoded.config))
+        rebuilt.append(_encode_709_full(np.stack(out,axis=-1).astype(np.float64)/255.,encoded.chroma420))
+    return [np.concatenate((rebuilt[0][i],rebuilt[1][i]),axis=1) for i in range(3)]
+
+def blur_reference(planes, config: FoveationConfig):
+    """Reference reconstructed from the same foveated prefilter without codec loss."""
+    encoded=encode_planes(planes,config)
+    return reconstruct_planes(encoded.planes,encoded)
+
 def transform_planes(planes, config: FoveationConfig):
     """Frame-bank forward/reconstruct transform in the live shader's colour domain.
 
@@ -176,16 +242,5 @@ def transform_planes(planes, config: FoveationConfig):
     chroma-subsampled once. This deliberately does *not* average nonlinear Y/Cb/Cr
     planes independently. Input is already cropped by WO-10/Q3; eye halves never mix.
     """
-    if len(planes)!=3 or planes[0].dtype != np.uint8: raise ValueError("native 8-bit YUV planes required")
-    y=planes[0]; h,w2=y.shape; w=w2//2
-    if w2%2 or h%2: raise ValueError("stereo luma must be even")
-    chroma420=planes[1].shape == (h//2,w2//2) and planes[2].shape == (h//2,w2//2)
-    if not chroma420 and (planes[1].shape != y.shape or planes[2].shape != y.shape): raise ValueError("unsupported chroma geometry")
-    rgb=_decode_709_full(planes); reconstructed=[]
-    for eye_rgb in (rgb[:,:w],rgb[:,w:]):
-        components=[]
-        for component in range(3):
-            coded=forward_eye(eye_rgb[...,component],config)
-            components.append(reconstruct_eye(coded,(w,h),config))
-        reconstructed.append(np.stack(components,axis=-1))
-    return _encode_709_full(np.concatenate(reconstructed,axis=1),chroma420)
+    encoded=encode_planes(planes,config)
+    return reconstruct_planes(encoded.planes,encoded)

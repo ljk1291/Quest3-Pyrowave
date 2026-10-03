@@ -36,5 +36,11 @@ class FoveationTests(unittest.TestCase):
         y=np.full((48,128),128,np.uint8); cb=np.zeros((24,64),np.uint8); cb[:,32:]=255; cr=np.full((24,64),128,np.uint8)
         out=transform_planes([y,cb,cr],FoveationConfig('light',softness=.5))
         self.assertEqual(out[1].shape,(24,64)); self.assertTrue(np.isfinite(out[1]).all())
+    def test_encode_then_reconstruct_keeps_small_codec_representation(self):
+        y=np.full((48,128),100,np.uint8); planes=[y,np.full((24,64),128,np.uint8),np.full((24,64),128,np.uint8)]
+        encoded=encode_planes(planes,FoveationConfig('medium',softness=.5))
+        self.assertEqual(encoded.expanded_eye,(64,48)); self.assertEqual(encoded.encoded_eye,encoded_size(64,48,encoded.config))
+        self.assertEqual(encoded.planes[0].shape,(encoded.encoded_eye[1],encoded.encoded_eye[0]*2))
+        self.assertEqual(reconstruct_planes(encoded.planes,encoded)[0].shape,y.shape)
 
 if __name__=='__main__': unittest.main()
