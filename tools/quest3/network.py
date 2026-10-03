@@ -146,6 +146,7 @@ def tcp_sender(ip, port, mbps, seconds, hz, connect=socket.create_connection, cl
         raise ValueError("max_in_flight must be positive")
     ack_times_ms, schedule_lag_ms, acked, pending_ids = [], [], {}, set()
     receiver_error = [None]
+    stream_incomplete = [False]
     lock, stopped = threading.Lock(), threading.Event()
     scheduled = max(0, int(seconds * hz))
     with connect((str(ip), port), timeout=10) as sock:
@@ -194,9 +195,16 @@ def tcp_sender(ip, port, mbps, seconds, hz, connect=socket.create_connection, cl
             try:
                 sock.sendall(header); sock.sendall(payload)
             except (OSError, socket.timeout):
-                with lock:
-                    pending_ids.discard(frame_id)
-                    acked.pop(frame_id, None)
+                # sendall() may have put a prefix of this frame on the wire. A new
+                # header on the same TCP connection would then be parsed as payload;
+                # terminate the data stream and count the remaining schedule slots late.
+                stream_incomplete[0] = True
+                receiver_error[0] = "partial_or_timed_out_write"
+                try:
+                    sock.shutdown(socket.SHUT_WR)
+                except OSError:
+                    pass
+                break
         drain_deadline = clock() + period
         while clock() < drain_deadline:
             with lock:
@@ -224,7 +232,7 @@ def tcp_sender(ip, port, mbps, seconds, hz, connect=socket.create_connection, cl
             "late_frame_share_percent": 100.0 * late / scheduled if scheduled else None,
             "unacknowledged_frames": written - acknowledged,
             "censored_stall_lower_bound_ms": max((clock() - item["start"]) * 1000.0 for item in completed if item["ack"] is None) if any(item["ack"] is None for item in completed) else None,
-            "receiver_error": receiver_error[0],
+            "receiver_error": receiver_error[0], "stream_incomplete": stream_incomplete[0],
             "acknowledged_payload_mbps": (acknowledged * payload_bytes * 8 / elapsed / 1e6) if elapsed else None,
             "delivery_semantics": "sender write start to ACK after the receiver fully read the frame; includes return path and receiver scheduling, not one-way/decode/presentation"}
 
@@ -272,7 +280,8 @@ def run_tcp(adb, serial, ip, receiver, mbps, seconds, hz):
         if proc.poll() is None:
             proc.terminate()
             proc.wait(timeout=5)
-    complete = sender["frames_acknowledged"] == rx.get("acks_sent") and sender["receiver_error"] is None
+    complete = (sender["frames_acknowledged"] == rx.get("acks_sent")
+                and sender["receiver_error"] is None and not sender["stream_incomplete"])
     return {"schema_version": 2, "type": "network_only_tcp_frame_paced", "complete": complete, "sender": sender, "receiver": rx,
             "wifi_before": wifi_before, "wifi_after": wifi_readback(adb, serial),
             "frame_size_bytes": summarize_frame_sizes([sender["frame_byte_cap"]] * sender["frames_written"]),

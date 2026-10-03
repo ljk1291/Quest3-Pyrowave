@@ -52,6 +52,21 @@ class _FakeSocket:
         return out
 
 
+class _PartialWriteSocket(_FakeSocket):
+    def __init__(self):
+        super().__init__(b"")
+        self.calls = 0
+
+    def sendall(self, data):
+        self.calls += 1
+        self.sent.append(data)
+        if self.calls == 2:  # header completed; payload may have been partially written.
+            raise TimeoutError("simulated partial payload write")
+
+    def shutdown(self, *unused):
+        pass
+
+
 class _Tick:
     def __init__(self):
         self.value = 0.0
@@ -97,3 +112,15 @@ def test_backpressure_counts_every_deadline_instead_of_hiding_skipped_frames():
     assert result["skipped_frame_deadlines"] == 2
     assert result["frames_late_against_period"] == 3
     assert result["late_frame_share_percent"] == 100.0
+
+
+def test_partial_write_terminates_stream_without_a_second_frame_header():
+    sock = _PartialWriteSocket()
+    result = network.tcp_sender("192.0.2.1", 45200, 1, .04, 90,
+                                connect=lambda *unused, **kwargs: sock,
+                                clock=_Tick(), sleeper=lambda _seconds: None)
+    assert result["scheduled_frames"] == 3
+    assert result["stream_incomplete"] is True
+    assert result["receiver_error"] == "partial_or_timed_out_write"
+    assert sum(packet.startswith(b"Q3TF") for packet in sock.sent) == 1
+    assert result["frames_late_against_period"] == 3
