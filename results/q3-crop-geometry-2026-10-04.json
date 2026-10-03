@@ -1,0 +1,227 @@
+{
+  "schema": 1,
+  "source_sha256": "e61163143ec9e75634fc89fcc06b3bb007667a53d94a0cbf97a39c09b452a0c2",
+  "projection_source_sha256": "0f03e9a35ee316a6a781fbf84cc3a1fe1afb788ae5d91b09ac82cba8ade3d406",
+  "projection_session": "07",
+  "capture_session": "09",
+  "limitation": "Session09 has no independently retained projection dump; reuses Session07 geometry.",
+  "geometry": {
+    "source_eye": [
+      3072,
+      3232
+    ],
+    "target_eye": [
+      2624,
+      2776
+    ],
+    "tangent_multipliers": [
+      0.8542,
+      0.85
+    ],
+    "eyes": [
+      {
+        "eye": "left",
+        "x": 278,
+        "y": 274,
+        "width": 2624,
+        "height": 2776,
+        "ideal_offset": [
+          278.310417777275,
+          274.82863217055296
+        ],
+        "alignment_error": [
+          -0.3104177772750063,
+          -0.8286321705529645
+        ],
+        "original_tangents": [
+          -1.3763818740844727,
+          0.8390995860099792,
+          -1.4281479120254517,
+          0.9656887650489807
+        ],
+        "scaled_tangents": [
+          -1.1757053968429565,
+          0.7167588663697242,
+          -1.2139257252216338,
+          0.8208354502916336
+        ],
+        "effective_tangents": [
+          -1.1758923409118627,
+          0.7164980729188151,
+          -1.225205074921988,
+          0.8308873185058041
+        ],
+        "scaled_span_pixels": [
+          2624.1023999999998,
+          2747.2
+        ]
+      },
+      {
+        "eye": "right",
+        "x": 170,
+        "y": 274,
+        "width": 2624,
+        "height": 2776,
+        "ideal_offset": [
+          169.689582222725,
+          274.82863217055296
+        ],
+        "alignment_error": [
+          0.3104177772750063,
+          -0.8286321705529645
+        ],
+        "original_tangents": [
+          -0.8390995860099792,
+          1.3763818740844727,
+          -1.4281479120254517,
+          0.9656887650489807
+        ],
+        "scaled_tangents": [
+          -0.7167588663697242,
+          1.1757053968429565,
+          -1.2139257252216338,
+          0.8208354502916336
+        ],
+        "effective_tangents": [
+          -0.716498072918815,
+          1.175892340911863,
+          -1.225205074921988,
+          0.8308873185058041
+        ],
+        "scaled_span_pixels": [
+          2624.1023999999998,
+          2747.2
+        ]
+      }
+    ],
+    "resampling": "none; fixed extents centred on scaled tangent rectangle",
+    "alignment": "nearest even; ties-to-even"
+  },
+  "fixed_crops": [
+    {
+      "name": "ui_late_region",
+      "original": {
+        "eye": "left",
+        "x": 1074,
+        "y": 1164,
+        "width": 522,
+        "height": 646
+      },
+      "fully_contained": true,
+      "mapped": {
+        "eye": "left",
+        "x": 796,
+        "y": 890,
+        "width": 522,
+        "height": 646
+      },
+      "intersection": {
+        "eye": "left",
+        "x": 796,
+        "y": 890,
+        "width": 522,
+        "height": 646
+      },
+      "retained_area_fraction": 1.0
+    },
+    {
+      "name": "tunnel_fog_region",
+      "original": {
+        "eye": "left",
+        "x": 1504,
+        "y": 1002,
+        "width": 552,
+        "height": 582
+      },
+      "fully_contained": true,
+      "mapped": {
+        "eye": "left",
+        "x": 1226,
+        "y": 728,
+        "width": 552,
+        "height": 582
+      },
+      "intersection": {
+        "eye": "left",
+        "x": 1226,
+        "y": 728,
+        "width": 552,
+        "height": 582
+      },
+      "retained_area_fraction": 1.0
+    },
+    {
+      "name": "rail_diagonal_region",
+      "original": {
+        "eye": "left",
+        "x": 1690,
+        "y": 2198,
+        "width": 676,
+        "height": 776
+      },
+      "fully_contained": true,
+      "mapped": {
+        "eye": "left",
+        "x": 1412,
+        "y": 1924,
+        "width": 676,
+        "height": 776
+      },
+      "intersection": {
+        "eye": "left",
+        "x": 1412,
+        "y": 1924,
+        "width": 676,
+        "height": 776
+      },
+      "retained_area_fraction": 1.0
+    },
+    {
+      "name": "wood_gravel_region",
+      "original": {
+        "eye": "left",
+        "x": 246,
+        "y": 2294,
+        "width": 860,
+        "height": 710
+      },
+      "fully_contained": false,
+      "mapped": null,
+      "intersection": {
+        "eye": "left",
+        "x": 0,
+        "y": 2020,
+        "width": 828,
+        "height": 710
+      },
+      "retained_area_fraction": 0.9627906976744186
+    }
+  ],
+  "fence": {
+    "original": {
+      "eye": "left",
+      "x": 1740,
+      "y": 1310,
+      "width": 240,
+      "height": 274
+    },
+    "fully_contained": true,
+    "mapped": {
+      "eye": "left",
+      "x": 1462,
+      "y": 1036,
+      "width": 240,
+      "height": 274
+    },
+    "intersection": {
+      "eye": "left",
+      "x": 1462,
+      "y": 1036,
+      "width": 240,
+      "height": 274
+    },
+    "retained_area_fraction": 1.0
+  },
+  "vertical_ppd": 23.56428154212911,
+  "horizontal_ppd": 24.20084103027429
+}
