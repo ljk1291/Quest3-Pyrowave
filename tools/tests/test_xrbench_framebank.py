@@ -78,6 +78,17 @@ class FrameBankTests(unittest.TestCase):
     def test_lossless_psnr_infinity_is_valid(self):
         self.assertTrue(fb._valid_metric("psnr_y",math.inf));self.assertFalse(fb._valid_metric("vmaf",math.inf));self.assertFalse(fb._valid_metric("psnr_y",math.nan))
 
+    def test_libvmaf_null_hvs_preserves_separate_vmaf_without_inventing_values(self):
+        from xrbench import rdmatrix
+        with self.tmp() as t:
+            path=Path(t)/"vmaf.json"
+            path.write_text(json.dumps({"pooled_metrics":{"psnr_hvs":{"mean":None},
+                            "psnr_hvs_y":{"mean":None},"vmaf":{"mean":97.360949}}}))
+            self.assertEqual(rdmatrix.parse_vmaf_log(path),{"vmaf":97.360949})
+            path.write_text(json.dumps({"pooled_metrics":{"vmaf":{"mean":None}}}))
+            parsed=rdmatrix.parse_vmaf_log(path)
+            self.assertFalse(fb._valid_metric("vmaf",parsed.get("vmaf")))
+
     def test_hvs_requires_emitted_vertical_calibration(self):
         ppd,height=23.6,3232; factor=ppd*180/(height*math.pi)
         text=f"PixelsPerDegree = {ppd:.6f} || HeightFactor = {factor:.8f} || PSNR-HVS-M-H: (Y) inf dB"
