@@ -1,4 +1,5 @@
-# CPU-only image dependencies for deterministic stereo-chart tests.
+# CPU-only image dependencies for deterministic chart and frame-bank tests.
 # Keep these pins aligned with requirements.txt; OpenVR/GLFW/PyOpenGL are not needed in CI.
 numpy==2.3.5
 opencv-python-headless==4.13.0.90
+Pillow==11.3.0
