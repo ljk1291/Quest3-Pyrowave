@@ -122,6 +122,23 @@ class NvencFramebankTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "incomplete"):
             nf._parse_encode_completion_diagnostics(log.rsplit("\n", 2)[0], 90)
 
+    def test_annexb_idr_evidence_counts_first_slices_not_all_slices(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            h264 = root / "stream.h264"
+            h264.write_bytes(b"\x00\x00\x01\x65\x80" + b"\x00\x00\x01\x41\x80" * 89)
+            evidence = nf.validate_initial_idr(h264, "h264", 90)
+            self.assertTrue(evidence["initial_idr_proven"])
+            self.assertEqual(evidence["frame_starts"], 90)
+            hevc = root / "stream.hevc"
+            hevc.write_bytes(b"\x00\x00\x01\x26\x01\x80" + b"\x00\x00\x01\x02\x01\x80" * 89)
+            self.assertTrue(nf.validate_initial_idr(hevc, "hevc", 90)["initial_idr_proven"])
+            # A later first-slice IDR is rejected even when total frames match.
+            h264.write_bytes(b"\x00\x00\x01\x65\x80" * 90)
+            with self.assertRaisesRegex(ValueError, "one initial IDR"):
+                nf.validate_initial_idr(h264, "h264", 90)
+            self.assertIsNone(nf.validate_initial_idr(root / "unused.obu", "av1", 90)["initial_idr_proven"])
+
     def test_commands_pin_raw_codec_and_no_implicit_decode_format(self):
         cell = {"codec":"av1", "identity_count":90, "nvenc_profile":nf.profile("av1", 800)}
         encoded = nf.encode_command("ffmpeg", Path("ref.y4m"), Path("out.av1"), cell)
@@ -276,6 +293,7 @@ class NvencFramebankTests(unittest.TestCase):
                  mock.patch.object(fb, "sha256_file", side_effect=hashes), \
                  mock.patch.object(fb, "verify_tools_build", return_value={"qualified": True}), \
                  mock.patch.object(fb, "hvs_gpu_sanity", return_value={"passed": True}), \
+                 mock.patch.object(nf, "validate_initial_idr", return_value={"initial_idr_proven": True}), \
                  mock.patch.object(nf, "_run_json", return_value=observed), \
                  mock.patch.object(nf, "lease_telemetry", return_value={"measurement_mode":"quality", "samples":[{}], "cleanup_verified":False}), \
                  mock.patch.object(nf, "_same_frame_scores", return_value={"codec_only":{}, "displayed":{}, "crops":{}}):
@@ -329,7 +347,7 @@ class NvencFramebankTests(unittest.TestCase):
                             for i in range(90)), encoding="utf-8")
                     target = Path(argv[-1]); target.write_bytes(bytes(48 * 90) if "+p010le" in argv else (bytes(24 * 90) if "rawvideo" in argv else b"stream")); return 0, "", ""
             def hashes(path): return plan["source"]["sha256"] if Path(path) == source else "a" * 64
-            with mock.patch.object(fb,"_private_path",side_effect=lambda value:Path(value)), mock.patch.object(fb,"WindowGuard",return_value=Guard()), mock.patch.object(fb,"sha256_file",side_effect=hashes), mock.patch.object(fb,"verify_tools_build",return_value={"qualified":True}), mock.patch.object(fb,"hvs_gpu_sanity",return_value={"passed":True}), mock.patch.object(nf,"_run_json",return_value=observed), mock.patch.object(nf,"lease_telemetry",return_value={"measurement_mode":"quality","samples":[{}],"cleanup_verified":False}), mock.patch.object(nf,"_same_frame_scores",return_value={"codec_only":{},"displayed":{},"crops":{}}):
+            with mock.patch.object(fb,"_private_path",side_effect=lambda value:Path(value)), mock.patch.object(fb,"WindowGuard",return_value=Guard()), mock.patch.object(fb,"sha256_file",side_effect=hashes), mock.patch.object(fb,"verify_tools_build",return_value={"qualified":True}), mock.patch.object(fb,"hvs_gpu_sanity",return_value={"passed":True}), mock.patch.object(nf,"validate_initial_idr",return_value={"initial_idr_proven":True}), mock.patch.object(nf,"_run_json",return_value=observed), mock.patch.object(nf,"lease_telemetry",return_value={"measurement_mode":"quality","samples":[{}],"cleanup_verified":False}), mock.patch.object(nf,"_same_frame_scores",return_value={"codec_only":{},"displayed":{},"crops":{}}):
                 result=nf.run_plan(plan_path,source,root/"out",{"ffmpeg":sys.executable,"ffprobe":sys.executable,"psnr_hvs_m_h":sys.executable},root/"lease",tools_metadata=metadata)
             self.assertFalse(result["complete"])
             self.assertIn("lease_final_health_failed",result["failure_reasons"])

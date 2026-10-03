@@ -93,7 +93,10 @@ Before decode, `ffprobe` must confirm one stream with the requested codec,
 stereo geometry, the requested observed native 4:2:0 precision (8-bit planar,
 or 10-bit `p010le`/`yuv420p10le`), exactly 90 decoded frames and only I/P
 pictures. Frame one must be an I picture and the only initial `key_frame` flag;
-this is exactly-one-initial-key-frame evidence, not codec-level IDR proof.
+this is exactly-one-initial-key-frame evidence. H.264 and HEVC additionally
+parse their private raw Annex-B stream by first-slice VCL markers, require 90
+frame starts, and require exactly one initial IDR (H.264 type 5; HEVC type
+19/20). AV1 has no IDR NAL and remains a key-frame proxy.
 Every decoded-frame record must carry the same geometry and native format. Raw
 HEVC/OBU output commonly has unknown chroma location, colour range
 or `0/0` timing. Those are retained as observed metadata and never relabelled

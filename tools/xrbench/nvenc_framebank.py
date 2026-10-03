@@ -446,6 +446,64 @@ def probe_command(ffprobe: Path | str, bitstream: Path, output: Path) -> list[st
             "-of", "json", "-o", str(output), str(bitstream)]
 
 
+def _annexb_nalus(payload: bytes):
+    """Yield Annex-B NAL payloads; elementary stream data remains private."""
+    markers = list(re.finditer(b"\x00\x00(?:\x00)?\x01", payload))
+    if not markers:
+        raise ValueError("elementary stream is not Annex-B")
+    for index, marker in enumerate(markers):
+        begin = marker.end()
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(payload)
+        if end > begin:
+            yield payload[begin:end]
+
+
+def _h264_first_mb_is_zero(nal: bytes) -> bool:
+    """Read the first Exp-Golomb ``first_mb_in_slice`` from an H.264 RBSP."""
+    rbsp = re.sub(b"\x00\x00\x03", b"\x00\x00", nal[1:])
+    bits = "".join(f"{byte:08b}" for byte in rbsp)
+    zeroes = len(bits) - len(bits.lstrip("0"))
+    if zeroes >= len(bits):
+        raise ValueError("H.264 slice header is truncated")
+    end = zeroes * 2 + 1
+    if end > len(bits):
+        raise ValueError("H.264 slice header is truncated")
+    return int(bits[:end], 2) - 1 == 0
+
+
+def validate_initial_idr(bitstream: Path, codec: str, frames: int) -> dict:
+    """Prove a sole first IDR for H.264/HEVC without confusing extra slices.
+
+    The VCL first-slice flags, rather than the total NAL count, bind the Annex-B
+    proof to FFprobe's decoded-frame count. AV1 deliberately remains a
+    ``key_frame`` proxy because it has no IDR NAL type.
+    """
+    if codec == "av1":
+        return {"method": "ffprobe_key_frame_proxy", "frame_starts": frames,
+                "initial_idr_proven": None,
+                "note": "AV1 has no IDR NAL; exactly-one-initial-key-frame proxy is reported separately"}
+    if codec not in ("h264", "hevc"):
+        raise ValueError("IDR proof codec is unsupported")
+    starts: list[int] = []
+    for nal in _annexb_nalus(Path(bitstream).read_bytes()):
+        if codec == "h264":
+            nal_type = nal[0] & 0x1F
+            if nal_type in (1, 5) and _h264_first_mb_is_zero(nal):
+                starts.append(nal_type)
+        else:
+            if len(nal) < 3:
+                raise ValueError("HEVC NAL is truncated")
+            nal_type = (nal[0] >> 1) & 0x3F
+            if nal_type <= 31 and (nal[2] & 0x80):
+                starts.append(nal_type)
+    idr_types = (5,) if codec == "h264" else (19, 20)
+    if len(starts) != frames or starts[0] not in idr_types or any(value in idr_types for value in starts[1:]):
+        raise ValueError("Annex-B first-slice evidence does not prove one initial IDR")
+    return {"method": "annexb_first_slice_vcl", "frame_starts": len(starts),
+            "initial_vcl_nal_type": starts[0], "initial_idr_proven": True,
+            "subsequent_idr_vcl_count": sum(value in idr_types for value in starts[1:])}
+
+
 def validate_probe(value: dict, cell: dict, frames: int) -> dict:
     """Validate reconstructed planes; preserve elementary-stream metadata as observed.
 
@@ -959,6 +1017,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                     code, _, _, timing = _run_timed(guard, encode_command(needed["ffmpeg"], eye_ref, eye_stream, stream_cell), directory, command_timeout_s, encode_frames=eye_info.frames)
                     if code or not eye_stream.is_file() or eye_stream.stat().st_size <= 0:
                         raise RuntimeError("nvenc_encode_failed")
+                    idr_evidence = validate_initial_idr(eye_stream, cell["codec"], eye_info.frames)
                     eye_probe_path = directory / f"bitstream-probe-{eye_name}.json"
                     eye_cell = dict(stream_cell); eye_cell["stereo_width"] = eye_info.width; eye_cell["eye_height"] = eye_info.height
                     probe = validate_probe(_run_json(guard, probe_command(needed["ffprobe"], eye_stream, eye_probe_path), eye_probe_path, directory, command_timeout_s), eye_cell, eye_info.frames)
@@ -973,6 +1032,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                     else:
                         eye_score_raw, score_timing = eye_native_raw, None
                     streams.append({"eye": eye_name, "profile": stream_cell["nvenc_profile"], "bitstream": {**probe,
+                        "initial_idr_evidence": idr_evidence,
                         "actual_elementary_stream_bytes": eye_stream.stat().st_size,
                         "actual_mbps_external_f90_normalization": eye_stream.stat().st_size * 8 * cell["fps"] / eye_info.frames / 1_000_000},
                         "native_decoded_raw": native_record,
@@ -990,9 +1050,10 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                 code, _, _, timing = _run_timed(guard, encode_command(needed["ffmpeg"], ref, stream, row), directory, command_timeout_s, encode_frames=ref_info.frames)
                 if code or not stream.is_file() or stream.stat().st_size <= 0:
                     raise RuntimeError("nvenc_encode_failed")
+                idr_evidence = validate_initial_idr(stream, cell["codec"], ref_info.frames)
                 probe_json = directory / "bitstream-probe.json"
                 probe = validate_probe(_run_json(guard, probe_command(needed["ffprobe"], stream, probe_json), probe_json, directory, command_timeout_s), row, ref_info.frames)
-                row["bitstream"] = {**probe, "actual_elementary_stream_bytes": stream.stat().st_size,
+                row["bitstream"] = {**probe, "initial_idr_evidence": idr_evidence, "actual_elementary_stream_bytes": stream.stat().st_size,
                     "actual_mbps_external_f90_normalization": stream.stat().st_size * 8 * cell["fps"] / ref_info.frames / 1_000_000}
                 native_raw = directory / "decoded-native.raw"
                 code, _, _, decode_timing = _run_timed(guard, decode_command(needed["ffmpeg"], stream, native_raw, ref_info.frames, probe["pix_fmt"]), directory, command_timeout_s)
@@ -1024,8 +1085,13 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
             result["failure_reasons"].append(row["error"])
         result["cells"].append(row)
         (private_out / "nvenc-framebank-progress.json").write_text(fb.report_json(result), encoding="utf-8")
-        if not keep_artifacts:
-            for path in (ref, stream, raw_decoded, decoded, directory / "bitstream-probe.json"): path.unlink(missing_ok=True)
+        if not keep_artifacts and not row.get("error"):
+            # Raw 90-frame C420 and native Main10 payloads are large. Their
+            # hashes/scores/probes have already been persisted, whereas a
+            # failed scoring cell must remain resumable without re-encoding.
+            for path in directory.iterdir():
+                if path.is_file() and path.suffix.lower() in (".y4m", ".raw", ".h264", ".hevc", ".av1", ".obu"):
+                    path.unlink()
         if row.get("error"):
             break
     result["source_sha256_end"] = fb.sha256_file(source)
