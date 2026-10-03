@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 import sys
 import hashlib
+import subprocess
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from xrbench import hvs_scorer as hs
@@ -47,6 +48,18 @@ class HvsScorerTests(unittest.TestCase):
                 output=Path(temp)/(label+'-prepared'); hs.prepare_source(source,output)
                 self.assertEqual(hs.sha256_file(output/'psnr.cpp'),hs.PATCHED_PSNR_SHA256)
                 self.assertNotIn(b'\r\n',(output/'psnr.cpp').read_bytes())
+
+    def test_prepared_copy_inside_an_enclosing_git_repo_is_actually_patched(self):
+        fixture=Path(__file__).parent/'fixtures'/'pyrowave-d2997ac-psnr.cpp'
+        with tempfile.TemporaryDirectory() as temp:
+            parent=Path(temp)/'parent'; parent.mkdir()
+            subprocess.run(['git','init','-q',str(parent)],check=True,capture_output=True)
+            outer=parent/'psnr.cpp'; outer.write_text('owner repository file must stay unchanged\n')
+            source=parent/'source'; source.mkdir(); shutil.copyfile(fixture,source/'psnr.cpp')
+            output=parent/'prepared'; hs.prepare_source(source,output)
+            self.assertEqual(hs.sha256_file(output/'psnr.cpp'),hs.PATCHED_PSNR_SHA256)
+            self.assertEqual(outer.read_text(),'owner repository file must stay unchanged\n')
+            self.assertFalse((output/'.git').exists())
 
 
 if __name__ == '__main__': unittest.main()

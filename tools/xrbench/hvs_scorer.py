@@ -5,7 +5,7 @@ It validates and applies one opt-in patch to a caller-owned clean d2997ac source
 copy, then records the exact inputs needed to build ``pyrowave-psnr-hvs-m``.
 """
 from __future__ import annotations
-import argparse, hashlib, json, math, shutil, subprocess, tempfile
+import argparse, hashlib, json, math, os, shutil, subprocess, tempfile
 from pathlib import Path
 
 UPSTREAM_REPOSITORY = "https://github.com/Themaister/pyrowave"
@@ -40,7 +40,13 @@ def _git_apply(source:Path, reverse:bool=False, check:bool=True) -> subprocess.C
     if check: args.append("--check")
     if reverse: args.append("--reverse")
     args.append(str(patch_path()))
-    return subprocess.run(args,text=True,capture_output=True,check=False)
+    # Prepared sources intentionally have no .git directory. Git must not find
+    # the enclosing fork and silently skip psnr.cpp as outside its cwd prefix.
+    env=os.environ.copy()
+    for name in ('GIT_DIR','GIT_WORK_TREE','GIT_INDEX_FILE','GIT_COMMON_DIR','GIT_PREFIX'):
+        env.pop(name,None)
+    env['GIT_CEILING_DIRECTORIES']=str(source.resolve().parent)
+    return subprocess.run(args,text=True,capture_output=True,check=False,env=env)
 
 def verify_patch(source:Path) -> dict:
     """Forward- and reverse-check the patch in a private temporary copy."""
