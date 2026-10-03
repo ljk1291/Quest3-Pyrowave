@@ -558,3 +558,19 @@ Take the first unblocked item. Items marked ∥ are independent.
   density and explicitly distinguish fixed height 2776 from 0.85×3232=2747.2.
   WO-10, WO-8, revised Q3 and WO-13 source work are active on separate branches;
   Q3a/Q3b and the final stable-signed pair remain incomplete. No owner blocker.
+
+- 2026-10-04 (source review and Q3 preparation): [PR #28](https://github.com/ljk1291/Quest3-Pyrowave/pull/28)
+  merged as `9944e63` after [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37161080084),
+  adding reference-only band masks and sharp/matching-blur scoring. [WO-11 design PR #29](https://github.com/ljk1291/Quest3-Pyrowave/pull/29)
+  merged as `961f1aa` after [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37161552217).
+  Q3a's native C420 crop is prepared without resampling: 90 frames, 5248x2776 stereo,
+  SHA256 `4c833e175610488ffa05a8037e52c166424db8308a67a2bfed4ed48861fad2e5`.
+  WO-10 is in native CI. WO-13's reviewed follow-up now measures delayed ACKs,
+  retains skipped/partial/unacknowledged slots, and bounds receiver teardown;
+  11 CPU tests pass, native CI pending. The reconstructed stock-codec audit found
+  that Windows NVENC does not explicitly apply the H.264 High-profile setting;
+  two-eye H.264 Q3 rows remain offline proxies, not selectable live profiles.
+  Before Q3a runs, complete per-frame encoder-call timing/probe evidence and its
+  CPU CI. Before Q3b runs, finish WO-8's actual reduced-plane codec path and
+  Python/shader area-filter parity. No owner-dependent blocker; no new GPU,
+  headset, settings, installed-pair or arm-file changes at this checkpoint.
