@@ -60,3 +60,10 @@ Vulkan and does not emit a metric. CI tests this mode on the built Windows
 executable and tests the reader with g++ on Linux. The actual Vulkan metric still
 needs a guarded same-input sanity check before its Metro results are accepted;
 these CPU checks do not establish GPU metric correctness or Quest performance.
+
+The subsequent Windows configuration exposed a separate copy-filter bug: a
+`build*` ignore glob removed glslang's tracked `build_info.h.tmpl` and SDL's
+`include/build_config` templates. Source preparation now excludes known root
+output trees or directories with a generated `CMakeCache.txt`, preserving the
+tracked build templates/scripts. A regression reproduces both missing inputs;
+dependency revisions and runtime sources remain unchanged.

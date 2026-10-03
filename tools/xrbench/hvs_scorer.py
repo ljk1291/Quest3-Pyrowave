@@ -113,7 +113,14 @@ def prepare_source(source:Path, output:Path) -> dict:
     source,output=Path(source),Path(output)
     if output.exists(): raise FileExistsError("output scorer source already exists")
     verify_patch(source)
-    shutil.copytree(source,output,ignore=shutil.ignore_patterns(".git","build*"))
+    def ignore_build_outputs(directory,names):
+        # "build*" also matches tracked build_info.h.tmpl and SDL build_config.
+        # Exclude actual generated trees, never source templates/scripts.
+        root=Path(directory)
+        known={'build','build-pc','build-android','build-interop','build-tools','build-hvs-scorer'}
+        return [name for name in names if name=='.git' or
+                ((root/name).is_dir() and ((root==source and name in known) or (root/name/'CMakeCache.txt').is_file()))]
+    shutil.copytree(source,output,ignore=ignore_build_outputs)
     (output/"psnr.cpp").write_bytes((output/"psnr.cpp").read_bytes().replace(b'\r\n', b'\n'))
     applied=_git_apply(output,check=False)
     if applied.returncode or sha256_file(output/"psnr.cpp")!=PATCHED_PSNR_SHA256: raise RuntimeError("failed to prepare scorer source")

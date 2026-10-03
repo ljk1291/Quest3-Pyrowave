@@ -64,6 +64,20 @@ class HvsScorerTests(unittest.TestCase):
             self.assertEqual(outer.read_text(),'owner repository file must stay unchanged\n')
             self.assertFalse((output/'.git').exists())
 
+    def test_preparation_retains_real_build_templates_and_excludes_only_outputs(self):
+        fixture=Path(__file__).parent/'fixtures'/'pyrowave-d2997ac-psnr.cpp'
+        with tempfile.TemporaryDirectory() as temp:
+            source=Path(temp)/'source'; source.mkdir(); shutil.copyfile(fixture,source/'psnr.cpp')
+            required=('Granite/third_party/glslang/build_info.h.tmpl',
+                      'Granite/third_party/sdl3/include/build_config/SDL_build_config.h.cmake',
+                      'Granite/third_party/sdl3/build-scripts/source-helper.py')
+            generated=('build-pc/cached.exe','Granite/generated/CMakeCache.txt','Granite/generated/cached.exe','.git')
+            for name in (*required,*generated):
+                path=source/name; path.parent.mkdir(parents=True,exist_ok=True); path.write_text(name+'\n')
+            output=Path(temp)/'prepared'; hs.prepare_source(source,output)
+            for name in required: self.assertEqual((output/name).read_bytes(),(source/name).read_bytes())
+            for name in generated: self.assertFalse((output/name).exists())
+
 
 @unittest.skipUnless(shutil.which('g++'),'finite native reader checks require g++ (CI provides it)')
 class NativeY4MTests(unittest.TestCase):
