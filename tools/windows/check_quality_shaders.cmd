@@ -12,4 +12,4 @@ for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio
 if not defined QUALITY_VS ( echo Visual C++ tools missing & exit /b 1 )
 call "%QUALITY_VS%\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
 cl /nologo /EHsc /std:c++17 /O2 /W4 /WX "%REPO%\tools\ci\quality_shaders_test.cpp" /Fo"%OUTPUT%\quality-shaders-test.obj" /Fe"%OUTPUT%\quality-shaders-test.exe" d3d11.lib d3dcompiler.lib || exit /b 1
-"%OUTPUT%\quality-shaders-test.exe" "%ALVR%\alvr\server_openvr\cpp\platform\win32\FrameRenderPSArea.cso" "%ALVR%\alvr\server_openvr\cpp\platform\win32\rgbtoyuvplanardither.cso" || exit /b 1
+"%OUTPUT%\quality-shaders-test.exe" "%ALVR%\alvr\server_openvr\cpp\platform\win32\FrameRenderPSArea.cso" "%ALVR%\alvr\server_openvr\cpp\platform\win32\rgbtoyuvplanardither.cso" "%ALVR%\alvr\server_openvr\cpp\platform\win32\CompressAxisAlignedPixelShader.cso" || exit /b 1

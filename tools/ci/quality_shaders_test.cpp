@@ -13,6 +13,7 @@
 using Microsoft::WRL::ComPtr;
 static void check(HRESULT hr) { if (FAILED(hr)) throw std::runtime_error("D3D call failed"); }
 static void require(bool value, const char *why) { if (!value) throw std::runtime_error(why); }
+static float u32bits(unsigned value) { float out; std::memcpy(&out,&value,sizeof(out)); return out; }
 
 struct Warp {
     ComPtr<ID3D11Device> device;
@@ -104,14 +105,31 @@ struct Warp {
 
 int main(int argc,char **argv) {
     try {
-        require(argc==3,"expected area and dither CSO paths");Warp w;
-        auto area=w.shader(argv[1]),dither=w.shader(argv[2]);
+        require(argc==4,"expected area, dither and foveation CSO paths");Warp w;
+        auto area=w.shader(argv[1]),dither=w.shader(argv[2]),foveated=w.shader(argv[3]);
         const std::vector<float> params={1,0,0,0,0,0,1,1,0,0,1,1},uv={0,0,1,1};
         auto dc=w.draw(area.Get(),std::vector<float>(64,.37f),8,8,4,4,params,uv)[0];
         for(float x:dc) require(std::abs(x-.37f)<1e-6f,"area DC changed");
         std::vector<float> checker(64);for(unsigned y=0;y<8;y++)for(unsigned x=0;x<8;x++)checker[y*8+x]=float((x+y)%2);
         auto average=w.draw(area.Get(),checker,8,8,4,4,params,uv)[0];
         for(float x:average) require(std::abs(x-.5f)<1e-6f,"checkerboard area average");
+
+        // Execute the exact embedded WO-8 shader through WARP. targetResolution
+        // and optimizedResolution are uint2 fields, hence their raw bit values.
+        // This is only a numerical shader/readback gate, never a GPU timing test.
+        const std::vector<float> foveation={u32bits(8),u32bits(8),u32bits(8),u32bits(8),
+            1,1,.8f,.8f,0,0,0,0,1.5f,1.5f,1,0};
+        auto fdc=w.draw(foveated.Get(),std::vector<float>(128,.37f),16,8,16,8,foveation,uv)[0];
+        for(float x:fdc) require(std::abs(x-.37f)<1e-6f,"foveation DC changed");
+        // c=.285714... yields loBound=.3125, exactly a pixel centre on this
+        // 8-pixel eye. This catches the historical strict-predicate join hole.
+        auto fjoin=foveation; fjoin[6]=fjoin[7]=2.f/7.f;
+        auto joinDc=w.draw(foveated.Get(),std::vector<float>(128,.37f),16,8,16,8,fjoin,uv)[0];
+        for(float x:joinDc) require(std::abs(x-.37f)<1e-6f,"foveation join emitted black");
+        std::vector<float> foveatedStereo(128); for(unsigned y=0;y<8;y++) for(unsigned x=8;x<16;x++) foveatedStereo[y*16+x]=1;
+        auto fseam=w.draw(foveated.Get(),foveatedStereo,16,8,16,8,foveation,uv)[0];
+        for(unsigned y=0;y<8;y++) for(unsigned x=0;x<16;x++)
+            require(std::abs(fseam[y*16+x]-(x<8?0.f:1.f))<1e-6f,"foveation crossed eye seam");
         std::vector<float> ramp(24);for(unsigned y=0;y<4;y++)for(unsigned x=0;x<6;x++)ramp[y*6+x]=float(x)/5;
         auto fractional=w.draw(area.Get(),ramp,6,4,4,4,params,uv)[0];
         const float expected[]={1.f/15,1.f/3,2.f/3,14.f/15};

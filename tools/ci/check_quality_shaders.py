@@ -13,6 +13,7 @@ SOURCES = ('FrameRender.fx', 'FrameRenderPSArea.hlsl', 'RgbToYuvPlanar.hlsl', 'R
 BINARY = ('FrameRenderPS.cso', 'rgbtoyuvplanar.cso', 'FrameRenderPSArea.cso', 'rgbtoyuvplanardither.cso')
 VARIANTS = (('FrameRenderPSArea.hlsl', 'PS', 'FrameRenderPSArea.cso'),
             ('RgbToYuvPlanarDither.hlsl', 'main', 'rgbtoyuvplanardither.cso'))
+FOVEATION_VARIANT = ('CompressAxisAlignedPixelShader.hlsl', 'main', 'CompressAxisAlignedPixelShader.cso')
 
 def sha(path): return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 def hashes(root): return {name:sha(root/name) for name in (*[SHADER+x for x in SOURCES], *[WINDOWS+x for x in BINARY])}
@@ -40,6 +41,15 @@ def main():
             subprocess.run([str(a.fxc.resolve()),*manifest['flags'],'/E',entry,
                 '/Fo',str(output),str((a.alvr/SHADER/source).resolve())],check=True,timeout=60)
             if sha(output) != manifest['files'][WINDOWS+binary]: raise SystemExit('Regenerated DXBC differs: '+binary)
+        # WO-8 is a cumulative source patch, so its shader is not present in
+        # this repository's immutable legacy manifest. Bind it directly to the
+        # rebuilt embedded binary before the WARP readback fixture executes it.
+        source,entry,binary=FOVEATION_VARIANT
+        output=(a.compile_out/binary).resolve()
+        subprocess.run([str(a.fxc.resolve()),*manifest['flags'],'/E',entry,
+            '/Fo',str(output),str((a.alvr/SHADER/source).resolve())],check=True,timeout=60)
+        if sha(output) != sha(a.alvr/WINDOWS/binary):
+            raise SystemExit('Regenerated DXBC differs: '+binary)
     print('Windows composition shader sources, embedded binaries and legacy defaults verified')
 
 if __name__=='__main__': main()

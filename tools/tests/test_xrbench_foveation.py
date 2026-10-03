@@ -1,15 +1,18 @@
 import sys
+import math
 from pathlib import Path
 import unittest
 import numpy as np
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from xrbench.foveation import *
+from xrbench import foveation as f
 
 class FoveationTests(unittest.TestCase):
-    def test_compiled_hlsl_mapping_parity_at_joins_and_shifted_eyes(self):
-        # This is a float32 port of the actual CompressAxisAlignedPixelShader
-        # expression, kept separate from the float64 scoring implementation.
+    def test_hlsl_algebra_mapping_parity_at_joins_and_shifted_eyes(self):
+        # This is a float32 port of the HLSL expression, kept separate from
+        # the float64 scoring implementation. Native shader compilation is
+        # checked separately; this is not a shader-execution claim.
         # Include both join sides and an asymmetric diagnostic shift.
         cfg=FoveationConfig('medium',center_shift=(.17,-.23))
         size=(2624,2776); packed=encoded_size(*size,cfg)
@@ -19,11 +22,11 @@ class FoveationTests(unittest.TestCase):
         shader=hlsl_forward_map_uv(uv,size,packed,cfg)
         self.assertLess(float(np.max(np.abs(cpu-shader))),2e-6)
 
-    def test_compiled_hlsl_overlap_support_is_normalized_at_subpixel_phases(self):
+    def test_hlsl_algebra_overlap_support_is_normalized_at_subpixel_phases(self):
         cfg=FoveationConfig('h264fit',softness=1); size=(2624,2776); packed=encoded_size(*size,cfg)
         uv=np.array([[[.001,.001],[.4999,.5001],[.999,.731]]],np.float64)
         source=hlsl_forward_map_uv(uv,size,packed,cfg)
-        footprint=local_squeeze(uv,size,packed,cfg)*(1+cfg.softness*softness_ramp(uv,cfg)[...,None])
+        footprint=local_squeeze(uv,size,packed,cfg)*(1+cfg.softness*softness_ramp(source,size,packed,cfg)[...,None])
         weights,indices=hlsl_area_weights(source,footprint,size)
         self.assertLessEqual(float(footprint.max()),MAX_FOOTPRINT_PIXELS)
         self.assertTrue(np.allclose(weights.sum(axis=-1),footprint[...,0]*footprint[...,1],rtol=1e-4,atol=2e-6))
@@ -35,8 +38,31 @@ class FoveationTests(unittest.TestCase):
         # A 1D perimeter scan reaches the worst ratio-2 derivative without a
         # full-frame allocation. The rounded allocation makes it slightly >6.
         uv=np.stack(np.meshgrid(x,np.array([.5]),indexing='xy'),axis=-1)
-        edge=local_squeeze(uv,size,packed,cfg)*(1+softness_ramp(uv,cfg)[...,None])
+        source=forward_map_uv(uv,size,packed,cfg)
+        edge=local_squeeze(uv,size,packed,cfg)*(1+softness_ramp(source,size,packed,cfg)[...,None])
         self.assertGreater(float(edge.max()),6.0); self.assertLessEqual(float(edge.max()),MAX_FOOTPRINT_PIXELS)
+
+    def test_summed_area_filter_matches_bounded_shader_reference(self):
+        image=np.arange(19*23,dtype=np.float64).reshape(19,23)
+        uv=np.array([[[.002,.99],[.331,.741],[.998,.001]]])
+        footprint=np.array([[[6.34,5.81],[1.23,2.77],[6.9,6.01]]])
+        expected=f._area_box_reference(image,uv,footprint)
+        actual=f._area_box(image,uv,footprint)
+        self.assertTrue(np.allclose(actual,expected,rtol=0,atol=1e-10))
+
+    def test_right_eye_mirrors_static_horizontal_shift(self):
+        cfg=FoveationConfig('light',center_shift=(.22,-.11))
+        right=f._eye_config(cfg,True)
+        self.assertEqual(right.center_shift,(-.22,-.11))
+        self.assertTrue(np.allclose(forward_map_uv(np.array([[[.5,.5]]]),(2624,2776),encoded_size(2624,2776,cfg),cfg)[...,0],
+                                    1-forward_map_uv(np.array([[[.5,.5]]]),(2624,2776),encoded_size(2624,2776,right),right)[...,0],atol=.25))
+
+    def test_reconstruction_interpolates_client_code_values_before_eotf(self):
+        # stream.wgsl textureSample precedes ENABLE_SRGB_CORRECTION. A midpoint
+        # of black and white is therefore .5 code, not .5 linear (.735 code).
+        midpoint=f._bilinear(np.array([[0.,1.]]),np.array([[[.5,.5]]]))[0,0]
+        self.assertEqual(midpoint,.5)
+        self.assertGreater(float(f._linear_to_srgb(np.array(.5))),midpoint)
     def test_profile_dimensions_at_wo10_aligned_crop(self):
         # The upstream formula takes the unaligned crop height. It produces these actual
         # packed dimensions; the plan must not overwrite them with target labels.
@@ -48,9 +74,13 @@ class FoveationTests(unittest.TestCase):
         cfg=FoveationConfig('medium',center_shift=(.1,-.2)); got=inverse_map_uv(forward_map_uv(uv,(2624,2784),(2112,2240),cfg),(2624,2784),(2112,2240),cfg)
         self.assertLess(np.max(np.abs(uv-got)),1e-9)
     def test_softness_has_smooth_center_join(self):
-        cfg=FoveationConfig('light',softness=1); eps=1e-5
-        a=softness_ramp(np.array([[.5+.4/2-eps,.5]]),cfg)[0]; b=softness_ramp(np.array([[.5+.4/2+eps,.5]]),cfg)[0]
-        self.assertLess(b-a,1e-8); self.assertEqual(float(softness_ramp(np.array([[.5,.5]]),cfg)[0]),0.)
+        cfg=FoveationConfig('light',softness=1); size=(2624,2776); packed=encoded_size(*size,cfg); eps=1e-6
+        center=1-math.ceil((size[0]-cfg.center_fraction*size[0])/(cfg.edge_ratio*2))*cfg.edge_ratio*2/size[0]
+        lo=((1-center)*.5)/((cfg.edge_ratio-1)*center+1)
+        join=forward_map_uv(np.array([[[lo,.5]]]),size,packed,cfg)[0,0,0]
+        a=softness_ramp(np.array([[join-eps,.5]]),size,packed,cfg)[0]
+        b=softness_ramp(np.array([[join+eps,.5]]),size,packed,cfg)[0]
+        self.assertLess(b-a,1e-9); self.assertEqual(float(softness_ramp(np.array([[.5,.5]]),size,packed,cfg)[0]),0.)
     def test_blur_only_preserves_geometry_but_filters_periphery(self):
         cfg=FoveationConfig('light',softness=.5,blur_only=True); self.assertEqual(encoded_size(64,48,cfg),(64,48))
         checker=np.indices((240,640)).sum(axis=0).astype(np.uint8)%2*255; planes=[checker,np.full((120,320),128,np.uint8),np.full((120,320),128,np.uint8)]

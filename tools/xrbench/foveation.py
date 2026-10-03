@@ -186,13 +186,34 @@ def local_squeeze(uv: np.ndarray, full_size: tuple[int,int], encoded_size_: tupl
         result[...,axis]=np.maximum(1.0,deriv*full/enc)
     return result
 
-def softness_ramp(uv: np.ndarray, config: FoveationConfig) -> np.ndarray:
-    """C1 smooth 0→1 ring beginning at the centre edge and ending at the panel edge."""
-    p=np.asarray(uv,dtype=np.float64)
-    r=np.maximum(np.abs(p[...,0]-.5),np.abs(p[...,1]-.5))*2.0
-    edge=config.center_fraction
-    t=np.clip((r-edge)/max(1e-6,1-edge),0,1)
-    return t*t*(3-2*t)
+def _eye_config(config: FoveationConfig, right_eye: bool) -> FoveationConfig:
+    """Mirror the horizontal static centre exactly as ``TextureToEyeUV`` does."""
+    if not right_eye:
+        return config
+    return FoveationConfig(config.profile, config.softness, config.blur_only,
+                           (-config.center_shift[0], config.center_shift[1]))
+
+def softness_ramp(source_uv: np.ndarray, full_size: tuple[int,int], encoded_size_: tuple[int,int], config: FoveationConfig) -> np.ndarray:
+    """C1 source-space ring beginning at the *aligned* central-band joins.
+
+    The old encoded-UV ring started blurring inside the uncompressed centre
+    because ALVR's aligned ``loBound``/``hiBound`` are not at the nominal
+    centre fraction.  The source coordinates below are the exact joins of the
+    live forward mapping, including an asymmetric diagnostic shift.
+    """
+    p=np.asarray(source_uv,dtype=np.float64)
+    distances=[]
+    for axis,(full,enc,shift) in enumerate(zip(full_size,encoded_size_,config.center_shift)):
+        _,_,_,lo,hi=_params(full,enc,config.center_fraction,config.edge_ratio,shift)
+        # Evaluate the mapped joins instead of assuming a profile fraction.
+        joins=forward_map_uv(np.array([[[lo, .5], [hi, .5]]]) if axis == 0 else
+                             np.array([[[.5, lo], [.5, hi]]]), full_size, encoded_size_, config)[0,:,axis]
+        low,high=joins
+        before=np.maximum(0.,(low-p[...,axis])/max(low,1e-12))
+        after=np.maximum(0.,(p[...,axis]-high)/max(1.-high,1e-12))
+        distances.append(np.maximum(before,after))
+    t=np.clip(np.maximum(distances[0],distances[1]),0.,1.)
+    return t*t*(3.-2.*t)
 
 def _bilinear(image: np.ndarray, uv: np.ndarray) -> np.ndarray:
     h,w=image.shape; x=np.clip(uv[...,0]*w-.5,0,w-1); y=np.clip(uv[...,1]*h-.5,0,h-1)
@@ -200,8 +221,8 @@ def _bilinear(image: np.ndarray, uv: np.ndarray) -> np.ndarray:
     fx=x-x0; fy=y-y0
     return (image[y0,x0]*(1-fx)*(1-fy)+image[y0,x1]*fx*(1-fy)+image[y1,x0]*(1-fx)*fy+image[y1,x1]*fx*fy)
 
-def _area_box(image: np.ndarray, source_uv: np.ndarray, footprint: np.ndarray) -> np.ndarray:
-    """Exact normalized overlap weights for a bounded source-pixel box footprint."""
+def _area_box_reference(image: np.ndarray, source_uv: np.ndarray, footprint: np.ndarray) -> np.ndarray:
+    """Literal 9x9 shader loop used only to check the summed-area fast path."""
     h,w=image.shape; cx=source_uv[...,0]*w; cy=source_uv[...,1]*h
     fx=footprint[...,0]; fy=footprint[...,1]
     if np.any(fx > MAX_FOOTPRINT_PIXELS + 1e-8) or np.any(fy > MAX_FOOTPRINT_PIXELS + 1e-8):
@@ -220,6 +241,34 @@ def _area_box(image: np.ndarray, source_uv: np.ndarray, footprint: np.ndarray) -
             accum += image[iy,ix]*ww; weight += ww
     return accum/np.maximum(weight,1e-12)
 
+def _area_box(image: np.ndarray, source_uv: np.ndarray, footprint: np.ndarray) -> np.ndarray:
+    """Exact edge-clamped box integral in O(1) per output pixel.
+
+    The padded summed-area table is mathematically the same piecewise-constant
+    source-pixel footprint as the shader's 9x9 overlap loop.  Padding is sized
+    from this tile's mapped boxes, so allocation padding outside [0,1] still
+    samples the edge pixel rather than crossing into the other eye.
+    """
+    h,w=image.shape; cx=source_uv[...,0]*w; cy=source_uv[...,1]*h
+    fx=footprint[...,0]; fy=footprint[...,1]
+    if np.any(fx > MAX_FOOTPRINT_PIXELS + 1e-8) or np.any(fy > MAX_FOOTPRINT_PIXELS + 1e-8):
+        raise ValueError("foveation footprint exceeds declared profile bound")
+    left=cx-fx*.5; right=cx+fx*.5; top=cy-fy*.5; bottom=cy+fy*.5
+    pad=max(FILTER_RADIUS, int(math.ceil(max(0., -left.min(), right.max()-w, -top.min(), bottom.max()-h)))+1)
+    padded=np.pad(image.astype(np.float64),((pad,pad),(pad,pad)),mode="edge")
+    sat=np.pad(padded.cumsum(axis=0).cumsum(axis=1),((1,0),(1,0)))
+    def primitive(x,y):
+        x=np.clip(x+pad,0.,padded.shape[1]); y=np.clip(y+pad,0.,padded.shape[0])
+        ix=np.floor(x).astype(int); iy=np.floor(y).astype(int)
+        ix=np.minimum(ix,padded.shape[1]-1); iy=np.minimum(iy,padded.shape[0]-1)
+        fx=x-ix; fy=y-iy
+        # Bilinear interpolation of the integral grid gives the exact integral
+        # of a piecewise-constant pixel field at fractional bounds.
+        a=sat[iy,ix]; b=sat[iy,ix+1]; c=sat[iy+1,ix]; d=sat[iy+1,ix+1]
+        return a+(b-a)*fx+(c-a)*fy+(d-c-b+a)*fx*fy
+    integral=primitive(right,bottom)-primitive(left,bottom)-primitive(right,top)+primitive(left,top)
+    return integral/np.maximum(fx*fy,1e-12)
+
 def forward_eye(image: np.ndarray, config: FoveationConfig, *, tile_rows: int=TILE_ROWS) -> np.ndarray:
     """Area-prefilter and resample one plane into encoded space.
 
@@ -231,7 +280,7 @@ def forward_eye(image: np.ndarray, config: FoveationConfig, *, tile_rows: int=TI
     for start in range(0,eh,tile_rows):
         stop=min(eh,start+tile_rows); y=(np.arange(start,stop)+.5)/eh; xx,yy=np.meshgrid(x,y)
         uv=np.stack((xx,yy),axis=-1); source=forward_map_uv(uv,(w,h),(ew,eh),config)
-        footprint=local_squeeze(uv,(w,h),(ew,eh),config)*(1+config.softness*softness_ramp(uv,config)[...,None])
+        footprint=local_squeeze(uv,(w,h),(ew,eh),config)*(1+config.softness*softness_ramp(source,(w,h),(ew,eh),config)[...,None])
         out[start:stop]=_area_box(image,source,footprint)
     return out
 
@@ -253,22 +302,26 @@ def _srgb_to_linear(value):
 def _linear_to_srgb(value):
     return np.where(value <= .0031308,value*12.92,1.055*np.maximum(value,0.)**(1/2.4)-.055)
 
-def _decode_709_full(planes):
+def _decode_709_full_code(planes):
     y,cb,cr=(p.astype(np.float64)/255. for p in planes)
     cb=_resize_plane(cb,y.shape[1],y.shape[0])-.5; cr=_resize_plane(cr,y.shape[1],y.shape[0])-.5
-    rgb=np.stack((y+1.5748*cr,y-.187324*cb-.468124*cr,y+1.8556*cb),axis=-1)
-    return _srgb_to_linear(np.clip(rgb,0.,1.))
+    return np.clip(np.stack((y+1.5748*cr,y-.187324*cb-.468124*cr,y+1.8556*cb),axis=-1),0.,1.)
 
-def _encode_709_full(linear, chroma420):
-    r,g,b=np.moveaxis(np.clip(_linear_to_srgb(linear),0.,1.),-1,0)
+def _decode_709_full(planes):
+    """Decode C420jpeg/FULL to the server composition's linear RGB domain."""
+    return _srgb_to_linear(_decode_709_full_code(planes))
+
+def _encode_709_full_code(code, chroma420):
+    r,g,b=np.moveaxis(np.clip(code,0.,1.),-1,0)
     y=.2126*r+.7152*g+.0722*b; cb=(b-y)/1.8556+.5; cr=(r-y)/1.5748+.5
     q=lambda x: np.rint(np.clip(x,0.,1.)*255).astype(np.uint8)
     if chroma420:
-        # C420jpeg has centred chroma samples. Box downsampling is the matching area
-        # footprint after the RGB-domain foveation filter, not an independent YUV blur.
         cb=(cb[0::2,0::2]+cb[1::2,0::2]+cb[0::2,1::2]+cb[1::2,1::2])*.25
         cr=(cr[0::2,0::2]+cr[1::2,0::2]+cr[0::2,1::2]+cr[1::2,1::2])*.25
     return [q(y),q(cb),q(cr)]
+
+def _encode_709_full(linear, chroma420):
+    return _encode_709_full_code(_linear_to_srgb(linear),chroma420)
 
 @dataclass(frozen=True)
 class EncodedPlanes:
@@ -288,9 +341,10 @@ def _split_eyes(planes):
 def encode_planes(planes, config: FoveationConfig) -> EncodedPlanes:
     """Convert already-cropped stereo C420jpeg/FULL frames into smaller encoded planes."""
     eyes,size,chroma420=_split_eyes(planes); enc=[]
-    for eye in eyes:
+    for eye_index,eye in enumerate(eyes):
+        eye_config=_eye_config(config, eye_index == 1)
         rgb=_decode_709_full(eye); out=[]
-        for channel in range(3): out.append(forward_eye(rgb[...,channel],config))
+        for channel in range(3): out.append(forward_eye(rgb[...,channel],eye_config))
         enc.append(_encode_709_full(np.stack(out,axis=-1),chroma420))
     return EncodedPlanes(tuple(np.concatenate((enc[0][i],enc[1][i]),axis=1) for i in range(3)),size,encoded_size(*size,config),chroma420,config)
 
@@ -299,10 +353,15 @@ def reconstruct_planes(decoded_planes, encoded: EncodedPlanes):
     eyes,small_size,chroma420=_split_eyes(decoded_planes)
     if small_size != encoded.encoded_eye or chroma420 != encoded.chroma420: raise ValueError("decoded geometry/chroma drifted")
     rebuilt=[]
-    for eye in eyes:
-        rgb=_decode_709_full(eye); out=[]
-        for channel in range(3): out.append(reconstruct_eye(rgb[...,channel],encoded.expanded_eye,encoded.config))
-        rebuilt.append(_encode_709_full(np.stack(out,axis=-1),encoded.chroma420))
+    for eye_index,eye in enumerate(eyes):
+        eye_config=_eye_config(encoded.config, eye_index == 1)
+        # The client staging texture stores external decoder code values in an
+        # sRGB target, then stream.wgsl samples before ENABLE_SRGB_CORRECTION.
+        # Its foveated bilinear reconstruction is therefore in R'G'B' code
+        # space, unlike the server composition prefilter above.
+        code=_decode_709_full_code(eye); out=[]
+        for channel in range(3): out.append(reconstruct_eye(code[...,channel],encoded.expanded_eye,eye_config))
+        rebuilt.append(_encode_709_full_code(np.stack(out,axis=-1),encoded.chroma420))
     return [np.concatenate((rebuilt[0][i],rebuilt[1][i]),axis=1) for i in range(3)]
 
 def blur_reference(planes, config: FoveationConfig):
@@ -317,7 +376,9 @@ def transform_planes(planes, config: FoveationConfig):
     Therefore C420 input is expanded with centred chroma, converted from full-range
     BT.709 R'G'B' to linear RGB, filtered/remapped there, converted back, then
     chroma-subsampled once. This deliberately does *not* average nonlinear Y/Cb/Cr
-    planes independently. Input is already cropped by WO-10/Q3; eye halves never mix.
+    planes independently. The decode/reconstruction side instead matches the
+    client stream shader's R'G'B' interpolation before its sRGB correction.
+    Input is already cropped by WO-10/Q3; eye halves never mix.
     """
     encoded=encode_planes(planes,config)
     return reconstruct_planes(encoded.planes,encoded)

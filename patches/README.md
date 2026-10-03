@@ -20,12 +20,15 @@ The shader integrates an exact source-pixel box through its local Jacobian. Its
 without clamping the requested footprint. The
 peripheral softness control multiplies it by `1 + s * smoothstep(...)`; `s=0`
 still enables anti-alias filtering. Blur-only retains full encoded geometry and
-uses the same smooth ramp. `tools.xrbench.foveation` is the matching native-8-bit
+uses the same smooth ramp. The ramp begins at the aligned logical-source joins,
+so it cannot soften the profile's sharp central band. `tools.xrbench.foveation` is the matching native-8-bit
 C420 frame-bank transform; it receives an already WO-10-cropped frame and never
 reapplies crop factors. The live composition texture is `UNORM_SRGB`, so the
 frame-bank path expands centred C420, converts full-range BT.709 R'G'B' to
-linear RGB for filtering, then converts and subsamples once. It does not claim
-parity for a nonlinear per-plane YUV average.
+linear RGB for filtering, then converts and subsamples once. On reconstruction
+it uses R'G'B' interpolation because `stream.wgsl` samples the staging texture
+before `ENABLE_SRGB_CORRECTION`; that client-domain distinction is intentional.
+It does not claim parity for a nonlinear per-plane YUV average.
 
 Regenerate a patch with `git diff --binary --full-index --output=patches/<name>.patch` from the
 clone (`--output` rather than a shell redirect, so PowerShell cannot re-encode the bytes). Check one still
