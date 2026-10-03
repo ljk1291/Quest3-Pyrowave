@@ -186,12 +186,34 @@ def session(directory, *, evidence, duration_s=5400, measurement_mode='quality')
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['status', 'worker'])
+    parser.add_argument('command', choices=['status', 'worker', 'start', 'stop'])
     parser.add_argument('--window', required=True)
     parser.add_argument('--require-allow', default='frame_bank_pc')
     parser.add_argument('--nonce')
+    parser.add_argument('--owner-attested',help='quote the explicit owner authorization from the current session')
+    parser.add_argument('--duration-s',type=float,default=5400)
+    parser.add_argument('--measurement-mode',choices=['quality','timing'],default='quality')
+    parser.add_argument('--allow',choices=['frame_bank_pc'],default='frame_bank_pc')
     args = parser.parse_args(argv)
     if args.command == 'worker': worker(args.window, args.nonce); return 0
+    if args.command == 'start':
+        if not args.owner_attested or not args.owner_attested.strip():
+            parser.error('start requires --owner-attested from the current owner session')
+        try:
+            with session(args.window,evidence=args.owner_attested,duration_s=args.duration_s,
+                         measurement_mode=args.measurement_mode) as directory:
+                print(json.dumps({'ready':True,'allow':['frame_bank_pc'],
+                                  'measurement_mode':args.measurement_mode}),flush=True)
+                while status_payload(directory)['lease']['active']: time.sleep(1)
+        except KeyboardInterrupt: return 130
+        return 0
+    if args.command == 'stop':
+        directory=Path(args.window).resolve()
+        if not directory.is_relative_to((u.ROOT/'results/local').resolve()):
+            parser.error('lease must remain private')
+        if u.json_read(directory/'state.json').get('authorization',{}).get('kind')!=AUTHORITY:
+            parser.error('not an owner-supervised PC lease')
+        (directory/'stop').touch();return 0
     value = status_payload(args.window, require_allow=args.require_allow)
     print(json.dumps(value))
     return 0 if value['lease']['active'] else 2

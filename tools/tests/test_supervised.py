@@ -93,6 +93,16 @@ class SupervisedTests(unittest.TestCase):
             with self.subTest(evidence=evidence,duration=duration),self.assertRaises(ValueError):
                 with s.session(self.path,evidence=evidence,duration_s=duration): pass
 
+    def test_cli_start_requires_current_attestation_and_uses_finite_session(self):
+        with self.assertRaises(SystemExit): s.main(['start','--window',str(self.path)])
+        with mock.patch.object(s,'session') as session, mock.patch.object(s,'status_payload',side_effect=[
+                {'lease':{'active':True}},{'lease':{'active':False}}]),mock.patch.object(s.time,'sleep'):
+            session.return_value.__enter__.return_value=self.path
+            self.assertEqual(s.main(['start','--window',str(self.path),'--owner-attested','Owner: run Q1 now',
+                                     '--duration-s','60','--allow','frame_bank_pc']),0)
+            session.assert_called_once_with(str(self.path),evidence='Owner: run Q1 now',duration_s=60,
+                                            measurement_mode='quality')
+
     def sample(self,pct=80,name='firefox.exe'):
         return {'gpu_engine_activity':{'known':True,'active_pids':{'9':{'max_percent':pct,'engine_types':['3D']}}},
                 'nvidia_compute_apps':['9, '+name+', N/A'],'comfy_processes':[],
