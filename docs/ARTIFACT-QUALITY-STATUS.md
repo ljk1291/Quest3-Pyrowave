@@ -227,3 +227,26 @@ Take the first unblocked item. Items marked ∥ are independent.
   checkpoint. The owner's arm remains unchanged and ends 08:44:31 Europe/Berlin.
   Source/build work is unblocked; the goal remains active, with no optimization
   promoted and no new quality, fresh-submission or stable-90-Hz claim.
+
+- 2026-10-03, checkpoint first unattended precondition check:
+  WO-0 merged after its [full final-head CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37088239058)
+  passed, followed by [green integration CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37089916823).
+  The bounded PC dry run refused before opening a window: Android classified
+  the charging Quest as AC, NVIDIA listed resident desktop contexts as compute
+  processes, and the VD Streamer had no current disconnection record.
+  Independent read-only evidence showed charging at 74%, 33 °C, thermal status 0,
+  the armed physical USB device present, 539 available Windows engine counters,
+  zero active engines and an idle Comfy queue. One Comfy-discovery row was the
+  PowerShell probe itself. [Sanitized evidence](../results/unattended-precondition-check-2026-10-03.json).
+  [Detector corrections](https://github.com/ljk1291/Quest3-Pyrowave/pull/14)
+  require charging/full status plus pinned physical USB proof for AC-labelled
+  power, correlate resident processes with actual engine activity, and exclude
+  probe shells. Missing activity telemetry and active/unknown Comfy work still
+  fail closed. **97 focused CPU checks and four disposable Windows checks pass**;
+  full CI remains required before merge. The VD gate stays closed and the owner
+  was asked to disconnect/exit its Streamer manually; the agent never stops VD.
+  No guard/window, settings mutation, VR launch or GPU workload started. No
+  restoration was needed; VD hash verification remains unset for this refused
+  attempt. The arm is unchanged. A successful dry run and final scorer CI remain
+  prerequisites to Metro scoring. Source/build work is unblocked; the goal
+  remains active, with no quality/rate gain or stable-90-Hz pass claimed.
