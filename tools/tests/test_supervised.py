@@ -9,6 +9,7 @@ from unittest import mock
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from tools.quest3 import supervised as s
 from tools.quest3 import unattended as u
+from tools.quest3 import contention
 from xrbench import framebank as fb
 
 class Host:
@@ -74,7 +75,7 @@ class SupervisedTests(unittest.TestCase):
     def test_worker_stops_owned_jobs_on_parent_death_without_device_probes(self):
         self.state['parent']['started_epoch_s']=7
         self.state['owned_pc_jobs']=[dict(self.host.process_identity(3),nonce='nonce')];self.write()
-        with mock.patch.object(u,'Host',return_value=self.host),mock.patch.object(s.time,'time',return_value=100),mock.patch.object(u,'arm_window',side_effect=AssertionError('arm consulted')):
+        with mock.patch.object(u,'Host',return_value=self.host),mock.patch.object(s.time,'time',return_value=100),mock.patch.object(contention,'telemetry',return_value={'free_vram_mib':8000,'device_error':None}),mock.patch.object(u,'arm_window',side_effect=AssertionError('arm consulted')):
             s.worker(self.path,'nonce')
         self.assertEqual(self.host.stopped,[3]);self.assertTrue((self.path/'stop').exists())
         self.assertTrue(u.json_read(self.path/'state.json')['closed'])
@@ -91,5 +92,41 @@ class SupervisedTests(unittest.TestCase):
         for evidence,duration in [('',60),('owner',float('inf')),('owner',0),('owner',7201)]:
             with self.subTest(evidence=evidence,duration=duration),self.assertRaises(ValueError):
                 with s.session(self.path,evidence=evidence,duration_s=duration): pass
+
+    def sample(self,pct=80,name='firefox.exe'):
+        return {'gpu_engine_activity':{'known':True,'active_pids':{'9':{'max_percent':pct,'engine_types':['3D']}}},
+                'nvidia_compute_apps':['9, '+name+', N/A'],'comfy_processes':[],
+                'gpu_telemetry':{'free_vram_mib':8000,'overall_load_percent':99,'device_error':None}}
+    def test_quality_ignores_browser_load_but_stops_compute_vram_and_errors(self):
+        sample=self.sample()
+        self.assertEqual(contention.evaluate(sample,mode='quality',now=100)['stop_reasons'],[])
+        sample['nvidia_compute_apps']=['9, python.exe, N/A']
+        self.assertIn('compute_backend_active_or_unknown',contention.evaluate(sample,mode='quality',now=100)['stop_reasons'])
+        sample['excluded_owned_pids']=['9']
+        self.assertEqual(contention.evaluate(sample,mode='quality',now=100)['stop_reasons'],[])
+        sample['comfy_processes']=[{}];sample['comfy']={'known':True,'running':1,'pending':0}
+        self.assertIn('comfy_queue_active_or_unknown',contention.evaluate(sample,mode='quality',now=100)['stop_reasons'])
+        sample=self.sample();sample['gpu_telemetry']['free_vram_mib']=2047
+        self.assertIn('free_vram_below_margin',contention.evaluate(sample,mode='quality',now=100)['stop_reasons'])
+        sample['gpu_telemetry']['device_error']='device lost'
+        self.assertIn('gpu_driver_or_device_error',contention.evaluate(sample,mode='quality',now=100)['stop_reasons'])
+        sample['stop_requested']=True
+        self.assertIn('stop_requested',contention.evaluate(sample,mode='quality',now=100)['stop_reasons'])
+    def test_timing_sustained_external_load_invalidates_only_measurement(self):
+        sample=self.sample()
+        first=contention.evaluate(sample,mode='timing',now=100)
+        self.assertEqual(first['timing_invalidation_reasons'],[])
+        almost=contention.evaluate(sample,mode='timing',now=109.9,above_since=first['above_since_epoch_s'])
+        self.assertEqual(almost['timing_invalidation_reasons'],[])
+        sustained=contention.evaluate(sample,mode='timing',now=110,above_since=first['above_since_epoch_s'])
+        self.assertEqual(sustained['stop_reasons'],[])
+        self.assertEqual(sustained['timing_invalidation_reasons'],['sustained_external_gpu_load'])
+        self.assertIsNone(contention.evaluate(self.sample(10),mode='timing',now=111,above_since=100)['above_since_epoch_s'])
+        sample['excluded_owned_pids']=['9']
+        self.assertEqual(contention.evaluate(sample,mode='timing',now=120,above_since=100)['timing_invalidation_reasons'],[])
+        sample=self.sample(1,'ollama.exe')
+        decision=contention.evaluate(sample,mode='timing',now=100)
+        self.assertEqual(decision['stop_reasons'],[])
+        self.assertIn('compute_backend_active_or_unknown',decision['timing_invalidation_reasons'])
 
 if __name__=='__main__': unittest.main()

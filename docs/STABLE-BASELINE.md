@@ -58,6 +58,17 @@ Warm up consistently, alternate comparisons and return to comparable thermal con
 
 Use Python 3.12 and install `tools/quest3/requirements.txt` into a local environment for the capture and stereo-chart tools. Before each warm-up, confirm that no unrelated GPU workload is running and that VRAM has enough headroom: check process names and VRAM consumers in a local GPU monitor, including ComfyUI or other compute backends. Record the result in the operator review. Do not infer a competing workload solely from overall GPU utilization, since the VR workload itself can legitimately use the GPU heavily. Start capture after the profile/game settles. Use 310 seconds for a five-minute observed frame window and 1810 seconds for thirty minutes to allow event-boundary overhead:
 
+Owner-supervised PC frame-bank quality scoring records GPU load without stopping
+on desktop/browser/DWM activity. Its safety stops are active or unknown compute
+backends, less than 2048 MiB free VRAM, GPU driver/device errors and cancellation
+(plus the finite lease and monitor health). `tools.quest3.contention` provides
+separate quality and timing modes. Timing uses unrelated per-process engine load
+above 10% for at least 10 seconds or a compute backend, ignores single-sample
+spikes, and invalidates only measurements overlapping that condition. Overall
+utilization is context, not proof of competition. A timing consumer must retain
+the completed owned-job invalidation record; these offline quality scores never
+certify decoder timing, encoder milliseconds or fresh submissions.
+
 ```powershell
 python -m tools.quest3.bench capture --adb adb --seconds 1810 --hz 90 --build-manifest out/android/BUILD-METADATA.json --out results/local/metro-target-final
 ```

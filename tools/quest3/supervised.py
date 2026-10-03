@@ -16,6 +16,7 @@ import sys
 import time
 import uuid
 from . import unattended as u
+from . import contention
 
 FRESH_SECONDS = 60
 AUTHORITY = 'owner_supervised_pc'
@@ -54,6 +55,7 @@ def status_payload(directory, *, host=None, now=None, require_allow='frame_bank_
     conflicts = monitor.get('conflicts', ['gpu_status_unknown'])
     if conflicts: blockers.append('competing_gpu')
     return {'schema': 1, 'authorization': attestation,
+            'measurement_policy':state.get('last_policy'),
             'lease': {'active': not blockers, 'deadline_epoch_s': deadline, 'blockers': blockers},
             'guards': {'monitor': {'ready': monitor.get('ready') is True, 'alive': monitor_alive}},
             'cancellation': {'stop_requested': stopped, 'paused': False,
@@ -68,6 +70,8 @@ class JobRegistry:
             if not status_payload(state_path.parent, host=host)['lease']['active']:
                 raise u.Refusal('supervised PC lease inactive')
             state = u.json_read(state_path)
+            if state.get('measurement_mode')=='timing' and state.get('last_policy',{}).get('timing_invalidation_reasons'):
+                raise u.Refusal('this timing measurement is invalid under the contention policy')
             actual = host.process_identity(pid)
             if actual.get('exited'): raise u.Refusal('child already exited')
             record = {**actual, 'role': 'pc_job', 'nonce': state['guard_nonce']}
@@ -78,8 +82,13 @@ class JobRegistry:
     def unregister(self, state_path, pid):
         with u.state_lock(state_path):
             state = u.json_read(state_path)
+            completed=next((row for row in state['owned_pc_jobs'] if row['pid']==pid),None)
             state['owned_pc_jobs'] = [row for row in state['owned_pc_jobs'] if row['pid'] != pid]
+            if completed is not None:
+                completed['completed_epoch_s']=time.time()
+                state.setdefault('completed_pc_jobs',[]).append(completed)
             u.atomic_write(state_path, state)
+            return completed
 
 def stop_jobs(state, host):
     errors = []
@@ -95,11 +104,26 @@ def worker(directory, nonce):
     while True:
         # Sample outside the mutex, then exclude freshly registered identities.
         sample = host.gpu_sample()
+        sample['gpu_telemetry']=contention.telemetry(host)
         with u.state_lock(state_path):
             state = u.json_read(state_path)
             if state['guard_nonce'] != nonce: raise u.Refusal('supervised lease identity changed')
             sample = u.exclude_owned_compute_jobs(state, host, sample)
-            state['monitor'].update(ready=True, sample_epoch_s=time.time(), conflicts=sample['conflicts'])
+            now=time.time()
+            decision=contention.evaluate(sample,mode=state.get('measurement_mode','quality'),now=now,
+                above_since=state.get('last_policy',{}).get('above_since_epoch_s'))
+            state['last_policy']=decision
+            state['monitor'].update(ready=True, sample_epoch_s=now, conflicts=decision['stop_reasons'])
+            state.setdefault('gpu_load_samples',[]).append({'epoch_s':now,**sample['gpu_telemetry'],
+                'external_max_engine_percent':decision['external_max_engine_percent'],
+                'compute_backend_reasons':decision['compute_backend_reasons'],
+                'stop_reasons':decision['stop_reasons'],
+                'timing_invalidation_reasons':decision['timing_invalidation_reasons']})
+            if decision['timing_invalidation_reasons']:
+                for job in state['owned_pc_jobs']:
+                    job.setdefault('timing_invalidation_reasons',[]).extend(
+                        reason for reason in decision['timing_invalidation_reasons']
+                        if reason not in job.get('timing_invalidation_reasons',[]))
             state['last_gpu_sample'] = sample
             u.atomic_write(state_path, state)
             status = status_payload(directory, host=host)
@@ -113,9 +137,10 @@ def worker(directory, nonce):
         time.sleep(2)
 
 @contextlib.contextmanager
-def session(directory, *, evidence, duration_s=5400):
+def session(directory, *, evidence, duration_s=5400, measurement_mode='quality'):
     """Create once, after explicit owner authorization; never inspect the arm."""
     if not isinstance(evidence, str) or not evidence.strip(): raise ValueError('owner attestation required')
+    if measurement_mode not in ('quality','timing'): raise ValueError('unknown measurement mode')
     if not isinstance(duration_s, (int, float)) or not math.isfinite(duration_s) or not 0 < duration_s <= 7200:
         raise ValueError('PC session duration must be finite and at most two hours')
     directory = Path(directory).resolve()
@@ -127,6 +152,7 @@ def session(directory, *, evidence, duration_s=5400):
     state = {'schema': 1, 'authorization': {'kind': AUTHORITY, 'owner_present': True,
              'evidence': evidence, 'allow': ['frame_bank_pc']}, 'guard_nonce': nonce,
              'deadline_epoch_s': time.time()+duration_s, 'owned_pc_jobs': [], 'closed': False,
+             'measurement_mode':measurement_mode,
              'parent': {**host.process_identity(os.getpid()), 'nonce': nonce}, 'monitor': {}}
     path = directory/'state.json'
     u.atomic_write(path, state)
