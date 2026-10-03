@@ -11,6 +11,24 @@ class Host:
     def stop_owned_runtime(self, record): return True
 
 
+@pytest.mark.parametrize('drift',[False,True])
+def test_pc_only_cleanup_verifies_headset_without_stopping_or_rewriting(tmp_path,drift):
+    source,backup,record,state=setup_file(tmp_path)
+    state.update(allowed_actions=['frame_bank_pc'],owned_runtime=[],changes=[])
+    state['snapshot']['headset_properties']={'managed':{'debug.oculus.refreshRate':'90'}}
+    calls=[]
+    class ReadOnlyHost(Host):
+        def adb_run(self,*args):
+            calls.append(args)
+            assert args==('fake','shell','getprop','debug.oculus.refreshRate')
+            return '72' if drift else '90'
+    path=tmp_path/'state.json'; u.atomic_write(path,state)
+    result=u.restore(path,ReadOnlyHost())
+    assert result['status']==('restore_failed' if drift else 'restored')
+    assert result['client_stop_required'] is False and result['client_stopped'] is None
+    assert len(calls)==1 and source.read_bytes()==backup.read_bytes()
+
+
 def setup_file(tmp_path, label='alvr_session', kind='alvr'):
     source=tmp_path/'settings.json'; backup=tmp_path/'saved.json'
     original=b'{ "video": { "fps": 72, "bitrate": 200 }, "owner": "preserve" }\n'

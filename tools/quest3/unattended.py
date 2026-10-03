@@ -436,10 +436,18 @@ def _restore_locked(state_path, host=None):
     lock=state_path.parent/'restoration.lock'
     state['restoration']={'status':'restoring','at_utc':utc_now().isoformat()}; atomic_write(state_path,state)
     host=host or Host(state.get('adb','adb')); serial=state['serial']; steps=[]
-    client_stopped=False; awake_restored=True
-    try:
-        host.adb_run(serial,'shell','am','force-stop','io.github.ljk1291.quest3pyrowave'); client_stopped=True; steps.append('fork_client_stopped')
-    except Exception as exc: steps.append('fork_client_stop_failed:'+str(exc))
+    # New windows retain their action scope for deadline cleanup. PC-only work
+    # never launched the client or changed properties, so verify without writes.
+    # Missing scope preserves cleanup for historical device-window state files.
+    device_cleanup=bool(set(state.get('allowed_actions',['chart_cells','decoder_timing'])) &
+                        {'chart_cells','decoder_timing'})
+    client_stopped=None; awake_restored=True
+    if device_cleanup:
+        client_stopped=False
+        try:
+            host.adb_run(serial,'shell','am','force-stop','io.github.ljk1291.quest3pyrowave'); client_stopped=True; steps.append('fork_client_stopped')
+        except Exception as exc: steps.append('fork_client_stop_failed:'+str(exc))
+    else: steps.append('headset_verify_only_for_pc_window')
     owned_results=[]; owned_ok=True
     for record in state.get('owned_runtime',[]):
         try: host.stop_owned_runtime(record); owned_results.append({'role':record.get('role'),'stopped':True})
@@ -471,7 +479,7 @@ def _restore_locked(state_path, host=None):
             driver_restored=restore_recorded_driver(state,vrpathreg); steps.append('fork_driver_membership_restored')
         except Exception as exc: steps.append('fork_driver_restore_failed:'+str(exc))
     awake_state = state_path.parent / 'awake.json'
-    if awake_state.is_file():
+    if awake_state.is_file() and device_cleanup:
         try:
             awake=json_read(awake_state)
             if awake.get('device') != serial: raise Refusal('awake state serial mismatch')
@@ -482,11 +490,11 @@ def _restore_locked(state_path, host=None):
     # Restore each managed property, including the empty value which represents
     # an absent pre-window override. Never replay arbitrary getprop output.
     properties=state['snapshot']['headset_properties']
-    for key, value in properties.get('managed', {}).items():
+    for key, value in (properties.get('managed', {}) if device_cleanup else {}).items():
         if key in managed_properties():
             try: host.adb_run(serial,'shell',f"setprop {shlex.quote(key)} {shlex.quote(value)}"); steps.append('prop:'+key)
             except Exception as exc: steps.append('prop_failed:'+key+':'+str(exc))
-    if not properties.get('managed'):
+    if device_cleanup and not properties.get('managed'):
         # Compatibility with early snapshots: only replay safe, explicit keys.
         import re
         for line in properties.get('all_filtered',[]):
@@ -542,8 +550,8 @@ def _restore_locked(state_path, host=None):
             property_readback[key]={'expected':wanted,'error':str(exc),'matches':False}; properties_ok=False
     vd_checks=[row for row in verification if str(row.get('label','')).startswith('virtual_desktop')]
     vd_hashes_match=all(x.get('error') is None and x.get('backup_valid') is not False and x.get('current_matches') is True for x in vd_checks)
-    ok=files_ok and runtime_restored and properties_ok and client_stopped and awake_restored and owned_ok and alvr_restored and steamvr_restored and driver_restored and jobs_ok
-    state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'exact_owned_configuration_only;_VD_and_global_runtime_verify_only','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'owned_runtime':owned_results,'owned_runtime_stopped':owned_ok,'alvr_restored':alvr_restored,'steamvr_restored':steamvr_restored,'driver_restored':driver_restored,'owned_pc_jobs':job_results,'owned_pc_jobs_stopped':jobs_ok,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
+    ok=files_ok and runtime_restored and properties_ok and (not device_cleanup or client_stopped) and awake_restored and owned_ok and alvr_restored and steamvr_restored and driver_restored and jobs_ok
+    state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'exact_owned_configuration_only;_VD_and_global_runtime_verify_only','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stop_required':device_cleanup,'client_stopped':client_stopped,'owned_runtime':owned_results,'owned_runtime_stopped':owned_ok,'alvr_restored':alvr_restored,'steamvr_restored':steamvr_restored,'driver_restored':driver_restored,'owned_pc_jobs':job_results,'owned_pc_jobs_stopped':jobs_ok,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
     atomic_write(state_path,state)
     atomic_write(state_path.parent/'restoration.json',state['restoration'])
     return state['restoration']
@@ -1108,6 +1116,7 @@ def main():
             (directory/name).unlink(missing_ok=True)
         nonce=uuid.uuid4().hex
         state={'schema':1,'window_id':directory.name,'serial':arm['headset_serial'],'adb':check.get('adb',args.adb),'deadline_epoch_s':window['deadline'].timestamp(),'snapshot':check['snapshot'],'restoration':{'status':'pending'},'guards_ready':False,'guard_pids':{},'guard_nonce':nonce,'guard_started_epoch_s':utc_now().timestamp(),'arm_path':str(args.arm.resolve()),'arm_sha256':arm_digest(arm)}
+        state['allowed_actions']=list(arm.get('allow',[]))
         atomic_write(state_path,state)
         r=spawn_worker(state_path,False)
         if not wait_for_guard(directory,'restorer',nonce,r.pid,minimum_epoch_s=state['guard_started_epoch_s']) or not pid_alive(r.pid):

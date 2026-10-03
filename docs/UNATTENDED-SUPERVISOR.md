@@ -74,3 +74,9 @@ shell. Creation time uses the same millisecond convention as cleanup. Both
 Windows CPU checks pass locally, including a short child that could finish
 before the former PowerShell query. No GPU execution or timing claim follows
 from this process-registration test.
+
+New window state also retains its allowed actions. PC-only cleanup verifies
+headset properties without force-stopping the client or replaying setprop;
+unexpected property drift fails restoration without overwriting the owner.
+Two regressions cover unchanged state and drift. Device-window cleanup preserves
+the required client-stop-before-property-restore ordering.
