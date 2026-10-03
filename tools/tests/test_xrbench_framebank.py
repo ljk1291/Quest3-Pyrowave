@@ -32,6 +32,31 @@ def lease(active=True):
 class FrameBankTests(unittest.TestCase):
     def tmp(self): return tempfile.TemporaryDirectory()
 
+    def test_generated_420_header_matches_pinned_native_reader(self):
+        info=fb.Y4MInfo(64,64,90,1,'420','FULL',6144,3)
+        header=fb._header(info)
+        self.assertIn(b' C420jpeg ',header)
+        self.assertNotIn(b' C420 ',header)
+        self.assertIn(b'XCOLORRANGE=FULL',header)
+
+    def test_pinned_decoder_header_adapter_preserves_every_sample(self):
+        with self.tmp() as directory:
+            path=tiny_source(Path(directory),chroma='420')
+            before=fb.frame_records(path)
+            data=path.read_bytes().replace(b'C420jpeg',b'C420',1)
+            data=data.replace(b'YUV4MPEG2 ',b'YUV4MPEG2 YUV4MPEG2 ',1)
+            path.write_bytes(data)
+            payload=data.split(b'\n',1)[1]
+            record=fb.canonicalize_decoded_header(path)
+            self.assertTrue(record['frame_payload_unchanged'])
+            self.assertEqual(path.read_bytes().split(b'\n',1)[1],payload)
+            self.assertEqual(fb.frame_records(path),before)
+            self.assertIn(b'C420jpeg',path.read_bytes().split(b'\n',1)[0])
+            self.assertFalse(fb.canonicalize_decoded_header(path)['changed'])
+            for token in (b'C420mpeg2',b'C420p10',b'C420paldv'):
+                path.write_bytes(data.replace(b'C420 ',token+b' ',1))
+                with self.assertRaises(ValueError): fb.canonicalize_decoded_header(path)
+
     def test_tiny_y4m_identity_schema_and_default_matrix(self):
         with self.tmp() as temp:
             source = tiny_source(Path(temp)); plan = fb.build_plan(source, 24.2, projection_evidence="test-projection", display_eye=(4,4), geometries=((4,4),(2,2)), fixture=True)
@@ -77,6 +102,16 @@ class FrameBankTests(unittest.TestCase):
 
     def test_lossless_psnr_infinity_is_valid(self):
         self.assertTrue(fb._valid_metric("psnr_y",math.inf));self.assertFalse(fb._valid_metric("vmaf",math.inf));self.assertFalse(fb._valid_metric("psnr_y",math.nan))
+
+    def test_psnr_uses_sequence_summary_and_refuses_per_frame_fallback(self):
+        frame='n:73 mse_avg:12.0 psnr_y:38.98 psnr_u:44.19 psnr_v:43.13\n'
+        summary='[Parsed_psnr_2 @ address] PSNR y:38.768136 u:43.553428 v:43.310945 average:39.843862 min:36.468671 max:46.481952\n'
+        expected={'psnr_y':38.768136,'psnr_u':43.553428,'psnr_v':43.310945}
+        self.assertEqual(fb.parse_psnr_summary(frame+summary),expected)
+        with self.assertRaises(ValueError): fb.parse_psnr_summary(frame)
+        with self.assertRaises(ValueError): fb.parse_psnr_summary(summary*2)
+        self.assertEqual(fb.parse_psnr_summary('PSNR y:inf u:inf v:inf average:inf'),
+                         dict.fromkeys(('psnr_y','psnr_u','psnr_v'),math.inf))
 
     def test_libvmaf_null_hvs_preserves_separate_vmaf_without_inventing_values(self):
         from xrbench import rdmatrix

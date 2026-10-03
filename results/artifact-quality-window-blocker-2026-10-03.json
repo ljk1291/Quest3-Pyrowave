@@ -1,0 +1,83 @@
+{
+  "schema": 1,
+  "kind": "artifact_quality_hardware_blocker",
+  "checked_utc": "2026-10-03T06:46:03.331053+00:00",
+  "owner_window": {
+    "effective_hours": 8,
+    "exception_id": "owner-approved-2026-10-03-frame-bank-eight-hours",
+    "start_local": "2026-10-03T00:44:31",
+    "end_local": "2026-10-03T08:44:31",
+    "timezone": "Europe/Berlin",
+    "allowed_actions": [
+      "frame_bank_pc"
+    ],
+    "valid_for_new_start": false,
+    "refusal": "arm is not active now",
+    "arm_unchanged": true
+  },
+  "last_live_gate_observation": {
+    "checked_utc": "2026-10-03T05:29:09.212613+00:00",
+    "runtime_or_vd_gate_passed": false,
+    "vd_connection_state": null,
+    "note": "Resident VD Streamer supplied no current disconnected proof. This is unknown state, not proof of an active stream. No fresh device check was attempted after expiry."
+  },
+  "qualification": {
+    "signed_pair_commit": "bc2178842e0c48ada75b2179c56cae06b6204e61",
+    "signed_pair_ci": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37097253052",
+    "matching_pair_verified": true,
+    "framebank_tools_verified": true,
+    "native_input_only_checks_passed": 3,
+    "supervisor_integration_commit": "ad5308db23719c1bfebf93288cc3f851a0376c31",
+    "supervisor_integration_ci": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37101851281",
+    "supervisor_integration_all_four_jobs_passed": true,
+    "report_json_correction_pr": "https://github.com/ljk1291/Quest3-Pyrowave/pull/18",
+    "report_json_correction_ci": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37103211150",
+    "report_json_full_ci_at_checkpoint": "in_progress"
+  },
+  "completion_audit": {
+    "goal_achieved": false,
+    "criterion_1": {
+      "proved": false,
+      "missing": "Complete Metro comparison selecting a profile that improves VMAF and PSNR-HVS-M-H over Godlike/Haar/500 for all four fixed crops."
+    },
+    "criterion_2": {
+      "proved": false,
+      "missing": "Qualified chart rate/fault comparison for the selected profile, with exact restoration and matching VD hashes."
+    },
+    "criterion_3": {
+      "proved": false,
+      "missing": "Selected profile's exact settings, rollback and owner sign-off checklist; no profile has been selected."
+    }
+  },
+  "pending_measurements": {
+    "supervisor_restoration_dry_run": "not_run",
+    "hvs_gpu_sanity": "not_run",
+    "metro_matrix_cells": 36,
+    "metro_matrix_completed_cells": 0,
+    "metro_source_complete_frames": 90,
+    "reviewed_fixed_crops": 4,
+    "wo_6_7_8": "gated_on_actual_WO1_results",
+    "chart_property_installation_controller": "explicit_followup_before_device_windows"
+  },
+  "owner_actions_required": [
+    "Disconnect Virtual Desktop and exit its Streamer manually; the agent must not stop it.",
+    "Arm a fresh frame_bank_pc interval with at least 45 minutes remaining; keep the Quest on USB power and competing GPU work idle.",
+    "Resume the goal after arming. The next run must repeat live gates, verify the matching tools, pass the independent-guard restoration dry run, then the HVS GPU sanity gate before Metro cells."
+  ],
+  "unattended_hardware_window_started": false,
+  "unattended_state_files_observed": 0,
+  "settings_mutated": false,
+  "apk_installed": false,
+  "installed_pair_unchanged": true,
+  "vr_launched": false,
+  "gpu_benchmark_started": false,
+  "adb_used_for_expiry_check": false,
+  "restoration_required": false,
+  "vd_hash_verification": null,
+  "optimization_promoted": false,
+  "winning_profile": null,
+  "metro_quality_improvement": null,
+  "fresh_submissions_per_s": null,
+  "display_fps": null,
+  "optical_latency_ms": null
+}

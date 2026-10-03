@@ -95,7 +95,8 @@ def iter_y4m(path:Path,info:Y4MInfo|None=None)->Iterator[tuple[int,list[np.ndarr
             yield index,planes,hashlib.sha256(raw).hexdigest()
 
 def _header(info:Y4MInfo)->bytes:
-    return f"YUV4MPEG2 W{info.width} H{info.height} F{info.fps_num}:{info.fps_den} Ip A1:1 C{info.chroma} XCOLORRANGE={info.color_range}\n".encode("ascii")
+    chroma='420jpeg' if info.chroma=='420' else info.chroma
+    return f"YUV4MPEG2 W{info.width} H{info.height} F{info.fps_num}:{info.fps_den} Ip A1:1 C{chroma} XCOLORRANGE={info.color_range}\n".encode("ascii")
 
 def write_y4m(path:Path,info:Y4MInfo,frames:Sequence[Sequence[np.ndarray]])->list[str]:
     path=Path(path); path.parent.mkdir(parents=True,exist_ok=True); hashes=[]
@@ -281,8 +282,14 @@ class _OwnedPcJobRegistry:
         return unattended.unregister_owned_pc_job(state_path,pid)
 
 class WindowGuard:
-    def __init__(self,window:Path,arm:Path|None=None,status_command:Sequence[str]|None=None,clock:Callable[[],float]=time.time,job_registry=None):
+    def __init__(self,window:Path,arm:Path|None=None,status_command:Sequence[str]|None=None,clock:Callable[[],float]=time.time,job_registry=None,*,supervised=False):
         self.window=Path(window);self.arm=None if arm is None else Path(arm);self.command=list(status_command or [sys.executable,"-m","tools.quest3.unattended","status"]);self.clock=clock;self.job_registry=job_registry or _OwnedPcJobRegistry();self.owned_jobs=[]
+        self.supervised=supervised
+        if supervised:
+            if arm is not None or status_command is not None: raise ValueError('supervised lease has its own status authority')
+            from tools.quest3.supervised import JobRegistry
+            self.command=[sys.executable,'-m','tools.quest3.supervised','status']
+            self.job_registry=job_registry or JobRegistry()
     def status(self):
         cmd=[*self.command,"--window",str(self.window),"--require-allow","frame_bank_pc"]+([] if self.arm is None else ["--arm",str(self.arm)])
         try: r=subprocess.run(cmd,capture_output=True,text=True,timeout=10,check=False)
@@ -292,7 +299,13 @@ class WindowGuard:
         if r.returncode or data.get("schema")!=1 or data.get("lease",{}).get("active") is not True: raise PermissionError("WO-0 lease is inactive")
         deadline=data["lease"].get("deadline_epoch_s")
         guards=data.get("guards",{}); cancel=data.get("cancellation",{})
-        if not isinstance(deadline,(int,float)) or not math.isfinite(deadline) or deadline<=self.clock() or data.get("arm",{}).get("active") is not True or any(guards.get(x,{}).get(k) is not True for x in ("restorer","monitor") for k in ("ready","alive")) or cancel.get("stop_requested") or cancel.get("paused") or cancel.get("competing_gpu") or not cancel.get("monitor_fresh"):
+        authority_ok=data.get('arm',{}).get('active') is True
+        required_guards=('restorer','monitor')
+        if self.supervised:
+            auth=data.get('authorization',{})
+            authority_ok=(auth.get('kind')=='owner_supervised_pc' and auth.get('owner_present') is True and isinstance(auth.get('evidence'),str) and bool(auth['evidence'].strip()) and auth.get('allow')==['frame_bank_pc'])
+            required_guards=('monitor',)
+        if not isinstance(deadline,(int,float)) or not math.isfinite(deadline) or deadline<=self.clock() or not authority_ok or any(guards.get(x,{}).get(k) is not True for x in required_guards for k in ("ready","alive")) or cancel.get("stop_requested") or cancel.get("paused") or cancel.get("competing_gpu") or not cancel.get("monitor_fresh"):
             raise PermissionError("WO-0 lease health check failed")
         return data
     def run(self,argv,*,cwd:Path,env:dict,timeout_s:float):
@@ -454,6 +467,18 @@ def hvs_gpu_sanity(tool,directory,vertical_ppd,guard,env,timeout):
             'amplitude_ratio_delta_db':observed,'expected_delta_db':expected,'tolerance_db':.03}
 
 def _valid_metric(k,v): return isinstance(v,(int,float)) and not math.isnan(v) and (math.isfinite(v) or k.startswith("psnr"))
+def parse_psnr_summary(text):
+    """Sequence PSNR from FFmpeg's summary, never a rounded per-frame row.
+
+    The summary uses the mean squared error across the complete comparison.
+    Per-frame stats cannot substitute for it, particularly in a log tail.
+    Exactly one summary is required by our fixed one-PSNR-filter graph.
+    """
+    number=r'(?:[0-9]+(?:\.[0-9]+)?|inf)'
+    summaries=re.findall(r'\bPSNR y:('+number+r') u:('+number+r') v:('+number+r') average:',text)
+    if len(summaries)!=1: raise ValueError('exactly one aggregate PSNR summary is required')
+    return dict(zip(('psnr_y','psnr_u','psnr_v'),map(float,summaries[0])))
+
 def _score_ffmpeg(tool,distorted,reference,workdir,guard,env,timeout_s):
     # This is rdmatrix.score's established ffmpeg graph, but the process is run
     # through WO-0 so a revoked lease terminates it too.
@@ -464,7 +489,7 @@ def _score_ffmpeg(tool,distorted,reference,workdir,guard,env,timeout_s):
     code,out,err=guard.run([str(tool),"-hide_banner","-i",str(Path(distorted).resolve()),"-i",str(Path(reference).resolve()),"-lavfi",graph,"-map","[p]","-map","[s]","-map","[v]","-f","null","-"],cwd=workdir,env=env,timeout_s=timeout_s)
     text=out+err
     if code: raise RuntimeError("ffmpeg/libvmaf scorer failed")
-    values={}; values.update(rdmatrix.parse_psnr(text) or {}); values.update(rdmatrix.parse_ssim(text) or {})
+    values=parse_psnr_summary(text); values.update(rdmatrix.parse_ssim(text) or {})
     log=Path(workdir)/"vmaf.json"
     values.update(rdmatrix.parse_vmaf_log(log))
     log.unlink(missing_ok=True)
@@ -508,8 +533,44 @@ def _assert_same_frames(reference,decoded,ref_info):
     if (dec_info.width,dec_info.height,dec_info.frames,dec_info.chroma,dec_info.color_range,dec_info.fps_num,dec_info.fps_den)!=(ref_info.width,ref_info.height,ref_info.frames,ref_info.chroma,ref_info.color_range,ref_info.fps_num,ref_info.fps_den): raise ValueError("decoded_identity_or_geometry_mismatch")
     return dec_info
 
-def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,*,arm:Path|None=None,status_command:Sequence[str]|None=None,command_timeout_s:float=900,keep_artifacts:bool=False,allow_fixture:bool=False,score_fn=score_pair,tools_metadata:Path|None=None):
-    raw_plan=Path(plan_path).read_bytes();plan=validate_plan(json.loads(raw_plan)); source=Path(source); private_out=_private_path(private_out); guard=WindowGuard(window,arm,status_command)
+def canonicalize_decoded_header(path:Path):
+    """Adapt the pinned decoder's plain C420 spelling; never change samples.
+
+    d2997ac decode.cpp emits C420 and repeats YUV4MPEG2 in its params.
+    Only its 8-bit JPEG-sited spelling and C444 are accepted here. Other
+    chroma positions/precision must not be relabelled as JPEG-sited samples.
+    """
+    path=Path(path)
+    with path.open('rb') as stream: original=stream.readline(4097)
+    tokens=original.decode('ascii').strip().split()
+    chroma=[token for token in tokens if token.startswith('C')]
+    if len(chroma)!=1 or chroma[0] not in ('C420','C420jpeg','C444'):
+        raise ValueError('unsupported decoded chroma spelling or precision')
+    info=_parse_header(original,path);canonical=_header(info)
+    record={'original_header':original.decode('ascii').strip(),
+            'canonical_header':canonical.decode('ascii').strip(),'changed':original!=canonical}
+    if original==canonical: return record
+    temporary=path.with_suffix(path.suffix+'.canonical.tmp')
+    payload=hashlib.sha256()
+    try:
+        with path.open('rb') as source,temporary.open('xb') as dest:
+            if source.readline(4097)!=original: raise ValueError('decoded header changed during normalization')
+            dest.write(canonical)
+            for chunk in iter(lambda:source.read(1024*1024),b''):
+                payload.update(chunk);dest.write(chunk)
+        copied=hashlib.sha256()
+        with temporary.open('rb') as stream:
+            stream.readline()
+            for chunk in iter(lambda:stream.read(1024*1024),b''): copied.update(chunk)
+        if copied.digest()!=payload.digest(): raise ValueError('decoded payload changed during header normalization')
+        temporary.replace(path)
+        record['frame_payload_sha256']=payload.hexdigest()
+        record['frame_payload_unchanged']=True
+        return record
+    finally: temporary.unlink(missing_ok=True)
+
+def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,*,arm:Path|None=None,status_command:Sequence[str]|None=None,command_timeout_s:float=900,keep_artifacts:bool=False,allow_fixture:bool=False,score_fn=score_pair,tools_metadata:Path|None=None,supervised=False):
+    raw_plan=Path(plan_path).read_bytes();plan=validate_plan(json.loads(raw_plan)); source=Path(source); private_out=_private_path(private_out); guard=WindowGuard(window,arm,status_command,supervised=supervised)
     if private_out.exists(): raise FileExistsError('private output must be a fresh directory')
     if plan.get("fixture_only") and not allow_fixture: raise ValueError("fixture-only plans cannot run outside a CPU test")
     required_tools(tools); guard.status(); initial={n:sha256_file(_tool_path(v)) for n,v in tools.items()};
@@ -548,6 +609,7 @@ def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,
                     raise RuntimeError('decoder_configuration_not_confirmed')
                 row['codec_environment'].update(observed_decoder_path='compute',observed_encoder_wavelet=wavelet_name,
                                                  observed_decoder_wavelet=wavelet_name)
+            row['decoded_y4m_header']=canonicalize_decoded_header(decoded)
             dec_info=_assert_same_frames(ref,decoded,ref_info);row["decoded_frame_identity"]=[{"cell_frame":i,"source_frame":x["source_frame"],"reference_sha256":x["reference_sha256"],"decoded_sha256":d} for (i,_,d),x in zip(iter_y4m(decoded,dec_info),ids)]
             if len(row["decoded_frame_identity"])!=len(ids): raise ValueError("decoded_identity_or_geometry_mismatch")
             common=dict(frames=ref_info.frames,guard=guard,env=env,timeout_s=command_timeout_s)
@@ -575,6 +637,7 @@ def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,
         except (PermissionError,TimeoutError,ValueError,RuntimeError) as exc:
             row["error"]=str(exc) if str(exc) in {"encode_failed","decode_failed","decoded_identity_or_geometry_mismatch"} else "cell_failed";result["failure_reasons"].append(row["error"])
         result["cells"].append(row)
+        (private_out/"framebank-progress.json").write_text(report_json(result),encoding="utf-8")
         if not keep_artifacts:
             for p in (ref,wave,decoded,directory/"source-display.y4m",directory/"decoded-display.y4m"): p.unlink(missing_ok=True)
             for p in directory.glob('crop-*.y4m'): p.unlink()
@@ -604,7 +667,7 @@ def report_json(result):
     return json.dumps(transport(result),indent=2,allow_nan=False)
 
 def sanitized_report(result):
-    keep=("wavelet","rate_mbps","fps","eye_width","eye_height","encoded_chroma","cap_bytes","bits_per_pixel","actual_container_bytes","codec_environment","codec_only","displayed","crops","error")
+    keep=("wavelet","rate_mbps","fps","eye_width","eye_height","encoded_chroma","cap_bytes","bits_per_pixel","actual_container_bytes","codec_environment","decoded_y4m_header","codec_only","displayed","crops","error")
     return {"schema":SCHEMA,"kind":"pyrowave_frame_bank_sanitized","complete":result.get("complete") is True,"failure_reasons":list(result.get("failure_reasons",[])),"frozen_plan_sha256":result.get("frozen_plan_sha256"),"source_sha256":result.get("source_sha256_end"),"tool_provenance":result.get("tool_provenance_end"),"tools_build_provenance":result.get('tools_build_provenance'),"hvs_gpu_sanity":result.get('hvs_gpu_sanity'),"projection":result.get("projection"),"crop_definitions":result.get("crop_definitions"),"cells":[{k:r.get(k) for k in keep} for r in result.get("cells",[])],"optical_latency_ms":None,"display_fps":None}
 def parse_crops_argument(value:str):
     try:
@@ -616,7 +679,7 @@ def parse_crops_argument(value:str):
 def _main_plan(a):
     p=build_plan(Path(a.source),a.vertical_pixels_per_degree,horizontal_pixels_per_degree=a.horizontal_pixels_per_degree,projection_evidence=a.projection_evidence,crop_evidence=a.crop_evidence,crops=parse_crops_argument(a.crops));Path(a.out).write_text(json.dumps(p,indent=2),encoding="utf-8");print(f"wrote frozen plan with {len(p['cells'])} cells; no codec/scorer was run");return 0
 def _main_run(a):
-    tools={"encode":a.encode,"decode":a.decode,"ffmpeg":a.ffmpeg,"psnr_hvs_m_h":a.psnr_hvs_m_h};r=run_plan(Path(a.plan),Path(a.source),Path(a.private_out),tools,Path(a.window),arm=None if not a.arm else Path(a.arm),command_timeout_s=a.command_timeout_s,keep_artifacts=a.keep_artifacts,tools_metadata=Path(a.tools_metadata));report=sanitized_report(r);Path(a.report).write_text(report_json(report),encoding="utf-8");print(f"wrote sanitized report: complete={report['complete']}");return 0 if report["complete"] else 2
+    tools={"encode":a.encode,"decode":a.decode,"ffmpeg":a.ffmpeg,"psnr_hvs_m_h":a.psnr_hvs_m_h};r=run_plan(Path(a.plan),Path(a.source),Path(a.private_out),tools,Path(a.window),arm=None if not a.arm else Path(a.arm),command_timeout_s=a.command_timeout_s,keep_artifacts=a.keep_artifacts,tools_metadata=Path(a.tools_metadata),supervised=getattr(a,'supervised',False));report=sanitized_report(r);Path(a.report).write_text(report_json(report),encoding="utf-8");print(f"wrote sanitized report: complete={report['complete']}");return 0 if report["complete"] else 2
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     s=p.add_subparsers(dest='command',required=True)
@@ -631,6 +694,7 @@ def main(argv=None):
     for name in ('plan','source','private-out','report','window','encode','decode','ffmpeg','psnr-hvs-m-h','tools-metadata'):
         r.add_argument('--'+name,required=True)
     r.add_argument('--arm')
+    r.add_argument('--supervised',action='store_true',help='use an existing owner-attested PC-only lease')
     r.add_argument('--command-timeout-s',type=float,default=900)
     r.add_argument('--keep-artifacts',action='store_true')
     x=p.parse_args(argv)

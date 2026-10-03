@@ -350,3 +350,54 @@ Take the first unblocked item. Items marked ∥ are independent.
   and restoration dry run remain pending. WO-6/7/8 still require WO-1 scores;
   no quality improvement, fresh-rate gain or stable 90-Hz pass is claimed.
   Source/CI work continues, with the installed pair and defaults unchanged.
+
+- 2026-10-03, checkpoint window expiry and measurement blocker:
+  The owner's eight-hour exception was accepted exactly; a CPU-only arm check
+  at 06:46 UTC confirms expiry at 06:44:31 UTC, unchanged arm bytes and zero
+  unattended window state files. No ADB or hardware action ran in this check.
+  [Blocker and completion audit](../results/artifact-quality-window-blocker-2026-10-03.json).
+  Supervisor integration `ad5308d` passed [all four jobs](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37101851281).
+  [The report-format correction](https://github.com/ljk1291/Quest3-Pyrowave/pull/18)
+  has passed CPU and Android CI; its Windows and pair validation remain in
+  [the same live workflow](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37103211150).
+  Merge remains conditional on all four jobs passing. The earlier qualified
+  stable-signed `bc21788` tools/pair remain downloaded and uninstalled.
+  WO-0/1/2/3/4/5/9 source preparation is present; actual restoration, calibration,
+  Metro scores and chart comparisons remain unproved. WO-6/7/8 require WO-1's
+  real data; no new optimization is justified by the source-only checks.
+  Guarded chart/property/installation controller integration remains explicit
+  follow-up before device windows. No quality or rate profile was promoted.
+  The goal's three success criteria are unmet. Hardware diagnostics are blocked
+  by the expired arm and the unresolved VD-disconnection proof; CI completion
+  is the remaining available action in this checkpoint.
+  **Owner next steps:** disconnect VD and exit its Streamer manually, then arm
+  a fresh `frame_bank_pc` window with at least 45 minutes remaining and resume
+  the goal. No new Metro capture is needed: the existing 90-frame source and
+  four reviewed crops stay frozen. Repeat live gates and the independent-guard
+  restoration dry run first, then HVS GPU calibration and the finite Metro matrix.
+  Later chart tests need their own allowed scope/controller or owner supervision.
+  No settings, installation or runtime changes require rollback from this interval;
+  VD hash verification remains unset rather than claiming an unperformed check.
+
+- 2026-10-03 (Codex, owner-supervised PC pass 1): implemented the explicit owner-attested
+  frame-bank lease and separate quality/timing contention policies. Quality retains the
+  compute-backend, 2048 MiB free-VRAM, driver/device and stop-marker safety stops, with
+  GPU load samples; timing invalidates affected measurements after sustained external
+  engine load >10% for at least 10 seconds or an active compute backend. Single browser
+  spikes do not revoke quality work. No arm, idle, headset or VD gate was consulted.
+  HVS identity/amplitude sanity passed. All nine 500 Mbps × Haar/5/3/9/7 ×
+  3072/2560/2080 cells completed on the same 90 source frames and qualified native tools.
+  The six resumed CDF cells have 713 load samples, at least 12747 MiB free VRAM and no
+  safety stop; retained Haar evidence has the older monitor coverage. All 54 FFmpeg
+  comparisons passed the independent 1–90 frame audit. Ancillary PSNR was corrected
+  from retained sequence summaries without rescoring; VMAF, SSIM and HVS are unchanged.
+  [Results and limits](../results/metro-matrix-pass1-2026-10-03.md): Godlike CDF 9/7
+  leads this single-pass quality screen (97.79 display VMAF, 36.43 HVS dB), and both
+  CDF wavelets improve VMAF and calibrated HVS on all four crops at all tested sizes.
+  [PR #20](https://github.com/ljk1291/Quest3-Pyrowave/pull/20);
+  [CPU CI passed](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37112302438).
+  Local CPU checks: 49 passed, three compiler-dependent Windows skips. Native/signing
+  jobs skipped; no new signed pair, headset actions, settings changes or default
+  promotion. Lease closed, no owned jobs remain. Offline quality does not establish
+  decoder speed or stable 90 Hz; prior ~82–83 fresh submissions/s remains separate.
+  Pass 2 and further hardware work are stopped for owner review, as requested.

@@ -13,6 +13,31 @@ offline work only.
 
 ## 1. Arming (owner only)
 
+### Owner-supervised PC leases
+
+AGENTS.md rule (a) also permits a finite PC-only supervised lease, **only in response
+to an explicit owner message in the current session**. A historical note, a schedule,
+an expired arm, or an agent's own attestation does not authorize one. Retain the current
+owner quote in private evidence. This path does not inspect or change the arm file and
+does not authorize headset, VR, installation or settings actions.
+
+```powershell
+python -m tools.quest3.supervised start --window results/local/supervised/current-pc --owner-attested "<current owner authorization>" --allow frame_bank_pc --duration-s 7200 --measurement-mode quality
+```
+
+Keep that process running while the authorized frame-bank command uses the same
+`--window` and `--supervised`. The lease is limited to two hours and closes on the stop
+marker, cancellation, expiry or parent death. Use Ctrl+C or
+`python -m tools.quest3.supervised stop --window results/local/supervised/current-pc`
+to end it early. Exact owned-job registration and the independent GPU safety monitor
+remain mandatory. Quality mode tolerates browser/desktop load; compute backends,
+less than 2048 MiB free VRAM, driver/device errors and the stop marker end it. Timing
+mode additionally invalidates affected measurements on sustained unrelated per-process
+engine load >10% for at least 10 seconds or a compute backend. No utilization-based
+quality or latency claim is implied by this lease.
+
+### Unattended arm records
+
 A window exists only while a valid arm file is in force. Agents never create, extend or
 edit it; WO-0 provides `python -m tools.quest3.unattended arm …` for the owner to run.
 Until then the owner may write it by hand. The path is ignored by git
