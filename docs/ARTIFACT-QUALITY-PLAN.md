@@ -1,5 +1,90 @@
 # Compression-artifact plan: mura-like texture and line aliasing
 
+## Owner objective and revised investigation (2026-10-03)
+
+The objective is **the fewest compression artifacts possible**, with Godlike per-eye
+render, 90 Hz with fresh submissions near 90/s, and pipeline latency no worse than
+the current profile. PyroWave is optional: HEVC and AV1 are eligible contenders.
+The owner reports about 1000 Mbps available over Wi-Fi 6 at 160 MHz. This is available
+bandwidth context, not a measured sustainable video bitrate or network acceptance.
+This section supersedes the earlier optimization order and rate matrix below;
+historical diagnosis and measurements remain as evidence.
+
+Pass 1 used all 90 Metro frames at 500 Mbps. At 3072×3232/eye, CDF 9/7 gained
+8.97 display VMAF and 3.34 calibrated HVS dB over Haar; CDF 5/3 gained 7.98 VMAF
+and 2.79 dB. Both CDF wavelets improved both metrics on all four fixed crops at
+every tested size. Reducing encode size modestly helped Haar's aggregate scores,
+but reduced both CDF wavelets' aggregate display scores. The cells used nearly
+their complete byte caps. See the [full pass-1 report](../results/metro-matrix-pass1-2026-10-03.md).
+
+Rank candidates by **calibrated PSNR-HVS-M-H first, VMAF second**, then owner judgement
+among profiles meeting the rate and latency constraints. Neither metric alone
+establishes VR image quality. VMAF's model is TV-calibrated. The frame bank's per-eye
+Lanczos down/upscaling is better than the current live sampling path; reduced-size
+rows are optimistic until the real path is measured. Projection reuses Session 07;
+the frozen capture contains irregular timestamps and a later menu view. Preserve
+its exact file order, four crops, range, chroma and all 90 frames.
+
+### Questions and finite test order
+
+1. **Q1:** offline Haar at 800 and 1000 Mbps, at 3072×3232 and 2560×2688/eye.
+   Determine whether bitrate alone reaches CDF-at-500 quality. Exp3's roughly
+   twofold byte penalty suggests a hypothesis, not a predicted measured score.
+2. **Q2:** offline CDF 5/3 and CDF 9/7 at **both 800 and 1000 Mbps**, at the same
+   two sizes (the current owner request expands the planner's 1000-only Q2).
+   Together Q1/Q2 are twelve cells. Compare against retained pass-1 500 Mbps rows.
+   Run under a new owner-supervised PC lease in response to the current message,
+   retaining the quality-mode GPU monitor, stop marker, owned jobs and finite deadline.
+   Post the combined table before any headset work.
+3. **Q3:** add a separate NVENC HEVC/AV1 frame-bank path using the same source,
+   geometry, crops, metrics and calibration. Plan 200/500/800/1000 Mbps with
+   ALVR-like CBR, no B-frames, no lookahead, low-latency tuning and approximately
+   one frame of VBV. Record exact requested settings, bitstream metadata, actual
+   bytes/bitrate, encoder/decoder identities and capability failures. No silent
+   bitrate, format or geometry fallback. An offline decode proves reconstruction,
+   not Quest decoder throughput. The current request adds this path; its complete
+   hardware-codec matrix and subsequent live cells remain separately reported.
+4. **Q4:** before any live video cell above 600 Mbps, measure sustained TCP goodput
+   and tail latency at 160 MHz using the repository network tools. The planner's
+   approximately 1053 Mbps requirement for 1000 Mbps video is a 5% overhead planning
+   estimate, not measured transport overhead or network headroom.
+5. Later owner-supervised live HEVC/AV1 comparisons at 400/800/1000 Mbps must establish
+   Quest 3 hardware-decoder throughput, fresh submissions and latency at Godlike/90.
+   No headset work may overlap offline GPU scoring.
+
+The new PyroWave campaign uses 500, 800 and 1000 Mbps, with 1200 Mbps reserved for
+a later headroom experiment. Drop 300 Mbps from this campaign; 2080 remains a
+diagnostic size. At 1000 Mbps/90 frames/s the derived stereo-luma bits/pixel are
+0.56 (3072×3232/eye), 0.81 (2560×2688), and 1.21 (2080×2208).
+
+### Decoder and engineering decisions
+
+Quest decode cost is a central constraint. The retained live screen measured
+CDF 9/7 GPU decode at 24.3 ms versus Haar at 10.5 ms; the faster AHB configuration
+later reached only about 82–83 fresh submissions/s. Neither is a stable 90 Hz pass.
+CDF 5/3 currently shares the apron reconstruction path. Historical HEVC control
+was about 89.7 fresh submissions/s at 200 Mbps, with an estimated 62.5 ms pipeline
+versus Haar's approximately 85 ms; these are instrumentation estimates, not optical
+latency or a controlled high-bitrate codec comparison.
+
+Measure GPU execution and completion latency separately at 800/1000 Mbps before
+assuming more bits are free. The planner cites upstream USB completion increasing
+8.40→9.12 ms and fresh rate decreasing 106→97/s from 1000→1500 Mbps; those are
+upstream context, not equivalent local Godlike results. Preserve this distinction.
+
+WO-6 (fast CDF 5/3 inverse) is gated on Q2 showing a clear quality gain over Haar
+at 1000 Mbps. P0–P5 decoder profiling remains relevant once a quality candidate
+is selected. Defer 4:4:4/HUD colour-fringe work; its previously reported roughly
+34–50% decode overhead must not be assumed affordable. Preserve baseline defaults,
+build/dependency/signing provenance and attribution. If the best feasible PyroWave
+profile loses to HEVC or AV1, report that result plainly.
+
+PR #20 and its two follow-ups (supervised CLI and current-session authorization
+note) merged as `c630f3d`; [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37135383541)
+passed. These Python/documentation changes require no new signed client/server pair.
+
+## Historical diagnosis and work orders (2026-10-02)
+
 Status: diagnosis and Codex work orders, 2026-10-02. No source, default, pin or
 installed build was changed while writing this. Evidence tags follow the
 experiment reports: **MEASURED** (recorded in this repo or upstream), **DERIVED**

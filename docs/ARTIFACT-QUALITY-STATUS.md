@@ -5,7 +5,16 @@ agent (Codex). Codex reads it at every checkpoint and appends to **Log**. The ow
 Claude may reorder **Queue** or add **Notes for Codex** between checkpoints. Keep
 entries short and link to evidence.
 
-## Current state (2026-10-02)
+## Owner objective (2026-10-03)
+
+Fewest artifacts at Godlike per-eye render, near-90 fresh submissions/s and no
+pipeline-latency regression. The owner reports ~1000 Mbps available over Wi-Fi 6
+at 160 MHz; sustained TCP headroom is unmeasured. PyroWave is optional. Rank offline
+candidates by calibrated HVS before VMAF, with owner judgement required for promotion.
+Reduced-size Lanczos frame-bank rows are optimistic relative to current live sampling.
+The complete reconciled Q1–Q4 plan is in [ARTIFACT-QUALITY-PLAN.md](ARTIFACT-QUALITY-PLAN.md).
+
+## Current state (baseline retained; updated 2026-10-03)
 
 - **Installed candidate:** signed `d1c3b3d4edb3` pair; colour remap fixed.
 - **Profile:** 3072×3232/eye, 90 Hz, Haar, 4:2:0, TCP Wi-Fi, 500 Mbps, recommended-AHB
@@ -17,6 +26,18 @@ entries short and link to evidence.
   The cause is unknown.
 
 ## Queue
+
+1. Q1/Q2: twelve offline cells, Haar/5/3/9/7 × 800/1000 Mbps ×
+   3072×3232/2560×2688, all 90 frozen frames, under the current owner-supervised lease.
+2. Add Q3 NVENC HEVC/AV1 frame-bank support with recorded low-delay settings and
+   identical image/scoring controls. Post a combined Q1/Q2/500-reference table before
+   headset work. Q3 hardware-codec matrix execution must be reported separately.
+3. Q4 TCP goodput/tail-latency evidence before live video above 600 Mbps. Then compare
+   quality candidates on Quest for fresh rate and latency under separate authorization.
+4. Gate WO-6 on CDF 5/3's quality gain over Haar/1000. Keep decoder pass profiling,
+   flat-field controls and real-path sampling tests; defer 4:4:4 and 1200 Mbps headroom.
+
+## Previous queue (historical)
 
 Take the first unblocked item. Items marked ∥ are independent.
 
@@ -52,6 +73,32 @@ Take the first unblocked item. Items marked ∥ are independent.
 - 2026-10-02 (Claude): start with WO-0, WO-1, WO-2, WO-3 and WO-9. Do not open a hardware
   window until WO-0's restorer and monitor are merged and dry-run tested. Keep each work
   order to one reviewable PR.
+
+- Historical note, superseded by the current Q1–Q4 queue; it grants no standing lease.
+
+- 2026-10-03 09:40 (Claude, relaying the owner): **owner-supervised session now.**
+  The owner is present, has confirmed Virtual Desktop is disconnected, and asked for
+  testing to start without an arm window. This is AGENTS.md rule (a), a supervised
+  session, not an unattended window. Do not create or edit the arm file. Priority is
+  the first real Metro frame-bank numbers.
+  1. Add a small supervised lease (for example `unattended.py supervise --owner-attested
+     "<owner quote + time>" --allow frame_bank_pc --hours 4`) that `WindowGuard`
+     accepts. Keep the competing-GPU monitor, the stop marker and job registration.
+     Skip the arm, owner-idle, headset battery/ADB and VD gates: none of them protect
+     a PC-only encode/decode job. This is a Python-only tools change: local CPU tests
+     plus the CPU CI job are enough. Do not wait for a new signed Android/Windows pair.
+  2. Run the HVS GPU sanity gate. Then run the frozen matrix in two passes:
+     - Pass 1: 500 Mbps × {haar, 53, 97} × {3072, 2560, 2080} on all 90 frames.
+       Post its table here before continuing.
+     - Pass 2: the remaining 27 cells.
+  3. Run no headset cells while the frame bank uses the GPU. Afterwards, with the owner
+     present, run the flat-field PyroWave-vs-HEVC control and the chart geometry A/B/A
+     with the existing control tools. The unattended chart controller does not exist yet.
+  4. Later, not now: scope preconditions by `allow`. Replace the VD log heuristic: an
+     unknown state currently counts as connected, and the substring "connected" also
+     matches unrelated lines. Use video-encode engine activity plus exact log patterns.
+  5. Keep ceremony proportional: one evidence record per real measurement, with no
+     checkpoint-only records.
 
 ## Log
 
@@ -401,3 +448,13 @@ Take the first unblocked item. Items marked ∥ are independent.
   promotion. Lease closed, no owned jobs remain. Offline quality does not establish
   decoder speed or stable 90 Hz; prior ~82–83 fresh submissions/s remains separate.
   Pass 2 and further hardware work are stopped for owner review, as requested.
+
+- 2026-10-03 (Codex, planner consolidation): read and reconciled PLANNER-NOTES.md.
+  [PR #20](https://github.com/ljk1291/Quest3-Pyrowave/pull/20) plus its supervised CLI
+  and current-session note merged into this integration branch as `c630f3d` after
+  [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37135383541).
+  Fifty local CPU checks passed; three compiler-dependent Windows checks skipped.
+  Retained prior evidence and the recovered 09:40 note; the new objective/queue
+  supersedes the old 300-Mbps/pass-2 schedule. Q1/Q2 are authorized by the current
+  owner message. No new signed pair or headset work; planner handoff file is removed
+  only after its content is committed here and in the plan.
