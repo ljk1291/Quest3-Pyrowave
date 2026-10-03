@@ -356,12 +356,40 @@ def verify_tools_build(tools, metadata_path):
     fork=json.loads((root/'fork.json').read_text(encoding='utf-8'))
     source_manifest=bundle/'HVS-SCORER-SOURCE.json'
     source_record=json.loads(source_manifest.read_text(encoding='utf-8-sig'))
+    shader=bundle/'psnr_hvs_m.comp'
+    imports_path=bundle/'FRAMEBANK-IMPORTS.json'
     if (meta.get('schema')!=1 or meta.get('kind')!='pyrowave_framebank_tools_build'
             or meta.get('source_lock_sha256')!=lock_hash
             or meta.get('source_psnr_cpp_sha256')!=hvs_scorer.PATCHED_PSNR_SHA256
             or meta.get('source_manifest_sha256')!=sha256_file(source_manifest)
             or source_record!=hvs_scorer.manifest()):
         raise ValueError('offline tool source provenance mismatch')
+    if (not shader.is_file() or sha256_file(shader)!=hvs_scorer.SCORER_SHADER_SHA256
+            or build.get('artifact_sha256',{}).get(shader.name)!=sha256_file(shader)):
+        raise ValueError('offline HVS shader is missing or mismatched')
+    if (not imports_path.is_file() or meta.get('imports_manifest_sha256')!=sha256_file(imports_path)
+            or build.get('artifact_sha256',{}).get(imports_path.name)!=sha256_file(imports_path)):
+        raise ValueError('offline tool import provenance is missing or mismatched')
+    imports=json.loads(imports_path.read_text(encoding='utf-8-sig'))
+    expected_names={_tool_path(tools[key]).name for key in ('encode','decode','psnr_hvs_m_h')}
+    if imports.get('schema')!=1 or imports.get('kind')!='framebank_windows_imports' or set(imports.get('tools',{}))!=expected_names:
+        raise ValueError('offline tool import identity mismatch')
+    for rows in imports['tools'].values():
+        if not isinstance(rows,list) or not rows: raise ValueError('offline tool imports incomplete')
+        for row in rows:
+            name=row.get('name',''); provider=row.get('provider')
+            if not re.fullmatch(r'[A-Za-z0-9_.+-]+\.dll',name,re.I) or provider not in ('windows_system','api_set','bundle'):
+                raise ValueError('offline tool import record invalid')
+            if provider=='api_set' and not name.casefold().startswith(('api-ms-win-','ext-ms-win-')):
+                raise ValueError('offline tool import provider invalid')
+            if provider=='bundle':
+                dll=bundle/name
+                if (not dll.is_file() or row.get('sha256')!=sha256_file(dll)
+                        or build.get('artifact_sha256',{}).get(name)!=sha256_file(dll)):
+                    raise ValueError('offline tool dependency missing or mismatched')
+            if provider=='windows_system' and os.name=='nt':
+                if not (Path(os.environ.get('WINDIR',r'C:\Windows'))/'System32'/name).is_file():
+                    raise ValueError('offline tool Windows prerequisite is missing: '+name)
     if (not re.fullmatch(r'[0-9a-f]{40}',str(build.get('repository_commit','')))
             or build.get('sources_lock_sha256')!=lock_hash
             or build.get('protocol_version')!=fork['protocol_version']
@@ -377,7 +405,8 @@ def verify_tools_build(tools, metadata_path):
             'repository_commit':build['repository_commit'],'sources_lock_sha256':lock_hash,
             'dependency_revisions':build['dependency_revisions'],'shader_hashes':build['shader_hashes'],
             'protocol_version':build['protocol_version'],'client_package_id':build['client_package_id'],
-            'scorer_source':source_record}
+            'scorer_source':source_record,'imports_manifest_sha256':sha256_file(imports_path),
+            'scorer_shader_sha256':sha256_file(shader)}
 
 def parse_hvs_m_h(text,pixels_per_degree:float,image_height:int)->dict:
     expected=hvs_calibration_for_vertical_ppd(pixels_per_degree,image_height)
@@ -391,7 +420,11 @@ def parse_hvs_m_h(text,pixels_per_degree:float,image_height:int)->dict:
 def _score_hvs_m_h(tool,reference,distorted,frames,vertical_ppd,image_height,guard,cwd,env,timeout):
     code,out,err=guard.run([str(tool),"--reference",str(reference),"--distorted",str(distorted),"--frames",str(frames),"--pixels-per-degree",f"{vertical_ppd:.9g}"],cwd=cwd,env=env,timeout_s=timeout)
     if code: raise RuntimeError("PSNR-HVS-M-H scorer failed")
-    return parse_hvs_m_h(out+err,vertical_ppd,image_height)
+    counts=re.findall(r'ScoredFrames\s*=\s*(\d+)',out+err)
+    if counts!=[str(frames)]: raise ValueError('HVS scorer frame count is missing or mismatched')
+    result=parse_hvs_m_h(out+err,vertical_ppd,image_height)
+    result['scored_frames']=frames
+    return result
 
 def _valid_metric(k,v): return isinstance(v,(int,float)) and not math.isnan(v) and (math.isfinite(v) or k.startswith("psnr"))
 def _score_ffmpeg(tool,distorted,reference,workdir,guard,env,timeout_s):
@@ -502,11 +535,14 @@ def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,
                         _write_frame(gf,ci,crop_y4m(gplanes,disp_info,crop))
                 crop_calibration=plan["hvs_calibration"]["crops"][plan["crops"].index(crop)]
                 row["crops"][crop["name"]]=score_fn(tools,gp,rp,directory,crop_calibration["vertical_pixels_per_degree"],image_height=ci.height,**common);_grid_png(directory/"grids"/f"PRIVATE-{crop['name']}.png",c0,crop_y4m(gp0,disp_info,crop))
+                if not keep_artifacts:
+                    rp.unlink(); gp.unlink()
         except (PermissionError,TimeoutError,ValueError,RuntimeError) as exc:
             row["error"]=str(exc) if str(exc) in {"encode_failed","decode_failed","decoded_identity_or_geometry_mismatch"} else "cell_failed";result["failure_reasons"].append(row["error"])
         result["cells"].append(row)
         if not keep_artifacts:
             for p in (ref,wave,decoded,directory/"source-display.y4m",directory/"decoded-display.y4m"): p.unlink(missing_ok=True)
+            for p in directory.glob('crop-*.y4m'): p.unlink()
     result["source_sha256_end"]=sha256_file(source); result["tool_provenance_end"]={n:sha256_file(_tool_path(v)) for n,v in tools.items()}
     if result["source_sha256_end"]!=result["source_sha256_start"]: result["failure_reasons"].append("source_changed_during_run")
     if result["tool_provenance_end"]!=result["tool_provenance_start"]: result["failure_reasons"].append("tool_changed_during_run")

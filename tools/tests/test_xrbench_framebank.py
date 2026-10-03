@@ -1,4 +1,5 @@
 import json
+import shutil
 import math
 import sys
 import tempfile
@@ -213,7 +214,7 @@ class FrameBankTests(unittest.TestCase):
             def __init__(self): self.argv=None
             def run(self,argv,**kwargs):
                 self.argv=argv
-                return 0, "PixelsPerDegree = 23.600000 || HeightFactor = 0.41837265 || PSNR-HVS-M-H: (Y) 31.2 dB", ""
+                return 0, "ScoredFrames = 90 || PixelsPerDegree = 23.600000 || HeightFactor = 0.41837265 || PSNR-HVS-M-H: (Y) 31.2 dB", ""
         guard=Guard()
         score=fb._score_hvs_m_h(Path("pyrowave-psnr-hvs-m"),Path("reference.y4m"),Path("distorted.y4m"),90,23.6,3232,guard,Path.cwd(),{},1)
         self.assertEqual(guard.argv,["pyrowave-psnr-hvs-m","--reference","reference.y4m","--distorted","distorted.y4m","--frames","90","--pixels-per-degree","23.6"])
@@ -239,6 +240,11 @@ class FrameBankTests(unittest.TestCase):
             for name in ('encode','decode','psnr_hvs_m_h'):
                 tools[name]=folder/(name+'.exe'); tools[name].write_bytes(name.encode())
             source=folder/'HVS-SCORER-SOURCE.json'; source.write_text(json.dumps(hs.manifest()))
+            shader=folder/'psnr_hvs_m.comp'
+            shutil.copyfile(Path(__file__).parent/'fixtures/pyrowave-d2997ac-psnr_hvs_m.comp',shader)
+            imports=folder/'FRAMEBANK-IMPORTS.json'
+            imports.write_text(json.dumps({'schema':1,'kind':'framebank_windows_imports',
+                'tools':{p.name:[{'name':'kernel32.dll','provider':'windows_system'}] for p in tools.values()}}))
             lock=json.loads((root/'sources.lock.json').read_text())
             lock_hash=hashlib.sha256((root/'sources.lock.json').read_bytes().replace(b'\r\n',b'\n')).hexdigest()
             fork=json.loads((root/'fork.json').read_text())
@@ -246,17 +252,40 @@ class FrameBankTests(unittest.TestCase):
                    'shader_hashes':{'test':'b'*64},'protocol_version':fork['protocol_version'],
                    'client_package_id':fork['client_package_id'],
                    'artifact_sha256':{path.name:fb.sha256_file(path) for path in tools.values()}}
+            build['artifact_sha256'].update({p.name:fb.sha256_file(p) for p in (shader,imports)})
             build_path=folder/'BUILD-METADATA.json'; build_path.write_text(json.dumps(build))
             meta={'schema':1,'kind':'pyrowave_framebank_tools_build','source_lock_sha256':lock_hash,
                   'source_psnr_cpp_sha256':hs.PATCHED_PSNR_SHA256,'source_manifest_sha256':fb.sha256_file(source),
+                  'imports_manifest_sha256':fb.sha256_file(imports),
                   'tools':{field:fb.sha256_file(tools[name]) for name,field in
                            (('encode','encode_sha256'),('decode','decode_sha256'),('psnr_hvs_m_h','scorer_sha256'))}}
             path=folder/'FRAMEBANK-TOOLS-BUILD-METADATA.json'; path.write_text(json.dumps(meta))
             self.assertEqual(fb.verify_tools_build(tools,path)['repository_commit'],'a'*40)
+            original_shader=shader.read_bytes(); shader.write_bytes(b'changed shader')
+            with self.assertRaisesRegex(ValueError,'shader'): fb.verify_tools_build(tools,path)
+            shader.write_bytes(original_shader)
+            original_imports=imports.read_bytes()
+            missing={'schema':1,'kind':'framebank_windows_imports','tools':{
+                p.name:[{'name':'missing-codec.dll','provider':'bundle','sha256':'0'*64}] for p in tools.values()}}
+            imports.write_text(json.dumps(missing))
+            meta['imports_manifest_sha256']=fb.sha256_file(imports)
+            build['artifact_sha256'][imports.name]=fb.sha256_file(imports)
+            path.write_text(json.dumps(meta)); build_path.write_text(json.dumps(build))
+            with self.assertRaisesRegex(ValueError,'dependency missing'): fb.verify_tools_build(tools,path)
+            imports.write_bytes(original_imports); meta['imports_manifest_sha256']=fb.sha256_file(imports)
+            build['artifact_sha256'][imports.name]=fb.sha256_file(imports)
+            path.write_text(json.dumps(meta)); build_path.write_text(json.dumps(build))
             tools['decode'].write_bytes(b'changed')
             with self.assertRaisesRegex(ValueError,'binary differs'): fb.verify_tools_build(tools,path)
             tools['decode'].write_bytes(b'decode')
             build['dependency_revisions']['pyrowave']['commit']='0'*40; build_path.write_text(json.dumps(build))
             with self.assertRaisesRegex(ValueError,'identity'): fb.verify_tools_build(tools,path)
+
+    def test_hvs_transport_requires_the_exact_scored_frame_count(self):
+        class Guard:
+            def run(self,*args,**kwargs):
+                return 0,'ScoredFrames = 89 || PixelsPerDegree = 23.6 || HeightFactor = 0.41837265 || PSNR-HVS-M-H: (Y) 31.2 dB',''
+        with self.assertRaisesRegex(ValueError,'frame count'):
+            fb._score_hvs_m_h(Path('scorer'),Path('ref'),Path('dist'),90,23.6,3232,Guard(),Path.cwd(),{},1)
 
 if __name__ == "__main__": unittest.main()

@@ -31,3 +31,32 @@ cmake --build <private-scorer-build> --target pyrowave-psnr-hvs-m
 
 The frame-bank runner calls that separate executable with measured **vertical**
 pixels per degree and rejects absent or mismatched emitted calibration.
+
+## Raw-Y4M transport correction, 2026-10-03
+
+The first Windows build reached the legacy scorer's configuration and failed at
+Granite's FFmpeg/PkgConfig dependency. Review also found that `psnr.cpp` discards
+the first reference/distorted frame for predictive video. That would omit part
+of this fixed raw corpus. CI now builds a separate `pyrowave-framebank-hvs` target
+with `PYROWAVE_UTILS=OFF` and `PYROWAVE_DEVEL=ON`, packaged under the existing
+`pyrowave-psnr-hvs-m.exe` tool name. The calibrated legacy patch remains retained
+and reversible; it is not the frame bank's video transport.
+
+The new target extracts `contrast_sensitivity_function` and
+`compute_total_errors_psnr_hvs_m` unchanged from pinned `psnr.cpp` and uses the
+unchanged `shaders/psnr_hvs_m.comp`. Its native reader accepts explicit 8-bit
+C420jpeg/C444 range, geometry and rate, and scores every frame from index zero.
+It rejects incomplete planes, extra frames/bytes and mismatched metadata. It
+reports `ScoredFrames`, which the harness requires to equal the frozen count.
+The pinned shader's stride, CSF, masking and error accumulation are unchanged,
+as is upstream's 223/255 limited-range peak convention; Metro is full range.
+The manifest binds the extracted functions, generated source, reader, main,
+CMake overlay and shader. Upstream MIT attribution remains in generated source
+and the packaged notices.
+
+Use `tools/windows/build_pyrowave_hvs_scorer.cmd` for this isolated target.
+`--verify-inputs-only` runs finite native parsing checks without initializing
+Vulkan and does not emit a metric. CI tests this mode on the built Windows
+executable and tests the reader with g++ on Linux. The actual Vulkan metric still
+needs a guarded same-input sanity check before its Metro results are accepted;
+these CPU checks do not establish GPU metric correctness or Quest performance.
