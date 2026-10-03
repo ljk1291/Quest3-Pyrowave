@@ -42,3 +42,22 @@ preservation, timestamp rejection, settings drift and monitor failure. These
 checks use fake hosts and do not establish a live hardware rollback. Before the
 first offline codec job, merge only after full CI, then run the required bounded
 check/start/restore dry run and verify exact saved configuration and VD hashes.
+
+## Additional rollback review, 2026-10-03
+
+The stopped dashboard's live API cannot be assumed available. Full snapshots now
+restore exact ALVR/SteamVR bytes only after the owned runtimes stop and all current
+differences match recorded changes or their original values. Partial setup is
+accepted; unrelated changes and corrupt backups are retained and reported. VD
+files and global runtime selection remain verification-only. Key-only compatibility
+rollback also rejects unexpected values before writing.
+
+The independent restorer retries an actual state-lock timeout at most three times
+(60 seconds per attempt), with a revoked lease throughout. Exhaustion records
+attempt failures without publishing a competing final state. Process cleanup binds
+the executable and start time to a retained Windows process handle; it never falls
+back to terminating a newly looked-up PID. A finite disposable CPU-child regression
+tests rejection of a mismatched identity and termination of the owned child. Eleven
+new rollback regressions bring the focused fake-host suite to 75 passing tests;
+corrupt VD backups cannot report a successful restoration.
+Neither these checks nor green CI replace the required armed dry run.

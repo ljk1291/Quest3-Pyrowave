@@ -27,6 +27,7 @@ def managed_properties():
 GUARD_READY_SECONDS = 5
 CHECK_FRESH_SECONDS = 5 * 60
 RESTORE_LOCK_SECONDS = 60
+RESTORE_LOCK_ATTEMPTS = 3
 
 class Refusal(RuntimeError): pass
 
@@ -308,15 +309,27 @@ class Host:
             raise
         if not ownership_matches(record,actual,record['nonce']): raise Refusal('runtime ownership changed; no stop issued')
         if os.name != 'nt': raise Refusal('Windows process stop is required')
-        script=("$p=Get-Process -Id %d -ErrorAction Stop; $null=$p.CloseMainWindow(); "
-                "if(-not $p.WaitForExit(5000)){Stop-Process -Id $p.Id -Force -ErrorAction Stop; $null=$p.WaitForExit(10000)}; "
-                "if(Get-Process -Id %d -ErrorAction SilentlyContinue){exit 1}") % (record['pid'],record['pid'])
+        script=owned_stop_script(record)
         self.run('powershell','-NoProfile','-NonInteractive','-Command',script,timeout=20)
         return True
     def keep_awake(self, active):
         if os.name=='nt':
             flags=0x80000000 | (0x00000001 if active else 0)
             ctypes.windll.kernel32.SetThreadExecutionState(flags)
+
+def owned_stop_script(record):
+    """Verify and retain the same Windows process handle through termination."""
+    pid=int(record['pid']); started=float(record['started_epoch_s'])
+    if pid<=0 or not math.isfinite(started): raise Refusal('invalid process identity')
+    expected=Path(record['path']).resolve().as_posix().replace("'","''")
+    return ("$ErrorActionPreference='Stop'; $p=Get-Process -Id %d; $null=$p.Handle; "
+            "if($p.HasExited){exit 0}; "
+            "$actualPath=[IO.Path]::GetFullPath($p.Path).Replace('\\','/'); "
+            "$started=([DateTimeOffset]$p.StartTime.ToUniversalTime()).ToUnixTimeMilliseconds()/1000.0; "
+            "if(-not [string]::Equals($actualPath,'%s',[StringComparison]::OrdinalIgnoreCase) "
+            "-or [Math]::Abs($started-%.6f) -ge 0.001){throw 'runtime ownership changed; no stop issued'}; "
+            "$null=$p.CloseMainWindow(); if(-not $p.WaitForExit(5000)){ $p.Kill(); "
+            "if(-not $p.WaitForExit(10000)){throw 'owned process did not exit'}}") % (pid,expected,started)
 
 def parse_battery(text):
     data={}
@@ -413,13 +426,15 @@ def _restore_locked(state_path, host=None):
     if host.vr_connected():
         owned_ok=False; steps.append('unclaimed_or_unstopped_vr_runtime_present')
     alvr_restored=not any(row.get('kind')=='alvr' for row in state.get('changes',[]))
-    if not alvr_restored and owned_ok:
+    records=state['snapshot']['configuration_snapshots']
+    exact_files={row['label'] for row in records if row.get('sha256') and row.get('snapshot')}
+    if not alvr_restored and owned_ok and 'alvr_session' not in exact_files:
         try:
             from .control import session as _session, set_values as _set_values
             alvr_restored=restore_recorded_alvr(state,(_session,_set_values)); steps.append('alvr_api_restored')
         except Exception as exc: steps.append('alvr_api_restore_failed:'+str(exc))
     steamvr_restored=not any(row.get('kind')=='steamvr' for row in state.get('changes',[]))
-    if not steamvr_restored and owned_ok:
+    if not steamvr_restored and owned_ok and 'steamvr_settings' not in exact_files:
         try: steamvr_restored=restore_recorded_steamvr(state); steps.append('steamvr_exact_keys_restored')
         except Exception as exc: steps.append('steamvr_restore_failed:'+str(exc))
     driver_restored=not any(row.get('kind')=='fork_driver' for row in state.get('changes',[]))
@@ -465,34 +480,30 @@ def _restore_locked(state_path, host=None):
             runtime_restored = current == runtime
             steps.append('openxr_runtime_verified' if runtime_restored else 'openxr_runtime_requires_owner_selector')
         except Exception as exc: steps.append('openxr_runtime_verify_failed:'+str(exc))
-    # Virtual Desktop files and OpenVR driver registration are never copied back.
-    # They are verification-only to preserve the owner's registration/settings.
+    # VD/driver files are verification-only. Exact ALVR/SteamVR restoration
+    # requires stopped owned runtimes and proof that every difference is ours.
     for record in state['snapshot']['configuration_snapshots']:
-        # The supervisor cannot safely stop the owning dashboard/runtime. All PC
-        # configuration is verify-only: a mismatch makes rollback fail visibly
-        # instead of overwriting a live owner application.
         if record.get('label','').startswith('virtual_desktop'):
             steps.append('vd_verify_only:'+record['label'])
         elif record.get('label') == 'openvr_paths':
             steps.append('steamvr_drivers_verify_only')
-        elif record.get('label') == 'steamvr_settings':
-            steps.append('steamvr_settings_verify_only')
-        elif record.get('label') == 'alvr_session':
-            from .preflight import sha256
-            source=Path(record['source'])
-            matches=source.is_file() and record.get('sha256') and sha256(source)==record['sha256']
-            if matches: steps.append('alvr_session_unchanged')
-            elif not owned_ok or not state.get('owned_runtime'):
-                steps.append('alvr_cold_restore_skipped_unowned_runtime'); alvr_restored=False
-            else:
-                try: shutil.copyfile(record['snapshot'],record['source']); steps.append('alvr_session_and_pairing_restored')
-                except OSError as exc: steps.append('alvr_session_restore_failed:'+str(exc)); owned_ok=False
+        if record.get('label') in {'alvr_session','steamvr_settings'}:
+            label=record['label']
+            try:
+                result=restore_configuration_bytes(state,record,owned_ok=owned_ok)
+                steps.append(label+':'+result)
+                if label=='alvr_session': alvr_restored=True
+                else: steamvr_restored=True
+            except Exception as exc:
+                steps.append(label+'_exact_restore_failed:'+str(exc))
+                if label=='alvr_session': alvr_restored=False
+                else: steamvr_restored=False
     verification=[]
     try:
         from .preflight import verify_snapshot
         verification=verify_snapshot(state['snapshot']['configuration_snapshots'])
     except Exception as exc: verification=[{'error':str(exc)}]
-    files_ok=all(x.get('error') is None and x.get('current_matches') is True for x in verification)
+    files_ok=all(x.get('error') is None and x.get('backup_valid') is not False and x.get('current_matches') is True for x in verification)
     property_readback={}; properties_ok=True
     for key, wanted in properties.get('managed', {}).items():
         try:
@@ -502,9 +513,9 @@ def _restore_locked(state_path, host=None):
         except Exception as exc:
             property_readback[key]={'expected':wanted,'error':str(exc),'matches':False}; properties_ok=False
     vd_checks=[row for row in verification if str(row.get('label','')).startswith('virtual_desktop')]
-    vd_hashes_match=all(x.get('error') is None and x.get('current_matches') is True for x in vd_checks)
+    vd_hashes_match=all(x.get('error') is None and x.get('backup_valid') is not False and x.get('current_matches') is True for x in vd_checks)
     ok=files_ok and runtime_restored and properties_ok and client_stopped and awake_restored and owned_ok and alvr_restored and steamvr_restored and driver_restored and jobs_ok
-    state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'pc_configuration_verify_only;_owner_selector_or_dashboard_must_restore_drift','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'owned_runtime':owned_results,'owned_runtime_stopped':owned_ok,'alvr_restored':alvr_restored,'steamvr_restored':steamvr_restored,'driver_restored':driver_restored,'owned_pc_jobs':job_results,'owned_pc_jobs_stopped':jobs_ok,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
+    state['restoration']={'status':'restored' if ok else 'restore_failed','at_utc':utc_now().isoformat(),'steps':steps,'fallback':'exact_owned_configuration_only;_VD_and_global_runtime_verify_only','vd_hashes_match':vd_hashes_match,'openxr_runtime_restored':runtime_restored,'client_stopped':client_stopped,'owned_runtime':owned_results,'owned_runtime_stopped':owned_ok,'alvr_restored':alvr_restored,'steamvr_restored':steamvr_restored,'driver_restored':driver_restored,'owned_pc_jobs':job_results,'owned_pc_jobs_stopped':jobs_ok,'physical_proximity_restored':awake_restored,'property_readback':property_readback,'properties_restored':properties_ok,'verification':verification}
     atomic_write(state_path,state)
     atomic_write(state_path.parent/'restoration.json',state['restoration'])
     return state['restoration']
@@ -544,6 +555,13 @@ def restore(state_path, host=None):
                          {'status':'lock_wait_failed','at_utc':utc_now().isoformat(),
                           'error':type(exc).__name__})
         raise
+
+def restore_with_retry(state_path, host=None):
+    """Finite retry when a bounded in-flight writer still owns the mutex."""
+    for attempt in range(RESTORE_LOCK_ATTEMPTS):
+        try: return restore(state_path,host)
+        except Refusal as exc:
+            if str(exc)!='state lock timeout' or attempt+1==RESTORE_LOCK_ATTEMPTS: raise
 
 def terminal_fault_decision(state, fault):
     """A second terminal codec/connection fault ends device work and requests restore."""
@@ -594,7 +612,7 @@ def worker(state_path, monitor=False):
                 except Exception:
                     (state_path.parent/'stop').write_text('arm revoked or changed\n',encoding='utf-8')
             if (state_path.parent/'stop').exists() or now>=state['deadline_epoch_s']:
-                if not monitor: restore(state_path,host)
+                if not monitor: restore_with_retry(state_path,host)
                 return
             if monitor:
                 failures=[]
@@ -704,6 +722,39 @@ def _path_delete(value, dotted):
     for part in parts[:-1]: node=node.get(part,{})
     node.pop(parts[-1],None)
 
+def restore_configuration_bytes(state, record, *, owned_ok):
+    """Restore original bytes after proving all changed keys belong to us."""
+    from .preflight import sha256
+    source=Path(record['source']); backup=Path(record['snapshot']); digest=record.get('sha256')
+    if not digest or not backup.is_file() or sha256(backup)!=digest:
+        raise Refusal('configuration backup invalid')
+    if source.is_file() and sha256(source)==digest: return 'unchanged'
+    if not owned_ok or not state.get('owned_runtime'): raise Refusal('configuration runtime unclaimed or still running')
+    kind={'alvr_session':'alvr','steamvr_settings':'steamvr'}.get(record['label'])
+    changes=[row for row in state.get('changes',[]) if row.get('kind')==kind]
+    if not kind or not changes: raise Refusal('no recorded changes permit a file restore')
+    original=json_read(backup); expected=json.loads(json.dumps(original)); current=json_read(source)
+    latest={row['key']:row for row in changes}
+    for key,row in latest.items():
+        present=_path_present(current,key); before=_path_present(original,key)
+        value=_path_get(current,key) if present else None
+        is_original=present==before and (not present or value==_path_get(original,key))
+        is_ours=present and value==row['expected_after']
+        if not is_original and not is_ours: raise Refusal('unrecorded configuration drift')
+        if present: _path_set(expected,key,value)
+    # Mixed original/owned values allow partial setup or an already completed
+    # API rollback. No unrelated key or pairing change is accepted.
+    if current!=expected: raise Refusal('unrecorded configuration drift')
+    observed=source.read_bytes()
+    with tempfile.NamedTemporaryFile('wb',dir=source.parent,prefix=source.name+'.q3pw-',delete=False) as stream:
+        stream.write(backup.read_bytes()); temporary=Path(stream.name)
+    try:
+        if source.read_bytes()!=observed: raise Refusal('configuration changed during restoration')
+        temporary.replace(source)
+    finally: temporary.unlink(missing_ok=True)
+    if sha256(source)!=digest: raise Refusal('exact configuration rollback did not match')
+    return 'exact_saved_bytes_restored'
+
 def configuration_drift(state):
     """Detect unrecorded settings changes without writing any owner file."""
     from .preflight import sha256, registry_value
@@ -764,9 +815,11 @@ def apply_alvr_changes(state_path, values, arm_path=ARM, api=None):
 
 def restore_recorded_alvr(state, api):
     """Restore only exact prior ALVR paths through the live owning API."""
-    session,set_values=api; values={}
+    session,set_values=api; values={}; current=session()
     for row in state.get('changes',[]):
-        if row['kind']=='alvr' and row['before_present']: values[row['key']]=row['before_value']
+        if row['kind']=='alvr':
+            validate_rollback_key(current,row)
+            if row['before_present']: values[row['key']]=row['before_value']
     if values:
         set_values(values); after=session()
         if any(_path_get(after,key) != value for key,value in values.items()): raise Refusal('ALVR rollback readback differs')
@@ -775,6 +828,13 @@ def restore_recorded_alvr(state, api):
 def _path_present(value, dotted):
     try: _path_get(value,dotted); return True
     except (KeyError, TypeError): return False
+
+def validate_rollback_key(current,row):
+    present=_path_present(current,row['key'])
+    value=_path_get(current,row['key']) if present else None
+    original=present==row['before_present'] and (not present or value==row['before_value'])
+    ours=present and value==row['expected_after']
+    if not original and not ours: raise Refusal('unrecorded configuration drift')
 
 @locked_state_mutation
 def apply_steamvr_changes(state_path, settings_path, values, arm_path=ARM):
@@ -796,9 +856,12 @@ def restore_recorded_steamvr(state):
     record=next((row for row in state['snapshot']['configuration_snapshots'] if row.get('label')=='steamvr_settings'),None)
     if not record or not record.get('source'): raise Refusal('SteamVR settings source not recorded')
     path=Path(record['source']); current=json_read(path)
+    for row in rows: validate_rollback_key(current,row)
+    observed=path.read_bytes()
     for row in rows:
         if row['before_present']: _path_set(current,row['key'],row['before_value'])
         else: _path_delete(current,row['key'])
+    if path.read_bytes()!=observed: raise Refusal('configuration changed during restoration')
     atomic_write(path,current); actual=json_read(path)
     return all((_path_present(actual,row['key']) == row['before_present'] and
                 (not row['before_present'] or _path_get(actual,row['key']) == row['before_value'])) for row in rows)
