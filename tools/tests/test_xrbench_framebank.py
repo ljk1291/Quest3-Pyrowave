@@ -215,6 +215,10 @@ class FrameBankTests(unittest.TestCase):
                 with mock.patch.object(fb.WindowGuard,"status",fake_status),mock.patch.object(fb.WindowGuard,"run",fake_child):
                     result=fb.run_plan(plan_path,src,out,tools,t/"window",allow_fixture=True, score_fn=fake_score)
                     saved=(out/'framebank-private.json').read_bytes()
+                    def reject_non_json(value): raise ValueError('Non-standard JSON number: '+value)
+                    private=json.loads(saved,parse_constant=reject_non_json)
+                    self.assertEqual(private['cells'][0]['codec_only']['psnr_y'],'Infinity')
+                    self.assertEqual(private['cells'][0]['codec_only']['ssim'],1.0)
                     with self.assertRaises(FileExistsError): fb.run_plan(plan_path,src,out,tools,t/'window',allow_fixture=True,score_fn=fake_score)
                     self.assertEqual((out/'framebank-private.json').read_bytes(),saved)
                 self.assertTrue(result["complete"]);self.assertEqual(result["cells"][0]["identity_count"],2)
@@ -233,6 +237,35 @@ class FrameBankTests(unittest.TestCase):
         score=fb._score_hvs_m_h(Path("pyrowave-psnr-hvs-m"),Path("reference.y4m"),Path("distorted.y4m"),90,23.6,3232,guard,Path.cwd(),{},1)
         self.assertEqual(guard.argv,["pyrowave-psnr-hvs-m","--reference","reference.y4m","--distorted","distorted.y4m","--frames","90","--pixels-per-degree","23.6"])
         self.assertAlmostEqual(score["value"],31.2)
+
+    def test_cli_report_encodes_infinite_psnr_as_strict_json(self):
+        from types import SimpleNamespace
+        result={'complete':True,'failure_reasons':[],
+                'hvs_gpu_sanity':{'passed':True,'identity_psnr_db':math.inf},
+                'cells':[{'codec_only':{'psnr_y':math.inf,'psnr_cb':-math.inf,'vmaf':97.0,
+                                       'psnr_hvs_m_h':{'value':math.inf}}}]}
+        with self.tmp() as t:
+            report=Path(t)/'report.json'
+            args=SimpleNamespace(plan='plan',source='source',private_out='private',window='window',
+                 encode='encode',decode='decode',ffmpeg='ffmpeg',psnr_hvs_m_h='hvs',arm=None,
+                 command_timeout_s=900,keep_artifacts=False,tools_metadata='metadata',report=str(report))
+            with mock.patch.object(fb,'run_plan',return_value=result): self.assertEqual(fb._main_run(args),0)
+            def reject_non_json(value): raise ValueError('Non-standard JSON number: '+value)
+            parsed=json.loads(report.read_text(),parse_constant=reject_non_json)
+        self.assertEqual(parsed['hvs_gpu_sanity']['identity_psnr_db'],'Infinity')
+        self.assertEqual(parsed['cells'][0]['codec_only']['psnr_y'],'Infinity')
+        self.assertEqual(parsed['cells'][0]['codec_only']['psnr_cb'],'-Infinity')
+        self.assertEqual(parsed['cells'][0]['codec_only']['psnr_hvs_m_h']['value'],'Infinity')
+        self.assertEqual(parsed['cells'][0]['codec_only']['vmaf'],97.0)
+        self.assertTrue(parsed['complete']); self.assertIsNone(parsed['display_fps'])
+        # Preserve the numeric API and all existing field names.
+        self.assertEqual(fb.sanitized_report(result)['cells'][0]['codec_only']['psnr_y'],math.inf)
+        self.assertEqual(set(parsed),set(fb.sanitized_report(result)))
+
+    def test_report_transport_rejects_nan_without_mutating_metrics(self):
+        result={'cells':[{'codec_only':{'psnr_y':math.nan}}]}
+        with self.assertRaisesRegex(ValueError,'NaN'): fb.report_json(result)
+        self.assertTrue(math.isnan(result['cells'][0]['codec_only']['psnr_y']))
 
     def test_sanitized_report_omits_private_identity(self):
         public=fb.sanitized_report({"complete":False,"failure_reasons":["cell_failed"],"cells":[{"wavelet":"haar","source_frame_identity":["private"],"error":"cell_failed"}]})

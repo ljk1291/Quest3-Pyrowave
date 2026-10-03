@@ -326,3 +326,27 @@ Take the first unblocked item. Items marked ∥ are independent.
   controller integration remains explicit follow-up scope. No quality gain,
   fresh-rate gain or stable 90-Hz pass is claimed; WO-6/7/8 stay gated on actual
   WO-1 scores. Source/CI work continues and the goal remains active.
+
+- 2026-10-03, checkpoint signed pair and strict quality-report transport:
+  The manual `bc21788` build passed [all four jobs](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37097253052).
+  Both downloaded archives pass checksums and matching-pair verification, with
+  the fork's stable signing certificate. Packaged frame-bank tools pass their
+  source/shader/import/binary verifier and three native input-only CPU tests;
+  nothing was installed. [Qualification record](../results/signed-integration-pair-2026-10-03.json).
+  The startup-restoration correction merged in
+  [PR 17](https://github.com/ljk1291/Quest3-Pyrowave/pull/17) after
+  [all four jobs](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37099138211)
+  passed. A fresh read-only check at 05:29 UTC passes battery (66%, charging,
+  30 °C), thermal, owner-idle and competing-workload gates; VD connection state
+  remains unknown and prevents opening a window. Read-only ADB was used; no
+  snapshot, guards, settings changes, VR launch or GPU workload occurred.
+  Lossless PSNR exposed a report bug: permissive JSON emitted bare `Infinity`.
+  Private and sanitized writers now encode infinity as a string, preserve
+  numeric in-memory metrics and reject NaN. CPU regressions cover actual CLI
+  output and private end-to-end fixture output. Full correction CI remains.
+  At 06:26 UTC, less than the required 45 minutes remain in the owner's exact
+  eight-hour interval ending 06:44:31 UTC; no new hardware window can start.
+  The arm is unchanged. Actual HVS GPU calibration, the 36-cell Metro matrix
+  and restoration dry run remain pending. WO-6/7/8 still require WO-1 scores;
+  no quality improvement, fresh-rate gain or stable 90-Hz pass is claimed.
+  Source/CI work continues, with the installed pair and defaults unchanged.
