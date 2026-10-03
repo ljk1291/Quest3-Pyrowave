@@ -123,3 +123,80 @@ Take the first unblocked item. Items marked ∥ are independent.
   No unattended window has opened: WO-0 must first pass review, full CI and its
   dry run. The installed d1 pair, baseline defaults and VD settings are
   unchanged. Source work is unblocked; no optimization has been promoted.
+
+- 2026-10-03, checkpoint guard concurrency and frozen Metro comparison:
+  The eight-hour owner exception/source-review record merged after
+  [full CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37078606818)
+  passed. [WO-0](https://github.com/ljk1291/Quest3-Pyrowave/pull/10) now has 64
+  focused CPU regressions, including a settings API update overlapping rollback,
+  simultaneous owned-job registration, crash-released locks, repeated restoration,
+  failure publication and lost monitor telemetry. After integration, 13 build
+  contract checks, 102 repository unit tests and 9 geometry tests also passed.
+  Its Actions CPU and Android jobs passed; Windows/full-pair validation and the
+  required bounded dry run remain. Global selector changes and guarded
+  chart/property/install orchestration are explicit remaining controller work.
+  The current arm permits only `frame_bank_pc`.
+  [WO-1](https://github.com/ljk1291/Quest3-Pyrowave/pull/8) failed Windows scorer
+  preparation in [this run](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37079088302):
+  Git found the enclosing fork and silently skipped the scorer patch. A reproduced
+  nested-repository regression fixes that scope; 27 focused harness/scorer tests
+  now pass. The runner also binds packaged binaries to their commit/dependencies
+  and clears inherited codec experiments, requiring activation confirmation.
+  [WO-4](https://github.com/ljk1291/Quest3-Pyrowave/pull/6)'s first combined
+  build caught a missed shared `stream.rs` constructor change. Its corrected
+  cumulative patch includes all four required client files, preserves the other
+  WO-5 files and default shader bytes, and passes clean apply/reverse/identity
+  checks. Both corrected PRs require new full CI before merge.
+  The 90-frame Metro plan is frozen with 36 cells and four reviewed spatial crops.
+  It reuses Session 07's measured projection at 24.20 horizontal / 23.56 vertical
+  centre px/deg; Session 09 has no separate retained projection measurement.
+  [Preparation record and limitations](../results/framebank-preparation-2026-10-03.json).
+  No unattended window or codec/scorer workload has started. No quality gain,
+  fresh-rate gain or stable 90-Hz pass is claimed. Source/build work is unblocked;
+  the goal remains active.
+
+- 2026-10-03, checkpoint exact rollback and native-frame scorer:
+  [WO-4](https://github.com/ljk1291/Quest3-Pyrowave/pull/6) merged after
+  [all four CI jobs](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37081909500)
+  passed; layer filtering remains default-off. The frozen Metro preparation
+  record also merged after [full CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37082594282).
+  [WO-0](https://github.com/ljk1291/Quest3-Pyrowave/pull/10) now proves exact saved
+  ALVR/SteamVR bytes only after owned runtimes stop and all differences match
+  recorded changes. It rejects owner drift and corrupt backups, retries a real
+  mutex timeout finitely, and retains a process handle through verified cleanup.
+  Its PC/install-only arms cannot mutate VR/device settings; runtime manifest
+  bytes are checked as well as registration. **82 focused fake-host tests and
+  two disposable Windows CPU-child checks pass locally.** Native identity queries
+  avoid a shell lookup that could miss short scorer jobs. The earlier 60114c8
+  workflow passed; [the final 75c6257 workflow](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37086277788)
+  and required armed dry run remain.
+  [WO-1](https://github.com/ljk1291/Quest3-Pyrowave/pull/8)'s next real Windows
+  failure was [missing FFmpeg/PkgConfig](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37081762449).
+  Review additionally found the upstream predictive-video reader discarded
+  frame zero. Its isolated raw-Y4M target now retains every frame, extracts the
+  pinned HVS functions unchanged, packages their unchanged shader and licenses,
+  and binds the PE import inventory to build provenance. The harness requires
+  exact scorer frame counts, fresh output directories and a finite owned-GPU
+  identity/amplitude sanity gate before Metro scoring. **29 local harness/scorer
+  tests pass; three native-reader tests await CI's g++**. [Current Linux and Android
+  jobs](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37085826097) passed;
+  Windows/full-pair validation remains. The sanity gate has not run on hardware.
+  A CPU-only check reverified the retained stable d1 artifact pair and all six
+  installed server binaries; it did not re-query/install the Quest APK or start
+  VR. The owner's exact eight-hour exception remains recorded, ending 08:44:31
+  Europe/Berlin, with only `frame_bank_pc` allowed and the arm file unchanged.
+  No unattended window or codec/scorer GPU workload has opened. No quality gain,
+  rate gain or stable 90-Hz pass is claimed. Source/build work remains unblocked;
+  chart/property/install controller orchestration and global selector support
+  remain explicit WO-0 follow-up scope. The goal remains active.
+
+- 2026-10-03, follow-up verification of the scorer and process cleanup:
+  WO-1's Linux log confirms all 32 checks passed, including three compiled
+  native-reader checks. The next Windows build exposed source templates omitted
+  by an overly broad copy exclusion; head `828a12b` preserves those inputs and
+  passes 30 local checks (three native-reader checks require CI's compiler).
+  No dependency pin changed. WO-0 head `6d7b8cc` also handles an owned child
+  that completes before cleanup; all three disposable Windows process checks
+  pass. Final-head full CI and the guarded dry run remain required. The owner
+  approved the existing eight-hour window, without extending its PC-only scope.
+  No hardware workload has started, and no performance or quality gain is claimed.

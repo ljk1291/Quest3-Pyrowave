@@ -64,7 +64,11 @@ def session():
     ws=websocket.create_connection(EVENTS,header=['X-ALVR: true'],timeout=10)
     try:
         request('GetSession')
+        deadline=time.monotonic()+10
         for _ in range(1000):
+            remaining=deadline-time.monotonic()
+            if remaining<=0: raise TimeoutError('ALVR session response deadline exceeded')
+            ws.settimeout(remaining)
             event=json.loads(ws.recv()).get('event_type',{})
             if event.get('id')=='Session': return event['data']
         raise RuntimeError('No session response')
