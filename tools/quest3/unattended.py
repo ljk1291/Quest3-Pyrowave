@@ -475,9 +475,12 @@ def _restore_locked(state_path, host=None):
     runtime_restored = runtime is None
     if runtime:
         try:
-            from .preflight import registry_value
+            from .preflight import registry_value,sha256
             current=registry_value(r'SOFTWARE\Khronos\OpenXR\1','ActiveRuntime').get('value')
             runtime_restored = current == runtime
+            manifest=state['snapshot'].get('preflight',{}).get('active_openxr_runtime_manifest',{})
+            if manifest.get('sha256'):
+                runtime_restored=runtime_restored and sha256(Path(manifest['path']))==manifest['sha256']
             steps.append('openxr_runtime_verified' if runtime_restored else 'openxr_runtime_requires_owner_selector')
         except Exception as exc: steps.append('openxr_runtime_verify_failed:'+str(exc))
     # VD/driver files are verification-only. Exact ALVR/SteamVR restoration
@@ -776,12 +779,20 @@ def configuration_drift(state):
     if expected:
         actual=registry_value(r'SOFTWARE\Khronos\OpenXR\1','ActiveRuntime')
         if actual.get('error') or actual.get('value')!=expected: failures.append('openxr_runtime_drift')
+    manifest=state['snapshot'].get('preflight',{}).get('active_openxr_runtime_manifest',{})
+    if manifest.get('sha256'):
+        try:
+            if sha256(Path(manifest['path']))!=manifest['sha256']: failures.append('openxr_manifest_drift')
+        except (OSError,KeyError,TypeError): failures.append('openxr_manifest_unreadable')
     return failures
 
 def mutable_state(state_path, arm_path=ARM):
     """Fail closed before recording or applying a new setting mutation."""
     state_path=Path(state_path); status=status_payload(state_path.parent,arm_path)
     if not status['lease']['active']: raise Refusal('lease is not active: '+','.join(status['lease']['blockers']))
+    allowed=status.get('arm',{}).get('allowed_actions',[])
+    if not set(allowed).intersection({'chart_cells','decoder_timing'}):
+        raise Refusal('arm does not allow device or VR settings changes')
     state=json_read(state_path)
     if (state_path.parent/'restoration.lock').exists() or state.get('restoring') or state.get('restoration',{}).get('status') != 'pending': raise Refusal('rollback has begun')
     if not state.get('owned_runtime'): raise Refusal('claimed runtime ownership required before mutation')
@@ -790,6 +801,10 @@ def mutable_state(state_path, arm_path=ARM):
 @locked_state_mutation
 def record_change(state_path, kind, key, before_present, before_value, expected_after, arm_path=ARM):
     """Append an immutable exact-key record before applying one owned change."""
+    if kind not in {'alvr','steamvr','fork_driver','headset_property'}: raise Refusal('unsupported change kind')
+    if kind=='headset_property' and (key not in managed_properties() or
+            not (key.startswith('debug.q3pw.') or key in {'debug.oculus.refreshRate','debug.oculus.guardian_pause'})):
+        raise Refusal('headset property is not authorized for mutation')
     state=mutable_state(state_path,arm_path); changes=state.setdefault('changes',[])
     if any(row['kind']==kind and row['key']==key for row in changes): raise Refusal('change already recorded')
     row={'kind':kind,'key':key,'before_present':bool(before_present),'before_value':before_value,
@@ -839,7 +854,10 @@ def validate_rollback_key(current,row):
 @locked_state_mutation
 def apply_steamvr_changes(state_path, settings_path, values, arm_path=ARM):
     """Record presence/value, then change exact SteamVR JSON keys while owned runtime is live."""
-    state=mutable_state(state_path,arm_path); path=Path(settings_path); current=json_read(path)
+    state=mutable_state(state_path,arm_path); path=Path(settings_path)
+    recorded=next((row for row in state['snapshot']['configuration_snapshots'] if row.get('label')=='steamvr_settings'),None)
+    if not recorded or Path(recorded['source']).resolve()!=path.resolve(): raise Refusal('SteamVR path is not the saved configuration')
+    current=json_read(path)
     rows=[]
     for key, expected in values.items():
         present=_path_present(current,key); old=_path_get(current,key) if present else None
@@ -1051,8 +1069,9 @@ def main():
             p.error('refusing start: check is stale or belongs to a different arm/window')
         try:
             from .preflight import verify_snapshot
-            source_ok=all(x.get('error') is None and x.get('current_matches') is True
+            source_ok=all(x.get('error') is None and x.get('backup_valid') is not False and x.get('current_matches') is True
                           for x in verify_snapshot(check['snapshot']['configuration_snapshots']))
+            source_ok=source_ok and not configuration_drift({'snapshot':check['snapshot']})
         except (KeyError, OSError, ValueError): source_ok=False
         if not source_ok: p.error('refusing start: source settings changed after snapshot')
         live_failures, _, _ = live_preconditions(arm,Host(check.get('adb',args.adb)))

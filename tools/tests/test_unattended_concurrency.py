@@ -97,7 +97,7 @@ def test_inflight_setting_is_observed_and_undone_after_restore_revokes(monkeypat
     settings={'session_settings':{'test':1}}
     def status(*args,**kwargs):
         stopped=(tmp_path/'stop').exists()
-        return {'lease':{'active':not stopped,'blockers':['stop'] if stopped else []}}
+        return {'lease':{'active':not stopped,'blockers':['stop'] if stopped else []},'arm':{'allowed_actions':['chart_cells']}}
     def current(): return settings
     def set_values(values):
         value=values['session_settings.test']

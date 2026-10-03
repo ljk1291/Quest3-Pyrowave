@@ -61,3 +61,9 @@ tests rejection of a mismatched identity and termination of the owned child. Ele
 new rollback regressions bring the focused fake-host suite to 75 passing tests;
 corrupt VD backups cannot report a successful restoration.
 Neither these checks nor green CI replace the required armed dry run.
+
+Seven further regressions (82 total) enforce the arm's action list for settings
+mutations and reject legacy/unknown property changes. A `frame_bank_pc` or
+install-only arm cannot mutate VR/device settings. SteamVR updates must address
+the saved settings path. OpenXR checks also compare the runtime manifest bytes,
+and startup refuses corrupt backups before guard/mutation setup.

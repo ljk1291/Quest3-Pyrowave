@@ -137,3 +137,33 @@ def test_retry_exhaustion_is_finite_and_does_not_publish_competing_final(monkeyp
         assert len(list(tmp_path.glob('restore-attempt-*.json')))==u.RESTORE_LOCK_ATTEMPTS
         assert path.read_bytes()==before and not (tmp_path/'restoration.json').exists()
     finally: release.set(); held.join(3)
+
+
+@pytest.mark.parametrize('allowed',[['frame_bank_pc'],['install_matching_pair'],[]])
+def test_pc_or_install_only_arm_cannot_mutate_settings(monkeypatch,tmp_path,allowed):
+    source,backup,record,state=setup_file(tmp_path)
+    path=tmp_path/'state.json'; u.atomic_write(path,state); before=path.read_bytes()
+    monkeypatch.setattr(u,'status_payload',lambda *a,**k:{'lease':{'active':True},'arm':{'allowed_actions':allowed}})
+    with pytest.raises(u.Refusal,match='does not allow'): u.record_change(path,'alvr','video.fps',True,72,90)
+    assert path.read_bytes()==before
+
+
+@pytest.mark.parametrize('key',['debug.xrwired.perf_level','debug.oculus.forceDisplayScaling','owner.property'])
+def test_legacy_or_unknown_properties_cannot_be_new_mutations(tmp_path,key):
+    with pytest.raises(u.Refusal,match='property is not authorized'):
+        u.record_change(tmp_path/'state.json','headset_property',key,False,None,'1')
+
+
+def test_openxr_manifest_drift_is_detected_without_changing_the_registration(monkeypatch,tmp_path):
+    source,backup,record,state=setup_file(tmp_path)
+    manifest=tmp_path/'runtime.json'; manifest.write_text('{"runtime":"owner"}')
+    state['snapshot']['preflight']={'active_openxr_runtime':{'value':str(manifest)},
+        'active_openxr_runtime_manifest':{'path':str(manifest),'sha256':preflight.sha256(manifest)}}
+    monkeypatch.setattr(preflight,'registry_value',lambda *a,**k:{'value':str(manifest),'error':None})
+    assert u.configuration_drift(state)==[]
+    manifest.write_text('{"runtime":"changed"}')
+    assert u.configuration_drift(state)==['openxr_manifest_drift']
+    path=tmp_path/'state.json'; u.atomic_write(path,state)
+    result=u.restore(path,Host())
+    assert result['status']=='restore_failed' and not result['openxr_runtime_restored']
+    assert manifest.read_text()=='{"runtime":"changed"}'
