@@ -164,6 +164,7 @@ class NvencFramebankTests(unittest.TestCase):
                  mock.patch.object(fb, "verify_tools_build", return_value={"qualified": True}), \
                  mock.patch.object(fb, "hvs_gpu_sanity", return_value={"passed": True}), \
                  mock.patch.object(nf, "_run_json", return_value=observed), \
+                 mock.patch.object(nf, "lease_telemetry", return_value={"measurement_mode":"quality", "samples":[{}], "cleanup_verified":False}), \
                  mock.patch.object(nf, "_same_frame_scores", return_value={"codec_only":{}, "displayed":{}, "crops":{}}):
                 result = nf.run_plan(plan_path, source, output,
                     {"ffmpeg":sys.executable, "ffprobe":sys.executable, "psnr_hvs_m_h":sys.executable},
@@ -172,6 +173,47 @@ class NvencFramebankTests(unittest.TestCase):
             row = result["cells"][0]
             self.assertTrue(row["decoded_raw_wrapper"]["byte_identical"])
             self.assertEqual(row["bitstream"]["ffprobe_observed_metadata"]["avg_frame_rate"], "0/0")
+
+    def test_lease_samples_are_private_path_pid_and_attestation_free(self):
+        state = {"closed": False, "last_policy":{"mode":"quality", "free_vram_margin_mib":2048,
+            "stop_reasons":[], "pid":44}, "gpu_load_samples":[{"epoch_s":11, "free_vram_mib":8000,
+            "total_vram_mib":16000, "overall_load_percent":33, "external_max_engine_percent":4,
+            "device_error":None, "compute_backend_reasons":[], "stop_reasons":[],
+            "timing_invalidation_reasons":[], "pid":9, "path":"private", "attestation":"private"}]}
+        with mock.patch("tools.quest3.unattended.json_read", return_value=state):
+            report = nf.lease_telemetry(Path("private-window"), 10, 12)
+        serialized = json.dumps(report)
+        self.assertNotIn("pid", serialized); self.assertNotIn("path", serialized); self.assertNotIn("attestation", serialized)
+        self.assertEqual(report["samples"][0]["free_vram_mib"], 8000.0)
+        self.assertFalse(report["cleanup_verified"])
+
+    def test_lease_samples_missing_in_interval_fail_closed(self):
+        state = {"closed":False, "last_policy":{"mode":"quality", "free_vram_margin_mib":2048, "stop_reasons":[]},
+                 "gpu_load_samples":[{"epoch_s":9}]}
+        with mock.patch("tools.quest3.unattended.json_read", return_value=state):
+            with self.assertRaisesRegex(ValueError, "missing"):
+                nf.lease_telemetry(Path("private-window"), 10, 12)
+
+    def test_runner_marks_final_lease_health_failure_incomplete(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root); source = self.source(root); crop = {"name":"center","eye":"left","x":0,"y":0,"w":1,"h":1}
+            plan = nf.build_plan(source, 23.5, projection_evidence="p", crop_evidence="c", fixture=True,
+                                 rates_mbps=(200,), geometries=((2, 4),), codecs=("hevc",), crops=[crop], display_eye=(2, 4))
+            plan_path = root / "plan.json"; plan_path.write_text(json.dumps(plan)); metadata = root / "metadata.json"; metadata.write_text("{}")
+            observed = {"streams":[{"codec_name":"hevc","width":4,"height":4,"pix_fmt":"yuv420p","color_range":"unknown","chroma_location":"left","color_space":"unknown","color_primaries":"unknown","color_transfer":"unknown","avg_frame_rate":"0/0","r_frame_rate":"0/0","nb_read_frames":"90"}],"frames":[{"pict_type":"I","width":4,"height":4,"pix_fmt":"yuv420p"}]+[{"pict_type":"P","width":4,"height":4,"pix_fmt":"yuv420p"}]*89}
+            class Guard:
+                calls = 0
+                def status(self):
+                    self.calls += 1
+                    if self.calls >= 2: raise PermissionError("lease lost")
+                    return {}
+                def run(self, argv, *, cwd, env, timeout_s):
+                    target = Path(argv[-1]); target.write_bytes(bytes(24 * 90) if "rawvideo" in argv else b"stream"); return 0, "", ""
+            def hashes(path): return plan["source"]["sha256"] if Path(path) == source else "a" * 64
+            with mock.patch.object(fb,"_private_path",side_effect=lambda value:Path(value)), mock.patch.object(fb,"WindowGuard",return_value=Guard()), mock.patch.object(fb,"sha256_file",side_effect=hashes), mock.patch.object(fb,"verify_tools_build",return_value={"qualified":True}), mock.patch.object(fb,"hvs_gpu_sanity",return_value={"passed":True}), mock.patch.object(nf,"_run_json",return_value=observed), mock.patch.object(nf,"lease_telemetry",return_value={"measurement_mode":"quality","samples":[{}],"cleanup_verified":False}), mock.patch.object(nf,"_same_frame_scores",return_value={"codec_only":{},"displayed":{},"crops":{}}):
+                result=nf.run_plan(plan_path,source,root/"out",{"ffmpeg":sys.executable,"ffprobe":sys.executable,"psnr_hvs_m_h":sys.executable},root/"lease",tools_metadata=metadata)
+            self.assertFalse(result["complete"])
+            self.assertIn("lease_final_health_failed",result["failure_reasons"])
 
 
 if __name__ == "__main__":

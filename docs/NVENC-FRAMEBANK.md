@@ -72,7 +72,7 @@ PyroWave plan:
 ```powershell
 python -m tools.xrbench.nvenc_framebank plan --source results/local/session-09/metro.y4m `
   --vertical-pixels-per-degree 23.56428154212911 --projection-evidence session-07 `
-  --crop-evidence metro-session-09 --crops @results/local/session-09/crops.json `
+  --crop-evidence metro-session-09 --crops '@results/local/session-09/crops.json' `
   --out results/local/session-09/nvenc-plan.json
 ```
 
@@ -94,6 +94,15 @@ frame-bank tool bundle before and after the run and binds the selected HVS score
 to that bundle. The frozen source must already be `C420jpeg` and full range;
 the adapter rejects C420mpeg2, limited/unknown range and non-4:2:0 sources before
 starting the encoder.
+
+The caller owns the supervised lease and closes it after the runner returns.
+The runner does not close or clean up that external lease. Its sanitized report
+contains only lease samples captured between its start and end times: numeric
+VRAM/load values, the quality mode and VRAM margin, and allowlisted policy
+reasons. It omits process IDs, commands, paths, device IDs and owner-attestation
+data. Missing in-interval telemetry or an unhealthy final lease status makes the
+result incomplete. `lease_closed_observed` is an observation only; it does not
+claim cleanup was verified.
 
 ## Source references and validation scope
 
