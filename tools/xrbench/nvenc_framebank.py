@@ -217,6 +217,17 @@ def build_revised_q3a_plan(source: Path, vertical_pixels_per_degree: float, *,
     without changing codec-cell provenance.
     """
     _require_jpeg_full_y4m(source)
+    # The public Q3 geometry artifact wraps the executable geometry and fence
+    # evidence; accepting it directly keeps the plan bound to that record.
+    if isinstance(crop_geometry, dict) and isinstance(crop_geometry.get("geometry"), dict):
+        public_record = crop_geometry
+        crop_geometry = public_record["geometry"]
+        if fence_rectangle is None and isinstance(public_record.get("fence"), dict):
+            fence_rectangle = public_record["fence"]
+    if isinstance(fence_rectangle, dict) and isinstance(fence_rectangle.get("original"), dict):
+        fence_rectangle = fence_rectangle["original"]
+    if isinstance(fence_rectangle, dict) and isinstance(fence_rectangle.get("fence"), dict):
+        fence_rectangle = fence_rectangle["fence"].get("original")
     if not isinstance(crop_geometry, dict) or crop_geometry.get("kind") != "per_eye_crop":
         raise ValueError("revised Q3a requires frozen per-eye crop geometry")
     crop_eye = tuple(crop_geometry.get("target_eye", ()))

@@ -189,6 +189,24 @@ class NvencFramebankTests(unittest.TestCase):
         self.assertEqual(h264["mbps"], 700)
         self.assertEqual(h264["layout"], "dual_eye")
 
+    def test_revised_q3a_plan_freezes_dual_eye_and_mapped_fence(self):
+        geometry = {"kind": "per_eye_crop", "source_eye": [3072, 3232], "target_eye": [2624, 2776], "eyes": [
+            {"eye": "left", "x": 278, "y": 274, "width": 2624, "height": 2776},
+            {"eye": "right", "x": 170, "y": 274, "width": 2624, "height": 2776}]}
+        base_cell = {"fps": 90, "eye_width": 2624, "eye_height": 2776, "stereo_width": 5248,
+                     "encoded_chroma": "420", "cap_bytes": fb.cap_bytes(200), "bits_per_pixel": 1.0}
+        base = {"cells": [base_cell], "hvs_calibration": {"codec_cells": [{}], "crops": []}}
+        fence = {"eye": "left", "x": 1740, "y": 1310, "width": 240, "height": 274}
+        with mock.patch.object(nf, "_require_jpeg_full_y4m"), mock.patch.object(fb, "build_plan", return_value=base):
+            plan = nf.build_revised_q3a_plan(Path("source.y4m"), 23.5, projection_evidence="p",
+                crop_evidence="c", crop_geometry=geometry, fence_rectangle=fence, crops=[])
+        self.assertEqual(len(plan["cells"]), 10)
+        self.assertEqual(plan["fence_rectangles"]["cropped"]["mapped"],
+                         {"eye": "left", "x": 1462, "y": 1036, "width": 240, "height": 274})
+        dual = next(c for c in plan["cells"] if c["label"] == "h264-dual-p7-700")
+        self.assertEqual(dual["per_stream_mbps"], 350)
+        self.assertEqual(dual["nvenc_profile"]["preset"], "p7")
+
     def test_mocked_runner_wraps_raw_planes_and_keeps_observed_metadata(self):
         with tempfile.TemporaryDirectory() as root:
             root = Path(root); source = self.source(root)
