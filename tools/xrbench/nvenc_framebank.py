@@ -132,7 +132,9 @@ def profile(codec: str, rate_mbps: int, fps: int = fb.FPS, *, preset: str = "p4"
         "low_delay": {"zero_latency": True, "delay_frames": 0, "strict_gop": True, "low_delay_key_frame_scale": 1},
         "layout": layout, "stream_count": 2 if layout == "dual_eye" else 1,
         "spatial_aq": spatial_aq, "aq_strength": 8 if spatial_aq else None,
-        "pixel_format": defaults["pix_fmt"], "source_plane_contract": "C420jpeg_FULL",
+        "pixel_format": defaults["pix_fmt"], "native_decode_format": (
+            "8bit_420_observed" if defaults["pix_fmt"] == "yuv420p" else "10bit_420_observed"),
+        "source_plane_contract": "C420jpeg_FULL",
         "score_pixel_format": "yuv420p",
         # This single scoring conversion is deliberately full-range to
         # full-range, bilinear, accurately rounded and non-dithered.  It is
@@ -412,28 +414,23 @@ def encode_command(ffmpeg: Path | str, reference: Path, output: Path, cell: dict
 def decode_command(ffmpeg: Path | str, bitstream: Path, output: Path, frames: int, native_pix_fmt: str) -> list[str]:
     # ``+`` makes FFmpeg reject a conversion instead of selecting a compatible
     # output format. Colour/siting tags are deliberately not forced here.
-    if native_pix_fmt not in ("yuv420p", "yuvj420p", "p010le"):
+    if native_pix_fmt not in ("yuv420p", "yuvj420p", "p010le", "yuv420p10le"):
         raise ValueError("NVENC decoded native 4:2:0 format is unsupported")
     return [str(ffmpeg), "-y", "-hide_banner", "-loglevel", "error", "-i", str(bitstream),
             "-map", "0:v:0", "-frames:v", str(frames), "-pix_fmt", "+" + native_pix_fmt,
             "-fps_mode", "passthrough", "-f", "rawvideo", str(output)]
 
 
-def decode_for_scoring_command(ffmpeg: Path | str, bitstream: Path, output: Path, frames: int,
-                               native_pix_fmt: str, profile_record: dict) -> list[str]:
-    """Decode with a pin-checked raw format, then one documented 10->8 filter."""
-    command = decode_command(ffmpeg, bitstream, output, frames, native_pix_fmt)
-    expected_native = profile_record["pixel_format"]
-    if native_pix_fmt != expected_native:
-        raise ValueError("NVENC decoder pixel format differs from frozen profile")
-    if native_pix_fmt == "p010le":
-        raw_index = command.index("-pix_fmt")
-        # Replace the no-conversion raw output with a single explicit, full
-        # range scaler followed by format conversion.  The probe remains the
-        # proof that the elementary stream actually decoded as p010le.
-        command[raw_index:raw_index + 2] = ["-vf", profile_record["score_downconvert_filter"],
-                                             "-pix_fmt", "yuv420p", "-color_range", "pc"]
-    return command
+def score_convert_command(ffmpeg: Path | str, native_raw: Path, output: Path, info: fb.Y4MInfo,
+                          native_pix_fmt: str, profile_record: dict) -> list[str]:
+    """Convert verified native raw 10-bit planes once for the 8-bit scorer."""
+    if native_pix_fmt not in ("p010le", "yuv420p10le"):
+        raise ValueError("score conversion requires an observed 10-bit 4:2:0 layout")
+    return [str(ffmpeg), "-y", "-hide_banner", "-loglevel", "error", "-f", "rawvideo",
+            "-pix_fmt", native_pix_fmt, "-video_size", f"{info.width}x{info.height}",
+            "-framerate", f"{info.fps_num}/{info.fps_den}", "-i", str(native_raw),
+            "-frames:v", str(info.frames), "-vf", profile_record["score_downconvert_filter"],
+            "-pix_fmt", "yuv420p", "-color_range", "pc", "-f", "rawvideo", str(output)]
 
 
 def probe_command(ffprobe: Path | str, bitstream: Path, output: Path) -> list[str]:
@@ -460,10 +457,11 @@ def validate_probe(value: dict, cell: dict, frames: int) -> dict:
             raise ValueError("NVENC bitstream metadata mismatch: " + key)
     # Direct probe tests and schema-1 callers did not carry an encoder profile.
     # Production cells always do, so their native precision is fail-closed.
-    expected_pix_fmt = cell.get("nvenc_profile", {}).get("pixel_format", "yuv420p")
-    native_formats = ("yuv420p", "yuvj420p") if expected_pix_fmt == "yuv420p" else ("p010le",)
+    expected_class = cell.get("nvenc_profile", {}).get("native_decode_format", "8bit_420_observed")
+    native_formats = (("yuv420p", "yuvj420p") if expected_class == "8bit_420_observed"
+                      else ("p010le", "yuv420p10le"))
     if stream.get("pix_fmt") not in native_formats:
-        raise ValueError("NVENC bitstream native 8-bit 4:2:0 format mismatch")
+        raise ValueError("NVENC bitstream native 4:2:0 format mismatch")
     if str(stream.get("nb_read_frames")) != str(frames):
         raise ValueError("NVENC bitstream frame count mismatch")
     pictures = value.get("frames")
@@ -488,6 +486,32 @@ def validate_probe(value: dict, cell: dict, frames: int) -> dict:
             "pix_fmt": stream["pix_fmt"], "frames": frames, "picture_types": {t: types.count(t) for t in sorted(set(types))},
             "ffprobe_observed_metadata": observed, "external_sequence_rate": f"{cell['fps']}/1",
             "bitstream_timing_confirmed": False}
+
+
+def native_raw_record(raw: Path, info: fb.Y4MInfo, native_pix_fmt: str) -> dict:
+    """Prove native decoder payload layout and bounds before score conversion."""
+    if native_pix_fmt in ("yuv420p", "yuvj420p"):
+        bytes_per_frame, depth, layout, alignment = info.frame_bytes, 8, "planar", "8bit"
+    elif native_pix_fmt == "p010le":
+        bytes_per_frame, depth, layout, alignment = info.width * info.height * 3, 10, "semiplanar", "msb_aligned_16bit"
+    elif native_pix_fmt == "yuv420p10le":
+        bytes_per_frame, depth, layout, alignment = info.width * info.height * 3, 10, "planar", "lsb_aligned_16bit"
+    else:
+        raise ValueError("native decoder format is unsupported")
+    if Path(raw).stat().st_size != bytes_per_frame * info.frames:
+        raise ValueError("native_decoded_raw_byte_count_mismatch")
+    hashes = []
+    with Path(raw).open("rb") as stream:
+        for _ in range(info.frames):
+            payload = stream.read(bytes_per_frame)
+            if len(payload) != bytes_per_frame:
+                raise ValueError("native_decoded_raw_byte_count_mismatch")
+            hashes.append(hashlib.sha256(payload).hexdigest())
+        if stream.read(1):
+            raise ValueError("native_decoded_raw_byte_count_mismatch")
+    return {"observed_pix_fmt": native_pix_fmt, "bit_depth": depth, "plane_layout": layout,
+            "sample_alignment": alignment, "bytes_per_frame": bytes_per_frame,
+            "frame_payload_sha256": hashes, "frames": info.frames}
 
 
 def _run_json(guard, command, output, directory, timeout):
@@ -828,7 +852,8 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                 raw_eyes = []
                 for eye_name, eye_ref, eye_info in (("left", left_ref, left_info), ("right", right_ref, right_info)):
                     eye_stream = directory / f"encoded-{eye_name}.{_ext(cell['codec'])}"
-                    eye_raw = directory / f"decoded-{eye_name}.raw"
+                    eye_native_raw = directory / f"decoded-{eye_name}-native.raw"
+                    eye_score_raw = directory / f"decoded-{eye_name}-score.raw"
                     stream_cell = dict(row)
                     stream_cell["nvenc_profile"] = profile(cell["codec"], cell["per_stream_mbps"], cell["fps"],
                                                               preset=row["nvenc_profile"]["preset"], spatial_aq=row["nvenc_profile"]["spatial_aq"],
@@ -839,15 +864,24 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                     eye_probe_path = directory / f"bitstream-probe-{eye_name}.json"
                     eye_cell = dict(stream_cell); eye_cell["stereo_width"] = eye_info.width; eye_cell["eye_height"] = eye_info.height
                     probe = validate_probe(_run_json(guard, probe_command(needed["ffprobe"], eye_stream, eye_probe_path), eye_probe_path, directory, command_timeout_s), eye_cell, eye_info.frames)
-                    code, _, _, decode_timing = _run_timed(guard, decode_for_scoring_command(needed["ffmpeg"], eye_stream, eye_raw, eye_info.frames, probe["pix_fmt"], stream_cell["nvenc_profile"]), directory, command_timeout_s)
-                    if code or not eye_raw.is_file():
+                    code, _, _, decode_timing = _run_timed(guard, decode_command(needed["ffmpeg"], eye_stream, eye_native_raw, eye_info.frames, probe["pix_fmt"]), directory, command_timeout_s)
+                    if code or not eye_native_raw.is_file():
                         raise RuntimeError("nvenc_decode_failed")
+                    native_record = native_raw_record(eye_native_raw, eye_info, probe["pix_fmt"])
+                    if native_record["bit_depth"] == 10:
+                        code, _, _, score_timing = _run_timed(guard, score_convert_command(needed["ffmpeg"], eye_native_raw, eye_score_raw, eye_info, probe["pix_fmt"], stream_cell["nvenc_profile"]), directory, command_timeout_s)
+                        if code or not eye_score_raw.is_file():
+                            raise RuntimeError("nvenc_score_conversion_failed")
+                    else:
+                        eye_score_raw, score_timing = eye_native_raw, None
                     streams.append({"eye": eye_name, "profile": stream_cell["nvenc_profile"], "bitstream": {**probe,
                         "actual_elementary_stream_bytes": eye_stream.stat().st_size,
                         "actual_mbps_external_f90_normalization": eye_stream.stat().st_size * 8 * cell["fps"] / eye_info.frames / 1_000_000},
+                        "native_decoded_raw": native_record,
                         "encode_process_completion_diagnostic": timing,
-                        "decode_process_completion_diagnostic": decode_timing})
-                    raw_eyes.append(eye_raw)
+                        "decode_process_completion_diagnostic": decode_timing,
+                        "score_conversion_process_completion_diagnostic": score_timing})
+                    raw_eyes.append(eye_score_raw)
                 _join_stereo_raw(raw_eyes[0], raw_eyes[1], left_info, raw_decoded)
                 row["streams"] = streams
                 row["bitstream"] = {"layout": "dual_eye", "stream_count": 2,
@@ -862,11 +896,21 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                 probe = validate_probe(_run_json(guard, probe_command(needed["ffprobe"], stream, probe_json), probe_json, directory, command_timeout_s), row, ref_info.frames)
                 row["bitstream"] = {**probe, "actual_elementary_stream_bytes": stream.stat().st_size,
                     "actual_mbps_external_f90_normalization": stream.stat().st_size * 8 * cell["fps"] / ref_info.frames / 1_000_000}
-                code, _, _, decode_timing = _run_timed(guard, decode_for_scoring_command(needed["ffmpeg"], stream, raw_decoded, ref_info.frames, probe["pix_fmt"], row["nvenc_profile"]), directory, command_timeout_s)
-                if code or not raw_decoded.is_file():
+                native_raw = directory / "decoded-native.raw"
+                code, _, _, decode_timing = _run_timed(guard, decode_command(needed["ffmpeg"], stream, native_raw, ref_info.frames, probe["pix_fmt"]), directory, command_timeout_s)
+                if code or not native_raw.is_file():
                     raise RuntimeError("nvenc_decode_failed")
+                native_record = native_raw_record(native_raw, ref_info, probe["pix_fmt"])
+                if native_record["bit_depth"] == 10:
+                    code, _, _, score_timing = _run_timed(guard, score_convert_command(needed["ffmpeg"], native_raw, raw_decoded, ref_info, probe["pix_fmt"], row["nvenc_profile"]), directory, command_timeout_s)
+                    if code or not raw_decoded.is_file():
+                        raise RuntimeError("nvenc_score_conversion_failed")
+                else:
+                    raw_decoded, score_timing = native_raw, None
                 row["encode_process_completion_diagnostic"] = timing
                 row["decode_process_completion_diagnostic"] = decode_timing
+                row["score_conversion_process_completion_diagnostic"] = score_timing
+                row["native_decoded_raw"] = native_record
             row["decoded_raw_wrapper"] = wrap_raw_payload(raw_decoded, ref_info, decoded)
             decoded_info = fb.inspect_y4m(decoded)
             fb._assert_same_frames(ref, decoded, ref_info)

@@ -41,8 +41,11 @@ coverage fraction; they are never moved, intersected or resized. Q3b uses
 `with_foveation_source` after WO-8 lands. Its transform descriptor is opt-in,
 records profile/softness/blur-only mode, and applies only after this crop.
 
-HEVC and AV1 encode and natively decode as `p010le`. The score-only conversion
-is one explicit full-range, non-dithered filter:
+HEVC and AV1 encode from `p010le`; their decoder layout is observed rather than
+assumed. The adapter accepts and records either planar `yuv420p10le` or
+semiplanar `p010le`, verifies its native raw payload before scoring, and keeps
+the layout/alignment and per-frame hashes private. The score-only conversion is
+one explicit full-range, non-dithered filter:
 `scale=in_range=full:out_range=full:flags=bilinear+accurate_rnd:sws_dither=none,format=yuv420p`.
 The native probe must first prove `p010le`; no format or range fallback is used.
 Each report labels 1–90 and 10–89 score windows. Fence metrics are supplied by

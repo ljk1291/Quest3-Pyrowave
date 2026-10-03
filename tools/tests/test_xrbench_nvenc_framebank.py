@@ -92,7 +92,7 @@ class NvencFramebankTests(unittest.TestCase):
         self.assertEqual(nf.validate_probe(yuvj, cell, 90)["pix_fmt"], "yuvj420p")
         ten_bit = json.loads(json.dumps(valid)); ten_bit["streams"][0]["pix_fmt"] = "p010le"
         for frame in ten_bit["frames"]: frame["pix_fmt"] = "p010le"
-        with self.assertRaisesRegex(ValueError, "8-bit 4:2:0"):
+        with self.assertRaisesRegex(ValueError, "native 4:2:0"):
             nf.validate_probe(ten_bit, cell, 90)
         for mutation, message in ((lambda v: v["streams"][0].update(color_range="tv"), "range contradicts"),
                                   (lambda v: v["frames"].__setitem__(3, {"pict_type":"B", "width":6144, "height":3232, "pix_fmt":"yuv420p"}), "B or unknown"),
@@ -174,10 +174,23 @@ class NvencFramebankTests(unittest.TestCase):
 
     def test_ten_bit_scoring_conversion_is_explicit_full_range_and_non_dithered(self):
         record = nf.profile("av1", 200, preset="p7")
-        command = nf.decode_for_scoring_command("ffmpeg", Path("in.av1"), Path("out.raw"), 90, "p010le", record)
+        info = fb.Y4MInfo(4, 4, 90, 1, "420", "FULL", 24, 90)
+        command = nf.score_convert_command("ffmpeg", Path("in.raw"), Path("out.raw"), info, "p010le", record)
         self.assertIn("scale=in_range=full:out_range=full:flags=bilinear+accurate_rnd:sws_dither=none,format=yuv420p", command)
-        self.assertEqual(command[command.index("-pix_fmt") + 1], "yuv420p")
+        self.assertEqual(command[[i for i, value in enumerate(command) if value == "-pix_fmt"][-1] + 1], "yuv420p")
         self.assertEqual(command[command.index("-color_range") + 1], "pc")
+
+    def test_native_ten_bit_layouts_are_observed_and_hashed_before_scoring(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root); info = fb.Y4MInfo(4, 4, 90, 1, "420", "FULL", 24, 2)
+            for fmt, layout, alignment in (("p010le", "semiplanar", "msb_aligned_16bit"),
+                                           ("yuv420p10le", "planar", "lsb_aligned_16bit")):
+                raw = root / (fmt + ".raw"); raw.write_bytes(bytes(48 * 2))
+                record = nf.native_raw_record(raw, info, fmt)
+                self.assertEqual(record["bit_depth"], 10)
+                self.assertEqual(record["plane_layout"], layout)
+                self.assertEqual(record["sample_alignment"], alignment)
+                self.assertEqual(len(record["frame_payload_sha256"]), 2)
 
     def test_revised_matrix_lists_all_crop_and_full_reference_cells(self):
         cells = nf.revised_q3a_cells()
@@ -224,7 +237,8 @@ class NvencFramebankTests(unittest.TestCase):
                 def status(self): return {}
                 def run(self, argv, *, cwd, env, timeout_s):
                     target = Path(argv[-1])
-                    if "rawvideo" in argv: target.write_bytes(bytes(24 * 90))
+                    if "+p010le" in argv: target.write_bytes(bytes(48 * 90))
+                    elif "rawvideo" in argv: target.write_bytes(bytes(24 * 90))
                     elif "hevc" in argv: target.write_bytes(b"stream")
                     return 0, "", ""
             def hashes(path):
@@ -279,7 +293,7 @@ class NvencFramebankTests(unittest.TestCase):
                     if self.calls >= 2: raise PermissionError("lease lost")
                     return {}
                 def run(self, argv, *, cwd, env, timeout_s):
-                    target = Path(argv[-1]); target.write_bytes(bytes(24 * 90) if "rawvideo" in argv else b"stream"); return 0, "", ""
+                    target = Path(argv[-1]); target.write_bytes(bytes(48 * 90) if "+p010le" in argv else (bytes(24 * 90) if "rawvideo" in argv else b"stream")); return 0, "", ""
             def hashes(path): return plan["source"]["sha256"] if Path(path) == source else "a" * 64
             with mock.patch.object(fb,"_private_path",side_effect=lambda value:Path(value)), mock.patch.object(fb,"WindowGuard",return_value=Guard()), mock.patch.object(fb,"sha256_file",side_effect=hashes), mock.patch.object(fb,"verify_tools_build",return_value={"qualified":True}), mock.patch.object(fb,"hvs_gpu_sanity",return_value={"passed":True}), mock.patch.object(nf,"_run_json",return_value=observed), mock.patch.object(nf,"lease_telemetry",return_value={"measurement_mode":"quality","samples":[{}],"cleanup_verified":False}), mock.patch.object(nf,"_same_frame_scores",return_value={"codec_only":{},"displayed":{},"crops":{}}):
                 result=nf.run_plan(plan_path,source,root/"out",{"ffmpeg":sys.executable,"ffprobe":sys.executable,"psnr_hvs_m_h":sys.executable},root/"lease",tools_metadata=metadata)
