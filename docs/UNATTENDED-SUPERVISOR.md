@@ -67,3 +67,10 @@ mutations and reject legacy/unknown property changes. A `frame_bank_pc` or
 install-only arm cannot mutate VR/device settings. SteamVR updates must address
 the saved settings path. OpenXR checks also compare the runtime manifest bytes,
 and startup refuses corrupt backups before guard/mutation setup.
+
+Short offline jobs now use `OpenProcess`, `QueryFullProcessImageNameW` and
+`GetProcessTimes` to obtain identity on one retained handle without starting a
+shell. Creation time uses the same millisecond convention as cleanup. Both
+Windows CPU checks pass locally, including a short child that could finish
+before the former PowerShell query. No GPU execution or timing claim follows
+from this process-registration test.

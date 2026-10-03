@@ -293,14 +293,7 @@ class Host:
             return state is not False
         return False
     def process_identity(self, pid):
-        if os.name != 'nt': raise Refusal('Windows process identity is required')
-        script=("$p=Get-Process -Id %d -ErrorAction Stop; "
-                "@{pid=$p.Id;path=$p.Path;started_epoch_s=([DateTimeOffset]$p.StartTime.ToUniversalTime()).ToUnixTimeMilliseconds()/1000.0}|ConvertTo-Json -Compress") % int(pid)
-        try:
-            value=json.loads(self.run('powershell','-NoProfile','-NonInteractive','-Command',script,timeout=10))
-            if not value.get('path'): raise ValueError('process path unavailable')
-            return value
-        except (ValueError, TypeError, Refusal) as exc: raise Refusal('process identity unavailable: '+str(exc))
+        return windows_process_identity(pid)
     def stop_owned_runtime(self, record):
         """Gracefully close, then force only the already verified owned PID."""
         try: actual=self.process_identity(record['pid'])
@@ -316,6 +309,34 @@ class Host:
         if os.name=='nt':
             flags=0x80000000 | (0x00000001 if active else 0)
             ctypes.windll.kernel32.SetThreadExecutionState(flags)
+
+def windows_process_identity(pid):
+    """Query one retained handle promptly, including for short offline children."""
+    if os.name!='nt': raise Refusal('Windows process identity is required')
+    from ctypes import wintypes as w
+    pid=int(pid)
+    if not 0<pid<=0xffffffff: raise Refusal('invalid process identity')
+    kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+    kernel.OpenProcess.argtypes=[w.DWORD,w.BOOL,w.DWORD]; kernel.OpenProcess.restype=w.HANDLE
+    kernel.QueryFullProcessImageNameW.argtypes=[w.HANDLE,w.DWORD,w.LPWSTR,ctypes.POINTER(w.DWORD)]
+    kernel.QueryFullProcessImageNameW.restype=w.BOOL
+    kernel.GetProcessTimes.argtypes=[w.HANDLE]+[ctypes.POINTER(w.FILETIME)]*4
+    kernel.GetProcessTimes.restype=w.BOOL
+    kernel.CloseHandle.argtypes=[w.HANDLE]; kernel.CloseHandle.restype=w.BOOL
+    handle=kernel.OpenProcess(0x1000,False,pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle: raise Refusal('process identity unavailable')
+    try:
+        path=ctypes.create_unicode_buffer(32768); size=w.DWORD(len(path))
+        created=w.FILETIME(); exited=w.FILETIME(); kernel_time=w.FILETIME(); user_time=w.FILETIME()
+        if (not kernel.QueryFullProcessImageNameW(handle,0,path,ctypes.byref(size)) or
+                not kernel.GetProcessTimes(handle,ctypes.byref(created),ctypes.byref(exited),
+                                           ctypes.byref(kernel_time),ctypes.byref(user_time))):
+            raise Refusal('process identity unavailable')
+        ticks=(int(created.dwHighDateTime)<<32)|int(created.dwLowDateTime)
+        # Same millisecond convention as the retained-handle PowerShell stop.
+        started=(ticks//10000-11644473600000)/1000.0
+        return {'pid':pid,'path':path.value,'started_epoch_s':started}
+    finally: kernel.CloseHandle(handle)
 
 def owned_stop_script(record):
     """Verify and retain the same Windows process handle through termination."""
