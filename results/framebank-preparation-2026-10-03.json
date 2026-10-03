@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "kind": "metro_framebank_preparation",
+  "status": "prepared_not_scored",
+  "source_sha256": "e61163143ec9e75634fc89fcc06b3bb007667a53d94a0cbf97a39c09b452a0c2",
+  "frozen_plan_sha256": "9652f47fe4b435f20f795ed78dcc5bef43418b94955e81ca380438c1251b552a",
+  "source_frames": 90,
+  "source_stereo_dimensions": [6144, 3232],
+  "source_format": "native 8-bit YUV 4:2:0 full range",
+  "source_capture_build": "d1c3b3d4edb354be8176ccaf5604918fe9ee4a52",
+  "profile_cells": 36,
+  "wavelets": ["haar", "53", "97"],
+  "bitrates_mbps": [300, 500, 600, 800],
+  "encoded_eye_dimensions": [[3072, 3232], [2560, 2688], [2080, 2208]],
+  "target_cap_fps": 90,
+  "crop_names": ["ui_late_region", "tunnel_fog_region", "rail_diagonal_region", "wood_gravel_region"],
+  "reviewed_source_frame_indices": [0, 44, 89],
+  "projection_calibration": {
+    "measured_projection_session": "07",
+    "source_capture_session": "09",
+    "horizontal_center_pixels_per_degree": 24.20084103027429,
+    "vertical_center_pixels_per_degree": 23.56428154212911,
+    "method": "center perspective-projection derivative",
+    "limitation": "Session 09 has no independently retained projection dump; Session 07 baseline geometry is reused."
+  },
+  "limitations": [
+    "Changing tunnel and late-menu content; not 90 static-checkpoint frames and no verified foliage.",
+    "Encoder-input planes are a reference, not PyroWave decoded output.",
+    "No encoder, decoder, scorer or unattended hardware window was launched during preparation.",
+    "Full CI and the guarded restoration dry run remain prerequisites."
+  ],
+  "quality_metrics": null,
+  "fresh_submission_rate": null,
+  "display_fps": null,
+  "optical_latency_ms": null,
+  "optimization_promoted": false
+}

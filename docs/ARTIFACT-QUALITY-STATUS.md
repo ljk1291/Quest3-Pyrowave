@@ -123,3 +123,34 @@ Take the first unblocked item. Items marked ∥ are independent.
   No unattended window has opened: WO-0 must first pass review, full CI and its
   dry run. The installed d1 pair, baseline defaults and VD settings are
   unchanged. Source work is unblocked; no optimization has been promoted.
+
+- 2026-10-03, checkpoint guard concurrency and frozen Metro comparison:
+  The eight-hour owner exception/source-review record merged after
+  [full CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37078606818)
+  passed. [WO-0](https://github.com/ljk1291/Quest3-Pyrowave/pull/10) now has 64
+  focused CPU regressions, including a settings API update overlapping rollback,
+  simultaneous owned-job registration, crash-released locks, repeated restoration,
+  failure publication and lost monitor telemetry. After integration, 13 build
+  contract checks, 102 repository unit tests and 9 geometry tests also passed.
+  Its Actions CPU and Android jobs passed; Windows/full-pair validation and the
+  required bounded dry run remain. Global selector changes and guarded
+  chart/property/install orchestration are explicit remaining controller work.
+  The current arm permits only `frame_bank_pc`.
+  [WO-1](https://github.com/ljk1291/Quest3-Pyrowave/pull/8) failed Windows scorer
+  preparation in [this run](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37079088302):
+  Git found the enclosing fork and silently skipped the scorer patch. A reproduced
+  nested-repository regression fixes that scope; 27 focused harness/scorer tests
+  now pass. The runner also binds packaged binaries to their commit/dependencies
+  and clears inherited codec experiments, requiring activation confirmation.
+  [WO-4](https://github.com/ljk1291/Quest3-Pyrowave/pull/6)'s first combined
+  build caught a missed shared `stream.rs` constructor change. Its corrected
+  cumulative patch includes all four required client files, preserves the other
+  WO-5 files and default shader bytes, and passes clean apply/reverse/identity
+  checks. Both corrected PRs require new full CI before merge.
+  The 90-frame Metro plan is frozen with 36 cells and four reviewed spatial crops.
+  It reuses Session 07's measured projection at 24.20 horizontal / 23.56 vertical
+  centre px/deg; Session 09 has no separate retained projection measurement.
+  [Preparation record and limitations](../results/framebank-preparation-2026-10-03.json).
+  No unattended window or codec/scorer workload has started. No quality gain,
+  fresh-rate gain or stable 90-Hz pass is claimed. Source/build work is unblocked;
+  the goal remains active.
