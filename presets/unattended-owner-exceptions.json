@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "once_windows": [
+    {
+      "id": "owner-approved-2026-10-03-frame-bank-eight-hours",
+      "authority": "Owner explicitly approved eight hours instead of six in this chat on 2026-10-03.",
+      "mode": "once",
+      "timezone": "Europe/Berlin",
+      "not_before_local": "2026-10-03T00:44:31",
+      "not_after_local": "2026-10-03T08:44:31",
+      "expires_local": "2026-10-03T08:44:31",
+      "allow": ["frame_bank_pc"],
+      "arm_max_window_hours": 6,
+      "approved_max_window_hours": 8
+    }
+  ]
+}
