@@ -69,7 +69,8 @@ int main(int argc, char **argv)
 
         Global::init(Global::MANAGER_FEATURE_DEFAULT_BITS, 1);
         // argv[0] is an absolute packaged-tool path supplied by the frame-bank runner.
-        Filesystem::setup_default_filesystem(GRANITE_FILESYSTEM(), Path::basedir(argv[0]));
+        const auto assets_directory = Path::basedir(argv[0]);
+        Filesystem::setup_default_filesystem(GRANITE_FILESYSTEM(), assets_directory.c_str());
         Context::SystemHandles system = {};
         system.filesystem = GRANITE_FILESYSTEM();
         system.thread_group = GRANITE_THREAD_GROUP();
