@@ -467,6 +467,18 @@ def hvs_gpu_sanity(tool,directory,vertical_ppd,guard,env,timeout):
             'amplitude_ratio_delta_db':observed,'expected_delta_db':expected,'tolerance_db':.03}
 
 def _valid_metric(k,v): return isinstance(v,(int,float)) and not math.isnan(v) and (math.isfinite(v) or k.startswith("psnr"))
+def parse_psnr_summary(text):
+    """Sequence PSNR from FFmpeg's summary, never a rounded per-frame row.
+
+    The summary uses the mean squared error across the complete comparison.
+    Per-frame stats cannot substitute for it, particularly in a log tail.
+    Exactly one summary is required by our fixed one-PSNR-filter graph.
+    """
+    number=r'(?:[0-9]+(?:\.[0-9]+)?|inf)'
+    summaries=re.findall(r'\bPSNR y:('+number+r') u:('+number+r') v:('+number+r') average:',text)
+    if len(summaries)!=1: raise ValueError('exactly one aggregate PSNR summary is required')
+    return dict(zip(('psnr_y','psnr_u','psnr_v'),map(float,summaries[0])))
+
 def _score_ffmpeg(tool,distorted,reference,workdir,guard,env,timeout_s):
     # This is rdmatrix.score's established ffmpeg graph, but the process is run
     # through WO-0 so a revoked lease terminates it too.
@@ -477,7 +489,7 @@ def _score_ffmpeg(tool,distorted,reference,workdir,guard,env,timeout_s):
     code,out,err=guard.run([str(tool),"-hide_banner","-i",str(Path(distorted).resolve()),"-i",str(Path(reference).resolve()),"-lavfi",graph,"-map","[p]","-map","[s]","-map","[v]","-f","null","-"],cwd=workdir,env=env,timeout_s=timeout_s)
     text=out+err
     if code: raise RuntimeError("ffmpeg/libvmaf scorer failed")
-    values={}; values.update(rdmatrix.parse_psnr(text) or {}); values.update(rdmatrix.parse_ssim(text) or {})
+    values=parse_psnr_summary(text); values.update(rdmatrix.parse_ssim(text) or {})
     log=Path(workdir)/"vmaf.json"
     values.update(rdmatrix.parse_vmaf_log(log))
     log.unlink(missing_ok=True)

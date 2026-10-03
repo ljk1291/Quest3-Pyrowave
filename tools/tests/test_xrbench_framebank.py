@@ -103,6 +103,16 @@ class FrameBankTests(unittest.TestCase):
     def test_lossless_psnr_infinity_is_valid(self):
         self.assertTrue(fb._valid_metric("psnr_y",math.inf));self.assertFalse(fb._valid_metric("vmaf",math.inf));self.assertFalse(fb._valid_metric("psnr_y",math.nan))
 
+    def test_psnr_uses_sequence_summary_and_refuses_per_frame_fallback(self):
+        frame='n:73 mse_avg:12.0 psnr_y:38.98 psnr_u:44.19 psnr_v:43.13\n'
+        summary='[Parsed_psnr_2 @ address] PSNR y:38.768136 u:43.553428 v:43.310945 average:39.843862 min:36.468671 max:46.481952\n'
+        expected={'psnr_y':38.768136,'psnr_u':43.553428,'psnr_v':43.310945}
+        self.assertEqual(fb.parse_psnr_summary(frame+summary),expected)
+        with self.assertRaises(ValueError): fb.parse_psnr_summary(frame)
+        with self.assertRaises(ValueError): fb.parse_psnr_summary(summary*2)
+        self.assertEqual(fb.parse_psnr_summary('PSNR y:inf u:inf v:inf average:inf'),
+                         dict.fromkeys(('psnr_y','psnr_u','psnr_v'),math.inf))
+
     def test_libvmaf_null_hvs_preserves_separate_vmaf_without_inventing_values(self):
         from xrbench import rdmatrix
         with self.tmp() as t:
