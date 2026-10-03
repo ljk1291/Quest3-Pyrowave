@@ -83,6 +83,7 @@ class NvencFramebankTests(unittest.TestCase):
                  "color_transfer":"unknown", "r_frame_rate":"0/0", "nb_read_frames":"90"}],
                  "frames":[{"pict_type":"I", "width":6144, "height":3232, "pix_fmt":"yuv420p"}] +
                  [{"pict_type":"P", "width":6144, "height":3232, "pix_fmt":"yuv420p"}] * 89}
+        for index, frame in enumerate(valid["frames"]): frame["key_frame"] = int(index == 0)
         result = nf.validate_probe(valid, cell, 90)
         self.assertEqual(result["picture_types"], {"I":1, "P":89})
         self.assertEqual(result["ffprobe_observed_metadata"]["avg_frame_rate"], "0/0")
@@ -96,6 +97,7 @@ class NvencFramebankTests(unittest.TestCase):
             nf.validate_probe(ten_bit, cell, 90)
         for mutation, message in ((lambda v: v["streams"][0].update(color_range="tv"), "range contradicts"),
                                   (lambda v: v["frames"].__setitem__(3, {"pict_type":"B", "width":6144, "height":3232, "pix_fmt":"yuv420p"}), "B or unknown"),
+                                  (lambda v: v["frames"][1].update(key_frame=1), "exactly one initial"),
                                   (lambda v: v["streams"][0].update(nb_read_frames="89"), "frame count")):
             candidate = json.loads(json.dumps(valid)); mutation(candidate)
             with self.assertRaisesRegex(ValueError, message):
@@ -233,6 +235,7 @@ class NvencFramebankTests(unittest.TestCase):
                 "color_transfer":"unknown", "avg_frame_rate":"0/0", "r_frame_rate":"0/0", "nb_read_frames":"90"}],
                 "frames":[{"pict_type":"I", "width":4, "height":4, "pix_fmt":"p010le"}] +
                 [{"pict_type":"P", "width":4, "height":4, "pix_fmt":"p010le"}] * 89}
+            for index, frame in enumerate(observed["frames"]): frame["key_frame"] = int(index == 0)
             class Guard:
                 def status(self): return {}
                 def run(self, argv, *, cwd, env, timeout_s):
@@ -286,6 +289,7 @@ class NvencFramebankTests(unittest.TestCase):
                                  rates_mbps=(200,), geometries=((2, 4),), codecs=("hevc",), crops=[crop], display_eye=(2, 4))
             plan_path = root / "plan.json"; plan_path.write_text(json.dumps(plan)); metadata = root / "metadata.json"; metadata.write_text("{}")
             observed = {"streams":[{"codec_name":"hevc","width":4,"height":4,"pix_fmt":"p010le","color_range":"unknown","chroma_location":"left","color_space":"unknown","color_primaries":"unknown","color_transfer":"unknown","avg_frame_rate":"0/0","r_frame_rate":"0/0","nb_read_frames":"90"}],"frames":[{"pict_type":"I","width":4,"height":4,"pix_fmt":"p010le"}]+[{"pict_type":"P","width":4,"height":4,"pix_fmt":"p010le"}]*89}
+            for index, frame in enumerate(observed["frames"]): frame["key_frame"] = int(index == 0)
             class Guard:
                 calls = 0
                 def status(self):

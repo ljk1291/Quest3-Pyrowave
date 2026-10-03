@@ -300,16 +300,15 @@ def build_revised_q3a_plan(source: Path, vertical_pixels_per_degree: float, *,
 
 
 def with_foveation_source(plan: dict, *, profile: str, softness: float, blur_only: bool) -> dict:
-    """Return a new frozen Q3b-ready plan; it never alters the Q3a manifest."""
-    validate_plan(plan)
-    if plan.get("source_adapter", {}).get("kind") != "per_eye_crop":
-        raise ValueError("foveation requires the frozen cropped-source adapter")
-    candidate = copy.deepcopy(plan)
-    candidate["source_adapter"]["future_transform"] = foveation_transform_descriptor(
-        profile=profile, softness=softness, blur_only=blur_only)
-    candidate["q3_revision"] = "2026-10-04-q3b"
-    validate_plan(candidate)
-    return candidate
+    """Reject premature Q3b use until reduced-plane WO-8 scoring lands.
+
+    A full-size forward+inverse warp would only blur/remap at the crop geometry;
+    it cannot measure foveation's requested reduced-pixel encoder allocation.
+    The later adapter must encode WO-8's reduced planes, reconstruct decoded
+    planes, and compare sharp plus matching-blur references by band.
+    """
+    foveation_transform_descriptor(profile=profile, softness=softness, blur_only=blur_only)
+    raise RuntimeError("Q3b reduced-plane adapter and band scoring are not implemented")
 
 
 def _validate_source_adapter(plan: dict) -> None:
@@ -435,7 +434,7 @@ def score_convert_command(ffmpeg: Path | str, native_raw: Path, output: Path, in
 
 def probe_command(ffprobe: Path | str, bitstream: Path, output: Path) -> list[str]:
     return [str(ffprobe), "-v", "error", "-count_frames", "-show_streams", "-show_frames",
-            "-show_entries", "stream=codec_name,width,height,pix_fmt,color_range,chroma_location,color_space,color_primaries,color_transfer,avg_frame_rate,r_frame_rate,nb_read_frames:frame=pict_type,width,height,pix_fmt",
+            "-show_entries", "stream=codec_name,width,height,pix_fmt,color_range,chroma_location,color_space,color_primaries,color_transfer,avg_frame_rate,r_frame_rate,nb_read_frames:frame=pict_type,key_frame,width,height,pix_fmt",
             "-of", "json", "-o", str(output), str(bitstream)]
 
 
@@ -470,6 +469,9 @@ def validate_probe(value: dict, cell: dict, frames: int) -> dict:
     types = [row.get("pict_type") for row in pictures if isinstance(row, dict)]
     if len(types) != frames or any(t not in ("I", "P") for t in types):
         raise ValueError("NVENC bitstream contains B or unknown picture type")
+    key_frames = [row.get("key_frame") for row in pictures]
+    if key_frames != [1] + [0] * (frames - 1):
+        raise ValueError("NVENC bitstream must have exactly one initial key frame")
     if any(row.get("width") != cell["stereo_width"] or row.get("height") != cell["eye_height"]
            or row.get("pix_fmt") != stream.get("pix_fmt") for row in pictures):
         raise ValueError("NVENC decoded frame format mismatch")
@@ -742,6 +744,38 @@ def lease_telemetry(window: Path, start_epoch_s: float, end_epoch_s: float) -> d
             "cleanup_verified": False}
 
 
+def _window_y4m(source: Path, info: fb.Y4MInfo, output: Path, start_one_based: int, end_one_based: int) -> fb.Y4MInfo:
+    """Write an exact inclusive source-frame window without timing duplication."""
+    if not 1 <= start_one_based <= end_one_based <= info.frames:
+        raise ValueError("invalid score frame window")
+    window = fb.Y4MInfo(info.width, info.height, info.fps_num, info.fps_den, info.chroma,
+                        info.color_range, info.frame_bytes, end_one_based - start_one_based + 1)
+    with fb._open_writer(output, window) as target:
+        for index, planes, _ in fb.iter_y4m(source, info):
+            if start_one_based - 1 <= index < end_one_based:
+                fb._write_frame(target, window, planes)
+    return window
+
+
+def _score_pair_windows(tools, distorted: Path, reference: Path, info: fb.Y4MInfo, workdir: Path,
+                        vertical_ppd: float, guard, timeout: float) -> dict:
+    """All primary metrics for both required Q3 frame windows."""
+    Path(workdir).mkdir(parents=True, exist_ok=True)
+    common = dict(guard=guard, env=os.environ.copy(), timeout_s=timeout)
+    all_score = fb.score_pair(tools, distorted, reference, workdir, vertical_ppd,
+                              frames=info.frames, image_height=info.height, **common)
+    dist_trim, ref_trim = workdir / "trim-decoded.y4m", workdir / "trim-reference.y4m"
+    trim_info = _window_y4m(distorted, info, dist_trim, 10, 89)
+    _window_y4m(reference, info, ref_trim, 10, 89)
+    try:
+        trim_score = fb.score_pair(tools, dist_trim, ref_trim, workdir, vertical_ppd,
+                                   frames=trim_info.frames, image_height=trim_info.height, **common)
+    finally:
+        dist_trim.unlink(missing_ok=True); ref_trim.unlink(missing_ok=True)
+    return {"1-90": all_score, "10-89": trim_score,
+            "windows_one_based": {"1-90": [1, 90], "10-89": [10, 89]}}
+
+
 def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, source_info,
                        decoded, decoded_info, reference, ref_info, timeout, keep_artifacts):
     """Use exactly the established display and fixed-crop score path."""
@@ -750,6 +784,8 @@ def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, 
                          plan["hvs_calibration"]["codec_cells"][cell_index]["vertical_pixels_per_degree"])
     row = {"codec_only": fb.score_pair(tools, decoded, reference, directory, codec_ppd,
                                         image_height=ref_info.height, **common)}
+    row["codec_only_windows"] = _score_pair_windows(tools, decoded, reference, ref_info,
+                                                      directory / "codec-windows", codec_ppd, guard, timeout)
     if "fence_rectangles" in plan:
         from . import fence_metrics
         fence_rect = (plan["fence_rectangles"]["cropped"]["mapped"] if cell.get("source_geometry") == "crop"
@@ -763,10 +799,12 @@ def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, 
     fb._write_display(reference if is_crop else source, ref_info if is_crop else source_info,
                       display_ref, presentation_eye)
     fb._write_display(decoded, decoded_info, display_dec, presentation_eye)
+    display_info = fb.inspect_y4m(display_ref); decoded_display_info = fb.inspect_y4m(display_dec)
     display_ppd = codec_ppd if is_crop else plan["hvs_calibration"]["display"]["vertical_pixels_per_degree"]
     row["displayed"] = fb.score_pair(tools, display_dec, display_ref, directory,
                                       display_ppd, image_height=presentation_eye[1], **common)
-    display_info = fb.inspect_y4m(display_ref); decoded_display_info = fb.inspect_y4m(display_dec)
+    row["displayed_windows"] = _score_pair_windows(tools, display_dec, display_ref, display_info,
+                                                     directory / "display-windows", display_ppd, guard, timeout)
     row["crops"] = {}
     score_crops, excluded = _crop_context_for_cell(plan, cell)
     row["crops"].update(excluded)
@@ -788,6 +826,10 @@ def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, 
         calibration = calibration_by_name[crop["name"]]
         row["crops"][crop["name"]] = fb.score_pair(tools, gp, rp, directory,
             calibration["vertical_pixels_per_degree"], image_height=crop_info.height, **common)
+        row["crops"][crop["name"]] = {"1-90": row["crops"][crop["name"]],
+            "10-89": _score_pair_windows(tools, gp, rp, crop_info, directory / f"crop-{crop['name']}-windows",
+                                            calibration["vertical_pixels_per_degree"], guard, timeout)["10-89"],
+            "windows_one_based": {"1-90": [1, 90], "10-89": [10, 89]}}
         fb._grid_png(directory / "grids" / f"PRIVATE-{crop['name']}.png", c0,
                      fb.crop_y4m(first_dec, display_info, crop))
         if not keep_artifacts:
@@ -829,6 +871,8 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
               "tool_provenance_start": {name: {"basename": path.name, "sha256": fb.sha256_file(path)} for name, path in needed.items()},
               "tool_provenance_end": None, "projection": plan["projection"],
               "projection_evidence": plan["projection_evidence"], "crop_definitions": plan["crops"],
+              "q3_revision": plan.get("q3_revision"), "source_adapter": plan.get("source_adapter"),
+              "fence_rectangles": plan.get("fence_rectangles"), "score_windows": plan.get("score_windows"),
               "proxy": plan["proxy"], "source_y4m_header": source_header,
               "tools_build_provenance": build_provenance, "cells": []}
     scoring_tools = {"ffmpeg": needed["ffmpeg"], "psnr_hvs_m_h": needed["psnr_hvs_m_h"]}
@@ -958,12 +1002,32 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
 
 def sanitized_report(result: dict) -> dict:
     keep = ("label", "codec", "rate_mbps", "fps", "eye_width", "eye_height", "encoded_chroma", "cap_bytes", "bits_per_pixel", "source_geometry", "nvenc_profile", "streams", "bitstream", "encode_process_completion_diagnostic", "decode_process_completion_diagnostic", "decoded_raw_wrapper", "codec_only", "displayed", "fence_metrics", "crops", "error")
+    def native_public(record):
+        if not isinstance(record, dict):
+            return None
+        return {key: record.get(key) for key in ("observed_pix_fmt", "bit_depth", "plane_layout",
+                "sample_alignment", "bytes_per_frame", "frames")}
+    def cell_public(row):
+        item = {key: row.get(key) for key in keep if key not in ("streams", "decoded_raw_wrapper")}
+        item["native_decoded_raw"] = native_public(row.get("native_decoded_raw"))
+        item["decoded_raw_wrapper"] = ({key: row.get("decoded_raw_wrapper", {}).get(key)
+                                        for key in ("raw_payload_sha256", "byte_identical", "external_y4m_contract")}
+                                       if isinstance(row.get("decoded_raw_wrapper"), dict) else None)
+        if isinstance(row.get("streams"), list):
+            item["streams"] = [{"eye": stream.get("eye"), "profile": stream.get("profile"),
+                                "bitstream": stream.get("bitstream"),
+                                "native_decoded_raw": native_public(stream.get("native_decoded_raw")),
+                                "encode_process_completion_diagnostic": stream.get("encode_process_completion_diagnostic"),
+                                "decode_process_completion_diagnostic": stream.get("decode_process_completion_diagnostic"),
+                                "score_conversion_process_completion_diagnostic": stream.get("score_conversion_process_completion_diagnostic")}
+                               for stream in row["streams"]]
+        return item
     return {"schema": SCHEMA, "kind": "nvenc_frame_bank_sanitized", "complete": result.get("complete") is True,
             "failure_reasons": list(result.get("failure_reasons", [])), "frozen_plan_sha256": result.get("frozen_plan_sha256"),
             "source_sha256": result.get("source_sha256_end"), "source_y4m_header": result.get("source_y4m_header"), "tool_provenance": result.get("tool_provenance_end"), "tools_build_provenance": result.get("tools_build_provenance"),
-            "hvs_gpu_sanity": result.get("hvs_gpu_sanity"), "projection": result.get("projection"), "crop_definitions": result.get("crop_definitions"), "proxy": result.get("proxy"),
+            "hvs_gpu_sanity": result.get("hvs_gpu_sanity"), "projection": result.get("projection"), "crop_definitions": result.get("crop_definitions"), "q3_revision": result.get("q3_revision"), "source_adapter": result.get("source_adapter"), "fence_rectangles": result.get("fence_rectangles"), "score_windows": result.get("score_windows"), "proxy": result.get("proxy"),
             "lease_final_health": result.get("lease_final_health"), "lease_telemetry": result.get("lease_telemetry"),
-            "cells": [{key: row.get(key) for key in keep} for row in result.get("cells", [])],
+            "cells": [cell_public(row) for row in result.get("cells", [])],
             "optical_latency_ms": None, "display_fps": None}
 
 
