@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "scope": "finite supervised Metro encoder-input corpus; offline quality input only",
+  "owner_confirmed_checkpoint_scene_visible": true,
+  "capture": {
+    "frames": 90,
+    "bytes": 2680750682,
+    "sha256": "e61163143ec9e75634fc89fcc06b3bb007667a53d94a0cbf97a39c09b452a0c2",
+    "frame_csv_sha256": "171237a4751dc764c2741248b5cc7a12d58efc195f7f8ab4208c887a372ed46a",
+    "y4m_header": "YUV4MPEG2 W6144 H3232 F90:1 Ip A1:1 XCOLORRANGE=FULL C420jpeg",
+    "stereo_encoded_size": [
+      6144,
+      3232
+    ],
+    "encoded_per_eye": [
+      3072,
+      3232
+    ],
+    "chroma": "420jpeg",
+    "bit_depth": 8,
+    "color_range": "FULL",
+    "nominal_fps": 90,
+    "dump_indices_contiguous": true,
+    "encoder_frame_counts_contiguous": true,
+    "target_timestamps_strictly_increasing": false,
+    "target_timestamp_issues": [
+      {
+        "dump_index": 62,
+        "kind": "repeated"
+      },
+      {
+        "dump_index": 67,
+        "kind": "decreased"
+      }
+    ],
+    "distinct_raw_frame_hashes": 89,
+    "encoder_input_not_quest_display_capture": true
+  },
+  "build": {
+    "repository_commit": "d1c3b3d4edb354be8176ccaf5604918fe9ee4a52",
+    "application_version": "20.13.0-ljk1291.2+d1c3b3d4edb3",
+    "protocol_version": "20.13.0-ljk1291.2",
+    "sources_lock_sha256": "b4a61b3ae0bdff818de18c8f97a1a2a1ba80ace7bf636de48093d22ad5aba23b",
+    "dependency_revisions": {
+      "alvr": {
+        "commit": "7eda092dbf0002281410a4222683ec228700cffb",
+        "url": "https://github.com/alvr-org/ALVR"
+      },
+      "android_ndk": "27.2.12479018",
+      "cargo_apk": {
+        "commit": "0fd3126dad5aa1c5f0f26cdae3410f2e5af62c60",
+        "url": "https://github.com/zarik5/cargo-apk"
+      },
+      "granite": {
+        "commit": "842d9d5686ba8c799a7d34a78a68f98d6aeb5a68",
+        "url": "https://github.com/Themaister/Granite"
+      },
+      "integration": {
+        "commit": "54cc8519bddceff57e159e6f39914e373b512809",
+        "url": "https://github.com/Terminal-ennui/galaxy-xr-alvr-pyrowave-444"
+      },
+      "openxr_loader": {
+        "android_aar": "openxr_loader_for_android-1.0.34.aar",
+        "release": "release-1.0.34",
+        "sha256": "c8b50603ad3b81756c6bd203ab9c9d19341326e14f6cbae87ee894137ee5e256"
+      },
+      "pyrowave": {
+        "commit": "d2997ac172bdc00e29c58e3f2938acb7e94580bf",
+        "url": "https://github.com/Themaister/pyrowave"
+      },
+      "reproducibility": "Pinned inputs and build recipe; signed APKs and ZIP metadata are not claimed byte-identical.",
+      "rust": "1.97.1"
+    },
+    "shader_hashes": {
+      "shaders/constants.h": "3bc9555f8399bad2bd6960536125588fd7dbc7936a7147755fc497241f04e062",
+      "shaders/dwt.comp": "f58c3f95d68a90f4621fc1999bcf9a95e1a263b80d20355b0ac20002828a90b1",
+      "shaders/dwt_common.h": "591f529143fce7efad00c0f5a5e6d9be0a714fb2d5098ac5e89242c0041ada26",
+      "shaders/dwt_quant_scale.h": "4a5e60c22785075341afa29211275857a4f3922999e0f5799131c5f4acf2c4be",
+      "shaders/dwt_swizzle.h": "0283e54d268f25375866274dd3728384c75d9783cab12787d8914588b80f0f30",
+      "shaders/idwt.comp": "e3bb1b44e1e0cb0c2137c44dc50c42f0de4b625f8505f26e96b89ea210c2c3af",
+      "shaders/idwt_haar_fused.comp": "a85ffbeb0966e22855d8c76690a7283fb6a2a5967ae5028feac81663c99be629",
+      "shaders/slangmosh.hpp": "4f84897f9d7fbb07cbc5ccba6d98bc83b85f697ca170578ba959118c84032995",
+      "shaders/slangmosh.json": "d5ea9829b89ee2ac5d16c12b34561971cfeaef5e97eec5ac47ec9a4baa3d06d5",
+      "shaders/wavelet_dequant.comp": "e588ddfdd7c3d1873b758a9d8511b80a946fccf384a7aab0b3368d4212aa1a44"
+    },
+    "signing_certificate_sha256": "4a3fe0a8d47ee67b01710df6ffdc870e91ebc5b8e7feec7c87534944ca2a44aa"
+  },
+  "matching_build_run": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37053223424",
+  "profile": {
+    "codec": "PyroWave",
+    "wavelet": "Haar",
+    "chroma": "4:2:0",
+    "transport": "TCP",
+    "target_mbps": 500,
+    "requested_hz": 90,
+    "negotiated_hz": 90,
+    "requested_render_per_eye": [
+      3072,
+      3232
+    ],
+    "negotiated_render_per_eye": [
+      3072,
+      3232
+    ],
+    "requested_encoded_per_eye": [
+      3072,
+      3232
+    ],
+    "negotiated_encoded_per_eye": [
+      3072,
+      3232
+    ],
+    "compute_decode": true,
+    "hdr": false,
+    "foveation": false,
+    "recommended_ahb_allocation": true,
+    "synchronous_direct_eye_copy": true
+  },
+  "fresh_client_state_verified_before_game": "Streaming",
+  "restoration": {
+    "complete": true,
+    "files": [
+      {
+        "label": "virtual_desktop_streamer",
+        "match": true
+      },
+      {
+        "label": "virtual_desktop_games",
+        "match": true
+      },
+      {
+        "label": "openvr_paths",
+        "match": true
+      },
+      {
+        "label": "steamvr_settings",
+        "match": true
+      },
+      {
+        "label": "alvr",
+        "match": true
+      }
+    ],
+    "errors": [],
+    "openxr_matches": true,
+    "settings_restored": true
+  },
+  "limitations": [
+    "Raw game frames and device/session identifiers remain private under results/local.",
+    "Encoder GPU readback and disk writes perturb pacing; this capture is not a rate benchmark.",
+    "Two target display timestamps repeat or decrease; dump index and encoder frame count remain contiguous. Preserve file order for same-input offline comparisons.",
+    "The optional first-frame CPU encoder control is not a matching decoded 90-frame corpus.",
+    "No quality metric, Quest GPU timing, optical FPS, or stable 90 Hz acceptance is claimed.",
+    "Fixed crop content and projection evidence must be frozen before the offline sweep.",
+    "No flat-field HEVC-versus-PyroWave owner judgement was collected in this session."
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "experiment": "supervised Metro frame-bank capture attempt",
+  "date": "2026-10-03",
+  "status": "incomplete",
+  "authorization": {"supervised": true, "finite_guard_seconds": 270},
+  "build": {
+    "commit": "d1c3b3d4edb354be8176ccaf5604918fe9ee4a52",
+    "workflow_run": 37053223424,
+    "matching_pair_verified": true,
+    "installed_version_matches": true,
+    "native_library_hashes_verified": true,
+    "apk_installed_this_session": false
+  },
+  "requested_profile": {
+    "render_eye": [3072, 3232], "encoded_eye": [3072, 3232],
+    "refresh_hz": 90, "codec": "PyroWave", "wavelet": "Haar",
+    "decode_path": "Compute", "chroma": "420", "transport": "Tcp",
+    "fixed_bitrate_mbps": 500, "direct_eye_copy": true,
+    "recommended_ahb_allocation": true
+  },
+  "stream_confirmation": {
+    "stored_requested_and_negotiated_settings_read": true,
+    "fresh_streaming_connection_confirmed": false,
+    "fresh_video_submissions_confirmed": false,
+    "decoder_activation_confirmed": false,
+    "lobby_runtime_hz_observed": 90,
+    "lobby_rate_is_stream_acceptance": false
+  },
+  "capture": {
+    "metro_launched": true, "checkpoint_confirmed": false,
+    "dump_triggered": false, "source_frames_captured": 0,
+    "flat_field_comparison_completed": false,
+    "owner_report": "Streamer disconnected"
+  },
+  "workload": {
+    "initial_setup_refused_when_comfyui_busy": true,
+    "queue_idle_before_runtime_start": true,
+    "queue_idle_at_post_report_sample": true,
+    "continuous_workload_capture": false
+  },
+  "fault_classification": {
+    "cause": "unresolved",
+    "fresh_pc_encoder_fence_timeout_found": false,
+    "fresh_android_decoder_failure_found": false,
+    "previous_timeout_log_excluded": true,
+    "notes": "The retained server crash log's timeout belongs to Session 07. Stored negotiated settings and lobby refresh did not prove a fresh video stream. Metro was launched before that confirmation gate; this attempt is invalid for codec, quality and rate comparisons."
+  },
+  "restoration": {
+    "independent_deadline_guard_executed": true,
+    "alvr_file_hash_matches": true, "steamvr_file_hash_matches": true,
+    "driver_inventory_hash_matches": true,
+    "virtual_desktop_settings_hashes_match": true,
+    "openxr_registration_matches": true,
+    "saved_headset_properties_readback_matches": true,
+    "complete": true
+  },
+  "acceptance": {"passed": false, "failure_reasons": ["fresh_stream_unconfirmed", "incomplete_capture", "owner_disconnection_report"]},
+  "fresh_submissions_per_second": null,
+  "optical_fps": null,
+  "optical_latency_ms": null,
+  "next_step": "Prove a fresh trusted Streaming connection and changing selected-output counter before launching Metro or arming a dump. Retain current connection-state and server/client logs continuously; then repeat the finite owner-supervised capture."
+}

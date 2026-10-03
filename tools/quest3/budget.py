@@ -16,11 +16,15 @@ def frame_budget(width, height, hz, mbps, chroma="420"):
     payload = mbps * 1_000_000 // 8 // math.floor(hz + 0.5)
     if payload == 0:
         raise ValueError("Bitrate is too small for the requested refresh")
+    bits_per_pixel = payload * 8 / pixels
     return {"requested_eye_resolution": [width, height], "aligned_eye_resolution": [w, h],
             "hz": hz, "mbps": mbps, "chroma": chroma, "frame_ms": 1000 / hz,
             "maximum_payload_bytes_per_frame": payload, "raw_bytes_per_frame": raw_bytes,
             "raw_to_payload_ratio": raw_bytes / payload,
-            "encoded_bits_per_stereo_pixel": payload * 8 / pixels,
+            # Kept for compatibility with existing reports. `bits_per_pixel` is
+            # the same value with a short, explicit display label.
+            "encoded_bits_per_stereo_pixel": bits_per_pixel,
+            "bits_per_pixel": bits_per_pixel,
             # Full-size TCP segments on Ethernet, before ACKs/retries/Wi-Fi airtime.
             "minimum_tcp_ethernet_mbps_at_cap": mbps * 1538 / 1460,
             "fits_pwu2_fragment_limit": (payload + 1367) // 1368 <= 8192,
@@ -34,12 +38,25 @@ def profiles(config):
             for v in p["candidate_profiles"] + p["experimental_profiles"]]
 
 
+def geometry_profiles(document):
+    """Budget the encode geometry; a larger source does not add encoded pixels."""
+    target = document["comparison_target"]
+    return [{"name": name,
+             "render_eye_requested": profile["render_eye"],
+             "encode_eye_requested": profile["encode_eye"],
+             **frame_budget(*profile["encode_eye"], target["hz"], target["mbps"], target["chroma"])}
+            for name, profile in document["profiles"].items()]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--presets", default="presets/quest3.json")
+    parser.add_argument("--resolution-profiles",
+                        help="geometry profile JSON; prints per-profile bytes/frame and bpp")
     parser.add_argument("--out")
     args = parser.parse_args()
-    report = profiles(json.loads(Path(args.presets).read_text()))
+    report = (geometry_profiles(json.loads(Path(args.resolution_profiles).read_text()))
+              if args.resolution_profiles else profiles(json.loads(Path(args.presets).read_text())))
     text = json.dumps(report, indent=2)
     if args.out:
         Path(args.out).write_text(text + "\n")

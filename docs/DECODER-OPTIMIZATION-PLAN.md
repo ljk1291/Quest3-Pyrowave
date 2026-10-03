@@ -487,3 +487,37 @@ then return to the prior Virtual Desktop registration/settings using the
 [stable baseline return procedure](STABLE-BASELINE.md#return-to-virtual-desktop).
 Do not turn a lower resolution, lower refresh or a chart-only result into a
 Godlike/90-Hz success.
+
+## Quality track — artifact-quality goal (2026-10-02)
+
+The owner’s [artifact-quality work orders](ARTIFACT-QUALITY-PLAN.md) and
+[checkpoint queue](ARTIFACT-QUALITY-STATUS.md) now govern this investigation.
+Choose render/encode geometry and bits per pixel before running P0–P5, because
+every decoder budget depends on encoded pixels. Preserve the historical
+measurements above: the ~82–83 fresh submissions/s comparison belongs to the
+`f2` pair, while the colour check belongs to `d1`; neither is a stable 90-Hz pass.
+
+The quality diagnosis is a hypothesis to test on this owner’s exact inputs.
+Haar, bitrate starvation, source sampling and compositor filtering remain
+distinct factors. Compare an immutable Metro frame bank across wavelet, bitrate
+and per-eye encode geometry, scoring both codec reconstruction and the image
+resampled to the same eye size. Require exact source/decoded identity, fixed
+crops, PSNR/SSIM, VMAF and PSNR-HVS-M-H at the logged viewing density. Compositor
+screenshots and prior Kodak results cannot establish a Metro crop-quality win.
+
+WO-0 is the prerequisite for unattended device or GPU work. WO-1–3 prepare the
+frame bank, reversible geometry controls and flat-field HEVC/PyroWave comparison
+without opening a hardware window. Only an owner-created valid arm file can
+authorize unattended work; the independent restorer and monitors must be ready
+before any change. Metro acquisition and in-headset judgement remain supervised.
+See [UNATTENDED.md](UNATTENDED.md) for the complete contract.
+
+The artifact-quality goal selects a candidate only after all fixed Metro crops
+beat the current Godlike-encode/Haar/500-Mbps baseline on both named perceptual
+metrics, an unattended chart screen preserves at least the baseline fresh rate
+without encoder/decoder faults, and settings restoration verifies the VD hashes.
+The status file must then supply that profile’s owner sign-off checklist and
+rollback steps. Reduced encode size must be labelled explicitly; retaining a
+Godlike render recommendation does not make it a Godlike encoded-resolution pass.
+This goal does not change stable defaults or replace the stable-90-Hz acceptance
+and promotion rules above.

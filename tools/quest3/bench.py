@@ -10,6 +10,8 @@ import threading
 import uuid
 from pathlib import Path
 from .baseline import baseline_plan, acceptance
+from .resolution import (evidence as resolution_evidence, profiles as resolution_profiles,
+                         scene_evidence as resolution_scene_evidence)
 
 RATES = (72, 90, 120, 144, 207, 240)
 BITRATES = (400, 600, 800, 1000, 1500, 2000)
@@ -397,6 +399,10 @@ def active_settings():
         'wavelet':v['pyrowave']['wavelet']['variant'],
         'chroma':'444' if v['pyrowave'].get('chroma_444',False) else '420',
         'transport':v['pyrowave']['transport']['variant'], 'stream_protocol':s['session_settings']['connection']['stream_protocol']['variant'],
+        # Preserve the raw session forms for geometry evidence. The normalized
+        # render/encoded_resolution values below remain useful to older reports,
+        # but cannot prove an Absolute request or restore its optional fields.
+        'configured_render_view_resolution':v['emulated_headset_view_resolution'],
         'configured_view_resolution':v['transcoding_view_resolution'],
         'hdr_enabled':encoder_config.get('enable_hdr'),
         'hdr_server_override':encoder_config.get('server_overrides_enable_hdr'),
@@ -426,6 +432,23 @@ def absolute_resolution(value):
 def openvr_resolution(config, width_key, height_key):
     width,height=config.get(width_key),config.get(height_key)
     return {'width':width,'height':height} if isinstance(width,int) and isinstance(height,int) else None
+
+
+def resolution_gate_status(geometry, required):
+    """Return the fail-closed capture status for an opt-in geometry cell."""
+    if not required:
+        return None
+    if geometry['status'] == 'verified':
+        return None
+    return 'resolution_mismatch' if geometry['status'] == 'mismatch' else 'resolution_evidence_incomplete'
+
+
+def scene_geometry_gate_status(scene, required):
+    if not required:
+        return None
+    if scene['status'] == 'verified':
+        return None
+    return 'scene_geometry_mismatch' if scene['status'] == 'mismatch' else 'scene_geometry_evidence_incomplete'
 
 def _log_epoch(line):
     match=re.match(r'\s*([0-9]+(?:\.[0-9]+)?)\s+', line)
@@ -585,6 +608,14 @@ def capture(args):
     coverage=runtime_coverage(runtime_polls,capture_end_elapsed)
     fresh=fresh_rate_evidence(evidence,args.hz)
     identity_ok=build_identity_verified(manifest,settings_start,build)
+    geometry = resolution_evidence(settings_start, report['headset_telemetry'], args.resolution_profile)
+    scene_document = None
+    if args.scene_metadata:
+        try:
+            scene_document = json.loads(args.scene_metadata.read_text(encoding='utf-8'))
+        except (OSError, json.JSONDecodeError):
+            scene_document = None
+    scene_geometry = resolution_scene_evidence(scene_document, geometry)
     report.update({'duration_requested_s':args.seconds,'capture_started_unix_ns':begin_wall_ns,'elapsed_s':clock()-begin,
         'measurement_clock':clock_info,
         'error':error,'state_start':start,'state_end':snapshot(args.adb),'device_samples':samples,
@@ -593,6 +624,8 @@ def capture(args):
         'runtime_evidence_coverage':coverage,
         'build_identity':manifest, 'build_identity_verified':identity_ok,
         'benchmark_tool_provenance':provenance,
+        'resolution_evidence':geometry,
+        'scene_geometry_evidence':scene_geometry,
         'experiment_options_start':start_experiments,
         'telemetry_complete':len(report.get('headset_telemetry',[])) >= 2,
         'thermal_ok':thermal_ok(samples),
@@ -600,6 +633,14 @@ def capture(args):
     report['experiment_options_end']=experiment_effective(report['state_end'])
     if settings_start!=settings_end:report['status']='settings_changed_during_capture'
     if settings_start['openvr'].get('refresh_rate')!=args.hz:report['status']='negotiated_rate_mismatch'
+    resolution_status = resolution_gate_status(geometry, args.require_resolution_evidence or bool(args.resolution_profile))
+    if resolution_status:
+        report['status'] = resolution_status
+    scene_geometry_status = scene_geometry_gate_status(scene_geometry, args.require_scene_geometry)
+    # Keep the more direct negotiated/decoder geometry failure visible when
+    # both geometry gates fail; scene metadata is a dependent chart check.
+    if scene_geometry_status and not resolution_status:
+        report['status'] = scene_geometry_status
     if error:report['status']='capture_failed'
     (root/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     print(json.dumps({'status':report['status'],'frames':report['frames'],'out':str(root)}))
@@ -615,6 +656,14 @@ def main():
     c.add_argument('--seconds',type=int,default=15);c.add_argument('--hz',type=int,required=True)
     c.add_argument('--events',default='ws://127.0.0.1:8082/api/events')
     c.add_argument('--build-manifest',help='matching CI build-identity manifest; recorded but not trusted without runtime marker')
+    c.add_argument('--resolution-profile', choices=sorted(resolution_profiles()),
+                   help='candidate profile whose requested geometry must match the capture')
+    c.add_argument('--require-resolution-evidence', action='store_true',
+                   help='fail closed unless requested, negotiated and decoder-reported dimensions verify')
+    c.add_argument('--scene-metadata', type=Path,
+                   help='WO-3 scene.json used by a normalized-chart capture')
+    c.add_argument('--require-scene-geometry', action='store_true',
+                   help='fail closed unless normalized scene metadata matches negotiated render geometry')
     c=sub.add_parser('baseline-plan');c.add_argument('--out',required=True);c.add_argument('--render-width',type=int,required=True);c.add_argument('--render-height',type=int,required=True)
     c.add_argument('--encoded-width',type=int,required=True);c.add_argument('--encoded-height',type=int,required=True);c.add_argument('--repeats',type=int,default=3)
     c=sub.add_parser('accept');c.add_argument('--report',required=True);c.add_argument('--expected',required=True);c.add_argument('--out',required=True)
