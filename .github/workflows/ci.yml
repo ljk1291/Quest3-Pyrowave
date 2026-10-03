@@ -18,7 +18,7 @@ jobs:
       - name: Reproducible-build contract checks
         run: |
           python3 -m pip install --disable-pip-version-check pytest==9.1.1
-          python3 -m pytest tools/tests/test_ci_pins.py tools/tests/test_build_metadata.py tools/tests/test_unattended.py tools/tests/test_unattended_duration.py tools/tests/test_unattended_concurrency.py tools/tests/test_unattended_monitor.py tools/tests/test_unattended_restore.py -q
+          python3 -m pytest tools/tests/test_ci_pins.py tools/tests/test_build_metadata.py tools/tests/test_unattended.py tools/tests/test_unattended_duration.py tools/tests/test_unattended_concurrency.py tools/tests/test_unattended_monitor.py tools/tests/test_unattended_restore.py tools/tests/test_unattended_preflight.py -q
       - name: Install CPU chart-test dependencies
         run: python3 -m pip install --disable-pip-version-check -r tools/quest3/requirements-cpu.txt
       - run: python3 -m unittest discover -s tests -v

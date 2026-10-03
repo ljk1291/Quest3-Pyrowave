@@ -229,7 +229,7 @@ class Host:
         return self.run('tasklist','/FO','CSV','/NH',timeout=10).lower() if os.name=='nt' else ''
     def _comfy_pids(self):
         if os.name != 'nt': return []
-        script="Get-CimInstance Win32_Process | Where-Object {$_.CommandLine -match 'ComfyUI|--port\\s+8192|:8192'} | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"
+        script="Get-CimInstance Win32_Process | Where-Object {$_.ProcessId -ne $PID -and $_.Name -notin @('powershell.exe','pwsh.exe') -and $_.CommandLine -match 'ComfyUI|--port\\s+8192|:8192'} | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"
         try:
             data=json.loads(self.run('powershell','-NoProfile','-NonInteractive','-Command',script,timeout=8)); return data if isinstance(data,list) else ([data] if data else [])
         except Exception: return []
@@ -241,23 +241,49 @@ class Host:
             running=data.get('queue_running',[]); pending=data.get('queue_pending',[])
             return {'endpoint':url,'known':True,'running':len(running),'pending':len(pending),'error':None}
         except Exception as exc: return {'endpoint':url,'known':False,'running':None,'pending':None,'error':str(exc)}
+    def gpu_activity(self):
+        """WDDM resident contexts are not execution; sample per-process engines."""
+        script=("$ErrorActionPreference='Stop'; "
+                "$q3pwRows=@(Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine); "
+                "@{instance_count=$q3pwRows.Count;active=@($q3pwRows | "
+                "Where-Object {$_.UtilizationPercentage -gt 0} | Select-Object Name,UtilizationPercentage)} "
+                "| ConvertTo-Json -Depth 4 -Compress")
+        try:
+            data=json.loads(self.run('powershell','-NoProfile','-NonInteractive','-Command',script,timeout=8))
+            return parse_gpu_activity(data)
+        except Exception: return {'known':False,'active_pids':{},'error':'GPU engine activity unavailable'}
+    def pinned_usb_present(self,serial):
+        # High-current USB charging can be classified as AC by Android. Require
+        # a present, healthy physical USB device bound to the armed identifier.
+        suffix=("\\"+serial).replace("'","''")
+        script=("$ErrorActionPreference='Stop'; $q3pwMatches=@(Get-CimInstance Win32_PnPEntity | "
+                "Where-Object {$_.Present -ne $false -and $_.ConfigManagerErrorCode -eq 0 -and "
+                "$_.PNPDeviceID.StartsWith('USB\\',[StringComparison]::OrdinalIgnoreCase) -and "
+                "$_.PNPDeviceID.EndsWith('%s',[StringComparison]::OrdinalIgnoreCase)}); "
+                "@{present=($q3pwMatches.Count -gt 0)} | ConvertTo-Json -Compress") % suffix
+        try:
+            value=json.loads(self.run('powershell','-NoProfile','-NonInteractive','-Command',script,timeout=8))
+            return value.get('present') is True
+        except Exception: return False
     def gpu_sample(self):
         """Record compute contention without treating every Python/service process as GPU work."""
         comfy_pids=self._comfy_pids(); comfy_running=bool(comfy_pids)
         comfy=self._comfy_queue() if comfy_running else {'known':True,'running':0,'pending':0,'error':None}
         conflicts=[]
         if comfy_running and (not comfy['known'] or comfy['running'] or comfy['pending']): conflicts.append('comfy_queue_active_or_unknown')
-        apps=[]; executable=shutil.which('nvidia-smi') or shutil.which('nvidia-smi.exe')
+        apps=[]; activity=None; executable=shutil.which('nvidia-smi') or shutil.which('nvidia-smi.exe')
         if executable:
             try:
                 rows=self.run(executable,'--query-compute-apps=pid,process_name,used_gpu_memory','--format=csv,noheader,nounits',timeout=5)
                 apps=[line.strip() for line in rows.splitlines() if line.strip() and 'No running processes' not in line]
-                # A live Comfy process is allowed only when its local queue reports idle.
-                idle_comfy={str(row.get('ProcessId')) for row in comfy_pids} if comfy.get('known') and not comfy.get('running') and not comfy.get('pending') else set()
-                conflicts.extend(row for row in apps if row.split(',',1)[0].strip() not in idle_comfy)
+                activity=self.gpu_activity()
+                if not activity['known']: conflicts.append('gpu_engine_activity_unknown')
+                else:
+                    active=activity['active_pids']
+                    conflicts.extend(row for row in apps if row.split(',',1)[0].strip() in active)
             except Refusal as exc: apps=['nvidia-smi-error:'+str(exc)]; conflicts.append('gpu_compute_status_unknown')
         else: conflicts.append('gpu_compute_status_unknown')
-        sample={'at_utc':utc_now().isoformat(),'comfy':comfy,'comfy_processes':comfy_pids,'nvidia_compute_apps':apps,'conflicts':conflicts}
+        sample={'at_utc':utc_now().isoformat(),'comfy':comfy,'comfy_processes':comfy_pids,'nvidia_compute_apps':apps,'gpu_engine_activity':activity,'conflicts':conflicts}
         self.last_gpu_sample=sample; return sample
     def competing_gpu(self): return self.gpu_sample()['conflicts']
     def _vd_log_state(self):
@@ -356,6 +382,23 @@ def owned_stop_script(record):
             "$null=$p.CloseMainWindow(); if(-not $p.WaitForExit(5000)){ $p.Kill(); "
             "if(-not $p.WaitForExit(10000)){throw 'owned process did not exit'}}") % (pid,expected,started)
 
+def parse_gpu_activity(data):
+    if not isinstance(data,dict) or not isinstance(data.get('instance_count'),int) or data['instance_count']<=0:
+        raise Refusal('GPU engine counters unavailable')
+    rows=data.get('active')
+    if not isinstance(rows,list): raise Refusal('GPU engine samples malformed')
+    active={}
+    for row in rows:
+        if not isinstance(row,dict): raise Refusal('GPU engine sample invalid')
+        match=re.fullmatch(r'pid_(\d+)_.*_engtype_(\w+)',str(row.get('Name','')))
+        value=float(row.get('UtilizationPercentage',math.nan))
+        if not match or not math.isfinite(value) or not 0<value<=100:
+            raise Refusal('GPU engine sample invalid')
+        pid,engine=match.groups(); previous=active.setdefault(pid,{'max_percent':0,'engine_types':[]})
+        previous['max_percent']=max(previous['max_percent'],value)
+        if engine not in previous['engine_types']: previous['engine_types'].append(engine)
+    return {'known':True,'instance_count':data['instance_count'],'active_pids':active}
+
 def parse_battery(text):
     data={}
     for line in text.splitlines():
@@ -365,8 +408,10 @@ def parse_battery(text):
         try:return float(data[k])
         except (KeyError,ValueError):return None
     temperature=number('temperature')
+    status=number('status'); usb=data.get('usb powered','false')=='true'
     return {'level':number('level'),'temperature_c':None if temperature is None else temperature/10,
-            'charging': data.get('usb powered','false')=='true'}
+            'charging':usb and (status is None or status in (2,5)),
+            'usb_powered':usb,'ac_powered':data.get('ac powered','false')=='true','charging_status':status}
 def parse_thermal(text):
     import re
     m=re.search(r'Thermal Status:\s*(\d+)',text)
@@ -412,6 +457,10 @@ def live_preconditions(arm, host):
     if not failures:
         if host.adb_run(serial,'shell','getprop','ro.product.model').strip()!='Quest 3': failures.append('not_quest_3')
         battery=parse_battery(host.adb_run(serial,'shell','dumpsys','battery'))
+        if (not battery['charging'] and battery['ac_powered'] and battery['charging_status'] in (2,5)
+                and host.pinned_usb_present(serial)):
+            battery['charging']=True
+            battery['charging_evidence']='Android AC/full-or-charging plus pinned physical USB'
         thermal=parse_thermal(host.adb_run(serial,'shell','dumpsys','thermalservice'))
         if battery['level'] is None or battery['level'] < 50 or not battery['charging'] or battery['temperature_c'] is None or battery['temperature_c'] >= 40: failures.append('battery_or_charge_precondition')
         if thermal is None or thermal > 1: failures.append('thermal_precondition')
