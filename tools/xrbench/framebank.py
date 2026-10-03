@@ -609,6 +609,8 @@ def _main_run(a):
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     s=p.add_subparsers(dest='command',required=True)
+    v=s.add_parser('verify-tools',help='verify packaged provenance without executing binaries or using a GPU')
+    v.add_argument('--tools-metadata',required=True)
     a=s.add_parser('plan')
     for name in ('source','projection-evidence','crop-evidence','out'): a.add_argument('--'+name,required=True)
     a.add_argument('--vertical-pixels-per-degree',type=float,required=True)
@@ -621,5 +623,12 @@ def main(argv=None):
     r.add_argument('--command-timeout-s',type=float,default=900)
     r.add_argument('--keep-artifacts',action='store_true')
     x=p.parse_args(argv)
+    if x.command=='verify-tools':
+        bundle=Path(x.tools_metadata).resolve().parent
+        record=verify_tools_build({'encode':bundle/'pyrowave-encode.exe','decode':bundle/'pyrowave-decode.exe',
+                                  'psnr_hvs_m_h':bundle/'pyrowave-psnr-hvs-m.exe'},Path(x.tools_metadata))
+        print(json.dumps({'verified':True,'repository_commit':record['repository_commit'],
+                          'metadata_sha256':record['metadata_sha256']}))
+        return 0
     return _main_plan(x) if x.command=='plan' else _main_run(x)
 if __name__=="__main__": raise SystemExit(main())
