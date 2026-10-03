@@ -1,0 +1,139 @@
+{
+  "schema": 1,
+  "kind": "signed_experimental_integration_pair_qualification",
+  "workflow_url": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37097253052",
+  "workflow_event": "workflow_dispatch",
+  "repository_commit": "bc2178842e0c48ada75b2179c56cae06b6204e61",
+  "all_four_ci_jobs_passed": true,
+  "matching_pair_verified_locally": true,
+  "signing_kind": "stable",
+  "signing_certificate_sha256": "4a3fe0a8d47ee67b01710df6ffdc870e91ebc5b8e7feec7c87534944ca2a44aa",
+  "client_package_id": "io.github.ljk1291.quest3pyrowave",
+  "protocol_version": "20.13.0-ljk1291.2",
+  "application_version": "20.13.0-ljk1291.2+bc2178842e0c",
+  "sources_lock_sha256": "b4a61b3ae0bdff818de18c8f97a1a2a1ba80ace7bf636de48093d22ad5aba23b",
+  "dependency_revisions": {
+    "alvr": {
+      "commit": "7eda092dbf0002281410a4222683ec228700cffb",
+      "url": "https://github.com/alvr-org/ALVR"
+    },
+    "android_ndk": "27.2.12479018",
+    "cargo_apk": {
+      "commit": "0fd3126dad5aa1c5f0f26cdae3410f2e5af62c60",
+      "url": "https://github.com/zarik5/cargo-apk"
+    },
+    "granite": {
+      "commit": "842d9d5686ba8c799a7d34a78a68f98d6aeb5a68",
+      "url": "https://github.com/Themaister/Granite"
+    },
+    "integration": {
+      "commit": "54cc8519bddceff57e159e6f39914e373b512809",
+      "url": "https://github.com/Terminal-ennui/galaxy-xr-alvr-pyrowave-444"
+    },
+    "openxr_loader": {
+      "android_aar": "openxr_loader_for_android-1.0.34.aar",
+      "release": "release-1.0.34",
+      "sha256": "c8b50603ad3b81756c6bd203ab9c9d19341326e14f6cbae87ee894137ee5e256"
+    },
+    "pyrowave": {
+      "commit": "d2997ac172bdc00e29c58e3f2938acb7e94580bf",
+      "url": "https://github.com/Themaister/pyrowave"
+    },
+    "reproducibility": "Pinned inputs and build recipe; signed APKs and ZIP metadata are not claimed byte-identical.",
+    "rust": "1.97.1"
+  },
+  "shader_hashes": {
+    "shaders/constants.h": "3bc9555f8399bad2bd6960536125588fd7dbc7936a7147755fc497241f04e062",
+    "shaders/dwt.comp": "f58c3f95d68a90f4621fc1999bcf9a95e1a263b80d20355b0ac20002828a90b1",
+    "shaders/dwt_common.h": "591f529143fce7efad00c0f5a5e6d9be0a714fb2d5098ac5e89242c0041ada26",
+    "shaders/dwt_quant_scale.h": "4a5e60c22785075341afa29211275857a4f3922999e0f5799131c5f4acf2c4be",
+    "shaders/dwt_swizzle.h": "0283e54d268f25375866274dd3728384c75d9783cab12787d8914588b80f0f30",
+    "shaders/idwt.comp": "e3bb1b44e1e0cb0c2137c44dc50c42f0de4b625f8505f26e96b89ea210c2c3af",
+    "shaders/idwt_haar_fused.comp": "a85ffbeb0966e22855d8c76690a7283fb6a2a5967ae5028feac81663c99be629",
+    "shaders/slangmosh.hpp": "4f84897f9d7fbb07cbc5ccba6d98bc83b85f697ca170578ba959118c84032995",
+    "shaders/slangmosh.json": "d5ea9829b89ee2ac5d16c12b34561971cfeaef5e97eec5ac47ec9a4baa3d06d5",
+    "shaders/wavelet_dequant.comp": "e588ddfdd7c3d1873b758a9d8511b80a946fccf384a7aab0b3368d4212aa1a44"
+  },
+  "archives": {
+    "android": {
+      "artifact_id": 11264264855,
+      "sha256": "67afb2d2fea15977543fd76200b2dbeb9631ee1886d39d06e1465ed1db77953b"
+    },
+    "windows": {
+      "artifact_id": 11265168163,
+      "sha256": "a009741eefb11d14c480c6c40d453131c33424b1362a46d81a6a886c2839efd6"
+    }
+  },
+  "artifact_sha256": {
+    "android": {
+      "APK-CERTIFICATE.txt": "d43d9c45a97636413ec298b83b1c971d47ab0c1411a483eea7cf6c6f6a30fd81",
+      "LICENSES.zip": "d3d3db4fac59cd5f616973e75766230255e535173244e42532ff556d5f06dec4",
+      "Quest3-Pyrowave-stable.apk": "1a26491811b7249f75eea6f6205c310543c302ec5468b4fa1886bcf29815ef00",
+      "libc++_shared.so": "f9992c4ba6b7c5a716e3a202fceb1ce029d6a2b0605838ac6b3219f489dd7970",
+      "libpyroclient.so": "bd33b0fa2ac6eb600c16806f645b4704afa4144a501fed08835efa39bc6c246d",
+      "libpyrowave-shared.so": "9c5ba02ba372745f23289a5ebd9555a6b2a21a9672a3ad545143c26889c09848",
+      "pyroclient_test": "547da209d7bdfa2f5cd7e11503f6ccf8969c6e5d39dd60593b324cab199ef2f8",
+      "pyrowave_android": "0d940d943a7eb05e9c0b6335f85ac41dd308f824042fafa46a78afcff6cd31d9",
+      "udprecv-android": "b8e092ec3dcd0a2d2640d1296e8abe0d4f0537c4cbb59f882329620c3a8aac05"
+    },
+    "windows": {
+      "FRAMEBANK-IMPORTS.json": "3a711c67327b7337856811e4a48bb11c093507aa8d7cfcb5c5aca2924f1a4df5",
+      "FRAMEBANK-LICENSES.zip": "dcaaaea09325f6f8de4598eec98c735fe8f2fd41b5c2b80f14a618ccfd9af8d1",
+      "FRAMEBANK-TOOLS-BUILD-METADATA.json": "4df29db7f5d540049270cc5368db9db211683a768255e4e0abbee8944fb5e64d",
+      "HVS-SCORER-SOURCE.json": "1a595cb750741e51725b9b6e6afd536d4814bac79dce57322b2e0a6feb1fe0c7",
+      "PYROWAVE-LICENSE.txt": "2bda201d3849fcb515f784a299c4eb0c3e0c86f4a134484e73af29684e51bb15",
+      "Quest3-Pyrowave-Windows.zip": "8a2b510952cce9de84a560edcdb9595ba5478333c7efe7f38583213b9bb39cb3",
+      "WINDOWS-COMPOSITION-SHADERS.json": "d7d3d90b349ad84c33f5febcfbdb7243e3936b67fce58bd5f903295240492f7c",
+      "psnr_hvs_m.comp": "87fd53541193fd2543be754ecb8a6a38f810894993d1c8963e1d86bd8edc30bf",
+      "pyrowave-decode.exe": "45f49be991c397bdef3b0af8a2c52dbf3e36e8e9b1da3378f036211dd2c2240b",
+      "pyrowave-encode.exe": "0b9415e8f78b8121bca888f616cdd05139eb927af229843be0b7b964c136bbd4",
+      "pyrowave-psnr-hvs-m.exe": "3a203301611812448fa279c669662ce6a65b6f946899d334503608871c167b67"
+    }
+  },
+  "framebank_tools": {
+    "verified_locally": true,
+    "metadata_sha256": "4df29db7f5d540049270cc5368db9db211683a768255e4e0abbee8944fb5e64d",
+    "native_cpu_input_checks_passed": 3,
+    "gpu_sanity_passed": null,
+    "metro_matrix_complete": false
+  },
+  "supervisor_correction": {
+    "head": "1c5f2197cb2ac9bcc3834ee3ca14c1b9975b3ab1",
+    "integration_merge": "ad5308db23719c1bfebf93288cc3f851a0376c31",
+    "all_four_ci_jobs_passed": true,
+    "workflow_url": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37099138211"
+  },
+  "read_only_readiness": {
+    "checked_utc": "2026-10-03T05:29:09.212613+00:00",
+    "deadline_utc": "2026-10-03T06:44:31+00:00",
+    "failures": [
+      "vr_or_virtual_desktop_connected"
+    ],
+    "read_only_gates_passed": false,
+    "battery_percent": 66.0,
+    "battery_temperature_c": 30.0,
+    "charging": true,
+    "charging_evidence": "Android AC/full-or-charging plus pinned physical USB",
+    "thermal_status": 0,
+    "owner_idle_gate_passed": true,
+    "runtime_or_vd_gate_passed": false,
+    "gpu_workload_gate_passed": true,
+    "arm_unchanged": true,
+    "adb_used_read_only": true,
+    "settings_snapshot_created": false,
+    "guards_started": false,
+    "window_started": false,
+    "settings_mutated": false,
+    "gpu_benchmark_started": false,
+    "apk_installed": false,
+    "vr_launched": false
+  },
+  "vd_connection_state": null,
+  "vd_hash_verification": null,
+  "restoration_required": false,
+  "installed_pair_unchanged": true,
+  "metro_quality_improvement": null,
+  "fresh_submissions_per_s": null,
+  "display_fps": null,
+  "optical_latency_ms": null
+}

@@ -55,3 +55,16 @@ lease revocation and registration failures. The first failed cell ends the matri
 and writes an invalid partial report; a broken codec or revoked lease is never
 replayed through the remaining cells. Repair the diagnosed failure before a new
 controlled run.
+
+## JSON metric transport
+
+The Python metric API and sanitized dictionary retain numeric infinities for
+lossless PSNR and the HVS identity gate. Report files use standard JSON: finite
+values remain numbers, infinite values are the strings `"Infinity"` and
+`"-Infinity"`, and NaN is rejected. Field names and the report schema are unchanged.
+Use `float(value)` when reading a possibly infinite PSNR field in Python, or
+`Number(value)` in JavaScript. Custom controllers must write with
+`framebank.report_json(report)` rather than a permissive `json.dumps` call.
+Both the private result writer and the production sanitized-report CLI use this
+transport. This affects representation only; it changes no metric calculation,
+source frame, codec setting or result acceptance.

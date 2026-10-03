@@ -590,7 +590,18 @@ def run_plan(plan_path:Path,source:Path,private_out:Path,tools:dict,window:Path,
             if verify_tools_build(tools,tools_metadata)!=build_provenance: result['failure_reasons'].append('tool_build_provenance_changed_during_run')
         except (OSError,ValueError,KeyError): result['failure_reasons'].append('tool_build_provenance_changed_during_run')
     if hashlib.sha256(Path(plan_path).read_bytes()).hexdigest()!=result["frozen_plan_sha256"]: result["failure_reasons"].append("plan_changed_during_run")
-    result["complete"]=not result["failure_reasons"] and len(result["cells"])==len(plan["cells"]); (private_out/"framebank-private.json").write_text(json.dumps(result,indent=2),encoding="utf-8"); return result
+    result["complete"]=not result["failure_reasons"] and len(result["cells"])==len(plan["cells"]); (private_out/"framebank-private.json").write_text(report_json(result),encoding="utf-8"); return result
+
+def report_json(result):
+    """Strict JSON transport; keep the in-memory metric API numeric and unchanged."""
+    def transport(value):
+        if isinstance(value,dict): return {key:transport(item) for key,item in value.items()}
+        if isinstance(value,(list,tuple)): return [transport(item) for item in value]
+        if isinstance(value,float):
+            if math.isnan(value): raise ValueError('NaN cannot be written as a frame-bank result')
+            if math.isinf(value): return 'Infinity' if value>0 else '-Infinity'
+        return value
+    return json.dumps(transport(result),indent=2,allow_nan=False)
 
 def sanitized_report(result):
     keep=("wavelet","rate_mbps","fps","eye_width","eye_height","encoded_chroma","cap_bytes","bits_per_pixel","actual_container_bytes","codec_environment","codec_only","displayed","crops","error")
@@ -605,7 +616,7 @@ def parse_crops_argument(value:str):
 def _main_plan(a):
     p=build_plan(Path(a.source),a.vertical_pixels_per_degree,horizontal_pixels_per_degree=a.horizontal_pixels_per_degree,projection_evidence=a.projection_evidence,crop_evidence=a.crop_evidence,crops=parse_crops_argument(a.crops));Path(a.out).write_text(json.dumps(p,indent=2),encoding="utf-8");print(f"wrote frozen plan with {len(p['cells'])} cells; no codec/scorer was run");return 0
 def _main_run(a):
-    tools={"encode":a.encode,"decode":a.decode,"ffmpeg":a.ffmpeg,"psnr_hvs_m_h":a.psnr_hvs_m_h};r=run_plan(Path(a.plan),Path(a.source),Path(a.private_out),tools,Path(a.window),arm=None if not a.arm else Path(a.arm),command_timeout_s=a.command_timeout_s,keep_artifacts=a.keep_artifacts,tools_metadata=Path(a.tools_metadata));report=sanitized_report(r);Path(a.report).write_text(json.dumps(report,indent=2),encoding="utf-8");print(f"wrote sanitized report: complete={report['complete']}");return 0 if report["complete"] else 2
+    tools={"encode":a.encode,"decode":a.decode,"ffmpeg":a.ffmpeg,"psnr_hvs_m_h":a.psnr_hvs_m_h};r=run_plan(Path(a.plan),Path(a.source),Path(a.private_out),tools,Path(a.window),arm=None if not a.arm else Path(a.arm),command_timeout_s=a.command_timeout_s,keep_artifacts=a.keep_artifacts,tools_metadata=Path(a.tools_metadata));report=sanitized_report(r);Path(a.report).write_text(report_json(report),encoding="utf-8");print(f"wrote sanitized report: complete={report['complete']}");return 0 if report["complete"] else 2
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     s=p.add_subparsers(dest='command',required=True)
