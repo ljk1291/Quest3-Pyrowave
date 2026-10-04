@@ -2,7 +2,9 @@
 
 The independent worker monitors competing GPU work and stops only registered
 children on cancellation, expiry or parent death. This is not an unattended
-authorization mechanism; the caller must retain the owner's session attestation.
+authorization mechanism for headset work; the caller must retain the owner's
+session attestation. An explicit PC-only authorization while the owner is away
+records that fact separately, without claiming physical presence.
 """
 from __future__ import annotations
 import argparse
@@ -38,7 +40,10 @@ def status_payload(directory, *, host=None, now=None, require_allow='frame_bank_
     deadline = state.get('deadline_epoch_s')
     monitor = state.get('monitor', {})
     blockers = []
-    if (attestation.get('kind') != AUTHORITY or attestation.get('owner_present') is not True
+    presence_authorized = (attestation.get('owner_present') is True or
+        (attestation.get('owner_present') is False and
+         attestation.get('owner_authorized_while_away') is True))
+    if (attestation.get('kind') != AUTHORITY or not presence_authorized
             or not isinstance(attestation.get('evidence'), str) or not attestation['evidence'].strip()
             or attestation.get('allow') != ['frame_bank_pc'] or require_allow != 'frame_bank_pc'):
         blockers.append('owner_attestation_missing_or_wrong_scope')
@@ -166,9 +171,14 @@ def worker(directory, nonce):
         raise
 
 @contextlib.contextmanager
-def session(directory, *, evidence, duration_s=5400, measurement_mode='quality'):
+def session(directory, *, evidence, duration_s=5400, measurement_mode='quality',
+            owner_present=True, owner_authorized_while_away=False):
     """Create once, after explicit owner authorization; never inspect the arm."""
     if not isinstance(evidence, str) or not evidence.strip(): raise ValueError('owner attestation required')
+    if type(owner_present) is not bool or type(owner_authorized_while_away) is not bool:
+        raise ValueError('owner presence and away authorization must be explicit booleans')
+    if not owner_present and not owner_authorized_while_away:
+        raise ValueError('owner absence requires explicit PC-only away authorization')
     if measurement_mode not in ('quality','timing'): raise ValueError('unknown measurement mode')
     if not isinstance(duration_s, (int, float)) or not math.isfinite(duration_s) or not 0 < duration_s <= 7200:
         raise ValueError('PC session duration must be finite and at most two hours')
@@ -178,7 +188,8 @@ def session(directory, *, evidence, duration_s=5400, measurement_mode='quality')
     directory.mkdir(parents=True, exist_ok=False)
     host = u.Host()
     nonce = uuid.uuid4().hex
-    state = {'schema': 1, 'authorization': {'kind': AUTHORITY, 'owner_present': True,
+    state = {'schema': 1, 'authorization': {'kind': AUTHORITY, 'owner_present': owner_present,
+             'owner_authorized_while_away': owner_authorized_while_away,
              'evidence': evidence, 'allow': ['frame_bank_pc']}, 'guard_nonce': nonce,
              'deadline_epoch_s': time.time()+duration_s, 'owned_pc_jobs': [], 'closed': False,
              'measurement_mode':measurement_mode,
@@ -229,6 +240,8 @@ def main(argv=None):
     parser.add_argument('--require-allow', default='frame_bank_pc')
     parser.add_argument('--nonce')
     parser.add_argument('--owner-attested',help='quote the explicit owner authorization from the current session')
+    parser.add_argument('--owner-authorized-while-away',action='store_true',
+                        help='record explicit current PC-only authorization while the owner is absent')
     parser.add_argument('--duration-s',type=float,default=5400)
     parser.add_argument('--measurement-mode',choices=['quality','timing'],default='quality')
     parser.add_argument('--allow',choices=['frame_bank_pc'],default='frame_bank_pc')
@@ -239,7 +252,9 @@ def main(argv=None):
             parser.error('start requires --owner-attested from the current owner session')
         try:
             with session(args.window,evidence=args.owner_attested,duration_s=args.duration_s,
-                         measurement_mode=args.measurement_mode) as directory:
+                         measurement_mode=args.measurement_mode,
+                         **({'owner_present':False,'owner_authorized_while_away':True}
+                            if args.owner_authorized_while_away else {})) as directory:
                 print(json.dumps({'ready':True,'allow':['frame_bank_pc'],
                                   'measurement_mode':args.measurement_mode}),flush=True)
                 while status_payload(directory)['lease']['active']: time.sleep(1)

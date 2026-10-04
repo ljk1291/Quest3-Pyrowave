@@ -5,7 +5,43 @@ agent (Codex). Codex reads it at every checkpoint and appends to **Log**. The ow
 Claude may reorder **Queue** or add **Notes for Codex** between checkpoints. Keep
 entries short and link to evidence.
 
-## Current owner-review checkpoint — 2026-10-04 20:52 CEST
+## Current headset preparation checkpoint — 2026-10-04 21:34 CEST
+
+The owner requested the verified 80a1635 pair, Q4, then **a, a2, b, c, d** and
+**f–h** on the winning runnable cell, with an owner judgement for every
+in-headset comparison. Preparation is complete enough to identify one source
+blocker; **owner confirmation to begin has not been received**. The APK/server
+checksums, stable certificate and archive members were reverified. The new server
+is staged separately; the d1c3 artifacts and server remain intact for rollback.
+No ADB, GPU query, install, VR launch, network test, settings/registration or
+arm-file operation has occurred during preparation. Private per-key guard/adapter
+and controller entry points have 32 passing CPU tests, including restart role
+reuse, dashboard availability during restoration and retained-handle completion.
+Fresh state snapshots and live worker/device readbacks remain open gates before
+invocation.
+
+**Native RDO readback on 80a1635 is blocked.** The release PyroWave C API sets
+`NullLogger` before encoder initialization and suppresses the WO-7 density log.
+There is no initialized-density getter or ALVR log bridge in this pair. Thus
+a/a2/d cannot meet the requested native proof by reading the launch environment.
+The offline direct-Encoder logs remain valid; no Q3 score is retracted. A minimal
+read-only getter/log bridge is prepared on local `codex/wo7-live-readback` for review,
+with no deployment or automatic substitution for the pinned pair. See the
+[checklist correction](Q3-HEADSET-CHECKLIST.md#preparation-finding-native-rdo-proof-is-blocked-on-80a1635).
+Its source/lock/wiring checks pass, including the expanded 141-test CPU command;
+the standalone C++ default/report-parity test also compiles and passes. Native
+DLL export, full matching build and live log activation remain unverified.
+
+a2 is identical to a except RDO 24 px/deg (12 cycles/deg), and follows it
+immediately. Q4 retains the 600/800/1000/1200-Mbps stationary sequence and moving
+qualification: nominal 1000-Mbps live cells require a passing 1200-Mbps moving
+leg to satisfy the 15% headroom rule. The H264Fit 3968x2080 capability probe is
+compiled and fixture-tested, but has not queried the GPU. All live measurements
+remain unset, including GPU decode execution, completion latency, fresh rate and
+estimated pipeline latency. Settings will be snapshotted before changes and
+restored with exact readbacks; the owner performs the VD comparison afterward.
+
+## Prior owner-review checkpoint — 2026-10-04 20:52 CEST
 
 **The revised Q3 request is complete; stop for owner review.** The
 [combined 32-row report](../results/metro-q3-combined-2026-10-04.md) and
@@ -102,7 +138,26 @@ Read with Get-NetAdapter; no network changes. Negotiated link speed is not goodp
 
 ## Queue (current owner goal)
 
-### Owner revision, 2026-10-04 17:36 CEST
+### Owner headset request, 2026-10-04 — prepare and wait
+
+The latest owner message authorizes preparing the supervised headset sequence,
+then explicitly requires waiting for confirmation to begin. VD/Streamer closed,
+ComfyUI idle and Quest USB power are owner attestations; fresh safety and state
+readbacks remain required at the start. Do not touch the unattended arm file.
+
+1. Retain d1c3 rollback artifacts; install only the requested verified 80a1635
+   pair after confirmation. Resolve the native RDO-proof/pinned-pair conflict
+   identified above before claiming that gate passed.
+2. Q4 network qualification, then a, **a2**, b, c, d; a2 differs from a only by
+   RDO 24 px/deg and requires native activation proof.
+3. Owner chooses the winning runnable cell using quality and live telemetry;
+   run f–h only within verified transport/decoder limits. Ask for every headset
+   judgement. No unattended inference from earlier tracking/image checks.
+4. Restore every changed setting/property/process environment value exactly;
+   verify VD, driver registration and OpenXR state. Report restoration complete
+   only after readbacks pass; the owner does their own VD comparison.
+
+### Prior owner revision, 2026-10-04 17:36 CEST
 
 The owner's latest message supersedes the two-cell remainder and the 25-row
 publication gate below. ComfyUI is owner-confirmed idle; read-only preflight at
@@ -301,6 +356,16 @@ Take the first unblocked item. Items marked ∥ are independent.
      checkpoint-only records.
 
 ## Log
+
+- 2026-10-04 19:34 UTC, supervised headset preparation only: reverified and
+  separately staged 80a1635, preserved d1c3 rollback, added a2 and exact owner
+  judgement phases, and passed eight private guard CPU tests. No hardware,
+  install, settings or arm operation occurred; begin confirmation is pending.
+  Source review found the release C API suppresses the live RDO marker; a/a2/d
+  native-proof gates are blocked on this pair. Offline direct-Encoder logs and
+  Q3 scores remain valid. A separate read-only observability proposal is being
+  prepared; no automatic pair substitution. See the current checkpoint and
+  [checklist](Q3-HEADSET-CHECKLIST.md).
 
 - 2026-10-04 08:37 UTC, Q3b NVENC resume safety stop: the earlier first H.264
   attempt stopped during CPU preparation at 63/90 frames when a newly started
