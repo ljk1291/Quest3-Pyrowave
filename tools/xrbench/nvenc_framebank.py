@@ -1126,6 +1126,10 @@ def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, 
                          plan["hvs_calibration"]["codec_cells"][cell_index]["vertical_pixels_per_degree"])
     row = {"codec_only": fb.score_pair(tools, decoded, reference, directory, codec_ppd,
                                         image_height=ref_info.height, **common)}
+    if matching_blur_reference is not None:
+        # Keep the legacy key for report compatibility, while making clear it
+        # scores the decoded reduced planes only after reconstruction.
+        row["codec_only_domain"] = "expanded_reconstructed_cropped_y4m"
     row["codec_only_windows"] = _score_pair_windows(tools, decoded, reference, ref_info,
         directory / "codec-windows", codec_ppd, guard, timeout, all_score=row["codec_only"])
     if matching_blur_reference is not None:

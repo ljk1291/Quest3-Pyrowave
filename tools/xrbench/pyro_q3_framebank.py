@@ -294,9 +294,35 @@ def verify_split_bundles(tools: dict, codec_metadata: Path, scorer_metadata: Pat
             "hvs_implementation_unchanged": True}
 
 
+def _select_cells(plan: dict, phase: str | None, cell_indices: list[int] | tuple[int, ...] | None) -> list[tuple[int, dict]]:
+    """Select original manifest indices before opening the GPU scoring gate."""
+    if phase is not None and phase not in ("q3a", "q3b"):
+        raise ValueError("phase must be q3a or q3b")
+    cells = plan["cells"]
+    if cell_indices is None:
+        indices = list(range(len(cells)))
+    else:
+        if not isinstance(cell_indices, (list, tuple)):
+            raise ValueError("cell_indices must be a list of original plan indices")
+        if any(type(index) is not int for index in cell_indices):
+            raise ValueError("cell_indices must contain only integers")
+        if len(set(cell_indices)) != len(cell_indices):
+            raise ValueError("cell_indices must not contain duplicates")
+        if any(index < 0 or index >= len(cells) for index in cell_indices):
+            raise ValueError("cell_indices contains an out-of-range plan index")
+        indices = list(cell_indices)
+    selected = [(index, cells[index]) for index in indices if phase is None or cells[index].get("phase") == phase]
+    if len(selected) != len(indices):
+        raise ValueError("cell_indices includes a cell outside the requested phase")
+    if not selected:
+        raise ValueError("requested selection has no cells")
+    return selected
+
+
 def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, window: Path, *, tools_metadata: Path,
              scorer_tools_metadata: Path | None = None, command_timeout_s: float = 900,
-             keep_artifacts: bool = False, supervised: bool = False, resume: bool = False, phase: str | None = None) -> dict:
+             keep_artifacts: bool = False, supervised: bool = False, resume: bool = False, phase: str | None = None,
+             cell_indices: list[int] | tuple[int, ...] | None = None) -> dict:
     """Run only frozen Q3a rows; Q3b fails closed until a real WO-8 adapter exists."""
     raw_plan = Path(plan_path).read_bytes(); plan = validate_plan(json.loads(raw_plan)); source = Path(source)
     info = _require_cropped_source(source); guard = fb.WindowGuard(Path(window), supervised=supervised)
@@ -304,27 +330,49 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
     required = {"encode", "decode", "psnr_hvs_m_h", "ffmpeg"}
     if set(tools) != required: raise ValueError("Pyro Q3 runner requires exactly encode/decode/psnr_hvs_m_h tools")
     fb.required_tools(tools); guard.status(); build = verify_split_bundles(tools, Path(tools_metadata), scorer_tools_metadata)
+    selected = _select_cells(plan, phase, cell_indices)
+    requested_indices = [index for index, _ in selected]
     out = Path(private_out)
     if out.exists():
         if not resume: raise FileExistsError("private output exists; explicit resume required")
         prior = json.loads((out / "framebank-private.json").read_text(encoding="utf-8"))
         if prior.get("frozen_plan_sha256") != hashlib.sha256(raw_plan).hexdigest() or prior.get("source_sha256_start") != _hash(source) or prior.get("tool_provenance_start") != {k: _hash(v) for k, v in tools.items()}:
             raise ValueError("resume provenance mismatch")
-        if prior.get("complete"): return prior
-        # An interrupted row may have a partial elementary stream. Never encode it again automatically.
-        raise RuntimeError("interrupted run preserved; manual review required before any cell replay")
-    out.mkdir(parents=True); result = _result_base(raw_plan, source, tools, build)
+        if prior.get("failure_reasons"):
+            # An interrupted row may have a partial elementary stream. Never encode it again automatically.
+            raise RuntimeError("interrupted run preserved; manual review required before any cell replay")
+        if not isinstance(prior.get("cells"), list) or any(type(row.get("plan_index")) is not int for row in prior["cells"]):
+            raise ValueError("resume result lacks original plan-index evidence")
+        completed = [row["plan_index"] for row in prior["cells"]]
+        if len(set(completed)) != len(completed):
+            raise ValueError("resume result repeats a plan index")
+        selected = [(index, cell) for index, cell in selected if index not in set(completed)]
+        result = prior
+        if not selected:
+            # All requested cells are already evidenced. Do not reopen the GPU
+            # sanity gate or regenerate any codec artifact on a resume.
+            result["requested_phase"] = phase; result["requested_cell_indices"] = cell_indices
+            result["selected_plan_indices"] = requested_indices
+            result.setdefault("run_scopes", []).append({"phase": phase, "requested_cell_indices": cell_indices,
+                                                         "selected_plan_indices": requested_indices})
+            result["complete"] = not result["failure_reasons"] and all(
+                index in set(completed) for index in requested_indices)
+            (out / "framebank-private.json").write_text(fb.report_json(result), encoding="utf-8")
+            return result
+    else:
+        out.mkdir(parents=True); result = _result_base(raw_plan, source, tools, build)
     try:
         env, _ = fb.codec_environment(os.environ, "haar")
         result["hvs_gpu_sanity"] = fb.hvs_gpu_sanity(tools["psnr_hvs_m_h"], out / "scorer-sanity",
                                                       plan["projection"]["vertical_pixels_per_degree"], guard, env, command_timeout_s)
         if not result["hvs_gpu_sanity"].get("passed"): raise RuntimeError("hvs_gpu_sanity_failed")
-        selected = [(index, cell) for index, cell in enumerate(plan["cells"]) if phase is None or cell["phase"] == phase]
-        if not selected: raise ValueError("requested phase has no cells")
-        result["requested_phase"] = phase; result["selected_plan_indices"] = [i for i,_ in selected]
+        result["requested_phase"] = phase; result["requested_cell_indices"] = cell_indices
+        result["selected_plan_indices"] = requested_indices
+        result.setdefault("run_scopes", []).append({"phase": phase, "requested_cell_indices": cell_indices,
+                                                     "selected_plan_indices": requested_indices})
         for index, cell in selected:
             directory = out / f"cell-{index:02d}-{cell['wavelet']}-{cell['rate_mbps']}"; directory.mkdir()
-            encoded, decoded = directory / "encoded.wave", directory / "decoded.y4m"; row = copy.deepcopy(cell)
+            encoded, decoded = directory / "encoded.wave", directory / "decoded.y4m"; row = {**copy.deepcopy(cell), "plan_index": index}
             try:
                 env, row["codec_environment"] = fb.codec_environment(os.environ, cell["wavelet"])
                 encode_source, encode_info = source, info
@@ -370,19 +418,20 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
         result["source_sha256_end"] = _hash(source); result["tool_provenance_end"] = {k: _hash(v) for k, v in tools.items()}
         if result["source_sha256_end"] != result["source_sha256_start"]: result["failure_reasons"].append("source_changed_during_run")
         if result["tool_provenance_end"] != result["tool_provenance_start"]: result["failure_reasons"].append("tool_changed_during_run")
-        result["complete"] = not result["failure_reasons"] and len(result["cells"]) == len(selected)
+        completed = {row.get("plan_index") for row in result["cells"]}
+        result["complete"] = not result["failure_reasons"] and all(index in completed for index in requested_indices)
     finally:
         (out / "framebank-private.json").write_text(fb.report_json(result), encoding="utf-8")
     return result
 
 
 def sanitized_report(result: dict) -> dict:
-    keep = ("phase", "profile", "wavelet", "rate_mbps", "fps", "eye_width", "eye_height", "stereo_width", "cap_bytes", "bits_per_pixel", "encoded_chroma", "bitstream", "native_encoder_telemetry", "codec_only", "displayed", "crops", "codec_only_windows", "displayed_windows", "crop_windows", "centre_hvs", "fence_metrics", "q3b_transform", "q3b_encoded_source", "error")
+    keep = ("plan_index", "phase", "profile", "wavelet", "rate_mbps", "fps", "eye_width", "eye_height", "stereo_width", "cap_bytes", "bits_per_pixel", "encoded_chroma", "bitstream", "native_encoder_telemetry", "codec_only", "codec_only_domain", "displayed", "crops", "codec_only_windows", "displayed_windows", "crop_windows", "centre_hvs", "fence_metrics", "q3b_transform", "q3b_encoded_source", "error")
     return {"schema": SCHEMA, "kind": "pyro_q3_framebank_sanitized", "complete": result.get("complete") is True,
             "failure_reasons": list(result.get("failure_reasons", [])), "frozen_plan_sha256": result.get("frozen_plan_sha256"),
             "source_sha256": result.get("source_sha256_end"), "tool_provenance": result.get("tool_provenance_end"),
             "tools_build_provenance": result.get("tools_build_provenance"), "module_hashes": result.get("module_hashes"),
-            "hvs_gpu_sanity": result.get("hvs_gpu_sanity"), "source": result.get("source_sha256_start"), "requested_phase": result.get("requested_phase"), "selected_plan_indices": result.get("selected_plan_indices"), "cells": [{k: r.get(k) for k in keep} for r in result.get("cells", [])],
+            "hvs_gpu_sanity": result.get("hvs_gpu_sanity"), "source": result.get("source_sha256_start"), "requested_phase": result.get("requested_phase"), "requested_cell_indices": result.get("requested_cell_indices"), "selected_plan_indices": result.get("selected_plan_indices"), "run_scopes": result.get("run_scopes"), "cells": [{k: r.get(k) for k in keep} for r in result.get("cells", [])],
             "optical_latency_ms": None, "display_fps": None}
 
 
@@ -402,6 +451,8 @@ def main(argv=None):
     run.add_argument("--command-timeout-s", type=float, default=900)
     run.add_argument("--keep-artifacts", action="store_true")
     run.add_argument("--phase", choices=("q3a", "q3b"))
+    run.add_argument("--cell-index", action="append", type=int, dest="cell_indices",
+                     help="original frozen-plan index; repeat to select a finite subset")
     run.add_argument("--supervised", action="store_true", help="require owner-attested frame_bank_pc lease")
     run.add_argument("--resume", action="store_true", help="inspect matching completed output only")
     args = parser.parse_args(argv)
@@ -419,7 +470,8 @@ def main(argv=None):
                       tools_metadata=Path(args.tools_metadata),
                       scorer_tools_metadata=Path(args.scorer_tools_metadata) if args.scorer_tools_metadata else None,
                       command_timeout_s=args.command_timeout_s, keep_artifacts=args.keep_artifacts,
-                      supervised=args.supervised, resume=args.resume, phase=args.phase)
+                      supervised=args.supervised, resume=args.resume, phase=args.phase,
+                      cell_indices=args.cell_indices)
     report = sanitized_report(result); Path(args.report).write_text(fb.report_json(report), encoding="utf-8")
     print("wrote sanitized report: complete=" + str(report["complete"]))
     return 0 if report["complete"] else 2
