@@ -358,6 +358,34 @@ def with_foveation_source(plan: dict, *, profile: str, softness: float, blur_onl
     raise RuntimeError("Q3b reduced-plane adapter and band scoring are not implemented")
 
 
+def build_revised_q3b_nvenc_plan(source: Path, vertical_pixels_per_degree: float, **kwargs) -> dict:
+    """Freeze Q3b's two NVENC rows; PyroWave owns the other eight rows.
+
+    Encoded geometry is deliberately reduced per cell. The frozen source crop
+    and all score references remain at 2624x2776 per eye.
+    """
+    base = build_revised_q3a_plan(source, vertical_pixels_per_degree, **kwargs)
+    crop = next(row for row in base["cells"] if row["label"] == "h264-dual-p7-400")
+    cells = []
+    for label, layout, transform in (
+        ("h264-h264fit-s05-700", "stereo_sbs", foveation_transform_descriptor(profile="h264fit", softness=.5, blur_only=False)),
+        ("h264-dual-blur-light-s05-700", "dual_eye", foveation_transform_descriptor(profile="light", softness=.5, blur_only=True)),
+    ):
+        from .foveation import FoveationConfig, encoded_size
+        width, height = encoded_size(2624, 2776, FoveationConfig(transform["profile"], transform["softness"], transform["blur_only"]))
+        encoded_base = dict(crop, eye_width=width, eye_height=height, stereo_width=width * 2,
+                            cap_bytes=fb.cap_bytes(700, fb.FPS), bits_per_pixel=fb.bpp(fb.cap_bytes(700, fb.FPS), width, height))
+        row = _revised_cell(encoded_base, codec="h264", rate_mbps=700, preset="p7", layout=layout,
+                            spatial_aq=False, label=label, source_geometry="crop")
+        row["source_transform"] = transform
+        row["score_vertical_pixels_per_degree"] = float(vertical_pixels_per_degree)
+        cells.append(row)
+    base.update(cells=cells, q3_revision="2026-10-04-q3b")
+    base["hvs_calibration"]["codec_cells"] = [fb.hvs_calibration_for_vertical_ppd(
+        vertical_pixels_per_degree * 2776 / kwargs.get("full_eye", fb.DISPLAY_EYE)[1], 2776) for _ in cells]
+    return base
+
+
 def _validate_source_adapter(plan: dict) -> None:
     adapter = plan.get("source_adapter")
     if adapter is None:  # schema-1 compatibility only
