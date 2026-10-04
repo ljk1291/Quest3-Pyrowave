@@ -86,3 +86,34 @@ class PyroQ3FramebankTests(unittest.TestCase):
             # The adapter itself must only delegate to an actual shared scorer.
             self.assertTrue(callable(getattr(__import__("xrbench.nvenc_framebank", fromlist=["x"]), "_same_frame_scores")))
         self.assertEqual(len(q3.Q3B_ROWS), 8)
+
+    def test_q3b_orchestration_uses_reduced_codec_input_then_expanded_shared_scores(self):
+        """Exercise both squeezed and blur-only cells without a codec/GPU."""
+        from xrbench import nvenc_framebank as nv
+        with tempfile.TemporaryDirectory() as root:
+            root=Path(root); source=root/'cropped.y4m'; source.write_bytes(b'x')
+            tools={name:root/(name+'.exe') for name in ('encode','decode','psnr_hvs_m_h')}
+            for path in tools.values(): path.write_bytes(b'x')
+            info=fb.Y4MInfo(5248,2776,90,1,'420','FULL',5248*2776*3//2,90)
+            for profile in ('light-s0','blur-only-light-s05'):
+                cell=dict(phase='q3b',profile=profile,wavelet='97',rate_mbps=1000,fps=90,
+                    eye_width=2464 if profile=='light-s0' else 2624,eye_height=2592 if profile=='light-s0' else 2776,
+                    stereo_width=4928 if profile=='light-s0' else 5248,source_geometry='crop',
+                    source_transform=q3._q3b_transform(profile),requires_wo8_reduced_encode=True,
+                    cap_bytes=fb.cap_bytes(1000,90),bits_per_pixel=1,score_vertical_pixels_per_degree=23.5)
+                plan={'schema':1,'kind':'pyro_q3_framebank','source':self.source_contract(),'cells':[cell],
+                      'projection':{'vertical_pixels_per_degree':23.5},'crop_geometry':q3.CROP_GEOMETRY,
+                      'source_adapter':{'kind':'per_eye_crop','geometry':q3.CROP_GEOMETRY,'future_transform':None},
+                      'hvs_calibration':{'codec_cells':[{}]},'fence_rectangles':{'cropped':{'mapped':q3.FENCE_RECTANGLES['cropped']['mapped']},'full_fov':q3.FENCE_RECTANGLES['full_fov']}}
+                (root/'plan.json').write_text(json.dumps(plan)); (root/'meta.json').write_text('{}')
+                class Guard:
+                    def status(self): return {}
+                    def run(self, argv, **kwargs):
+                        target=Path(argv[-1]) if 'decode.exe' in str(argv[0]) else next((Path(v) for v in argv if str(v).endswith('.wave')),Path(argv[-1]))
+                        target.write_bytes(b'x')
+                        return 0,'CDF 9/7',''
+                encoded_info=fb.Y4MInfo(cell['stereo_width'],cell['eye_height'],90,1,'420','FULL',1,90)
+                score_info=info; ids=[{'source_frame':i,'source_sha256':'a','encoded_reference_sha256':'b'} for i in range(90)]
+                with mock.patch.object(q3,'validate_plan',return_value=plan), mock.patch.object(q3,'_require_cropped_source',return_value=info), mock.patch.object(q3,'_source_contract',return_value=plan['source']), mock.patch.object(fb,'WindowGuard',return_value=Guard()), mock.patch.object(fb,'required_tools'), mock.patch.object(q3,'verify_split_bundles',return_value={}), mock.patch.object(fb,'hvs_gpu_sanity',return_value={'passed':True}), mock.patch.object(fb,'codec_environment',return_value=({},{})), mock.patch.object(q3,'parse_wave',return_value={'payload_bytes':[1]*90}), mock.patch.object(q3,'_native_records',return_value={'qualified':True}), mock.patch.object(nv,'_stream_q3b_sources',return_value=(encoded_info,score_info,ids,{})) as prep, mock.patch.object(nv,'_reconstruct_q3b_decoded') as expand, mock.patch.object(fb,'canonicalize_decoded_header',return_value={}), mock.patch.object(fb,'_assert_same_frames',side_effect=[encoded_info,score_info]), mock.patch.object(q3,'_same_frame_scores',return_value={'centre_hvs':{},'fence_metrics':{}}) as score:
+                    result=q3.run_plan(root/'plan.json',source,root/('out'+profile),tools,root/'lease',tools_metadata=root/'meta.json',supervised=True)
+                self.assertTrue(prep.called); self.assertTrue(expand.called); self.assertTrue(score.called)
