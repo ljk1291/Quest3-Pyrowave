@@ -51,6 +51,9 @@ and independent review; actual expanded-space scoring calibration is unchanged.
 All five cropped Pyro Q3a rows are now complete with clean lease closure. CDF 9/7
 at 1000 Mbps leads them (trimmed fence edge PSNR 35.754 dB, temporal residual p99
 19 luma codes); cropped AV1/200 remains ahead (43.747 dB, p99 8). No timing pass.
+The completed 15-row [Q3a report](../results/metro-q3a-quality-2026-10-04.md)
+and [JSON](../results/metro-q3a-quality-2026-10-04.json) retain both score windows,
+crop metrics and provenance. Q3b and the final combined 25-row report remain pending.
 The first Q3b cell was deliberately stopped during CPU reference preparation,
 before any codec encode: the area-filter helper rebuilt a full-plane summed-area
 table for every tile. Its lease closed with zero jobs/errors; partial references
