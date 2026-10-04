@@ -1,3 +1,35 @@
+diff --git a/alvr/client_core/src/c_api.rs b/alvr/client_core/src/c_api.rs
+index d1ef049fe0030d637b8370e3433b8e76e1fc94e3..7ea650a488b87362015792be11ed5918ded5c64b 100644
+--- a/alvr/client_core/src/c_api.rs
++++ b/alvr/client_core/src/c_api.rs
+@@ -20,7 +20,8 @@ use alvr_graphics::{
+ };
+ use alvr_packets::{ButtonEntry, ButtonValue, FaceData, ViewParams};
+ use alvr_session::{
+-    CodecType, FoveatedEncodingConfig, MediacodecPropType, MediacodecProperty, UpscalingConfig,
++    CodecType, FoveatedEncodingConfig, FoveationProfile, MediacodecPropType, MediacodecProperty,
++    UpscalingConfig,
+ };
+ use std::{
+     cell::RefCell,
+@@ -788,12 +789,17 @@ pub unsafe extern "C" fn alvr_start_stream_opengl(config: AlvrStreamConfig) {
+         convert_swapchain_array(config.swapchain_textures, config.swapchain_length);
+     let foveated_encoding = config.enable_foveation.then_some(FoveatedEncodingConfig {
+         force_enable: true,
++        // The C API carries arbitrary numeric values rather than one of the
++        // fixed desktop profiles. Preserve that legacy contract explicitly.
++        profile: FoveationProfile::Custom,
+         center_size_x: config.foveation_center_size_x,
+         center_size_y: config.foveation_center_size_y,
+         center_shift_x: config.foveation_center_shift_x,
+         center_shift_y: config.foveation_center_shift_y,
+         edge_ratio_x: config.foveation_edge_ratio_x,
+         edge_ratio_y: config.foveation_edge_ratio_y,
++        peripheral_softness: 0.0,
++        blur_only: false,
+         // The gaze-driven centre is chosen by the server; the client only decodes what it sends.
+         follow_gaze: false,
+     });
 diff --git a/alvr/client_openxr/src/lib.rs b/alvr/client_openxr/src/lib.rs
 index 045573703658f91b5448e231ac8269b5c7fe2fdb..29c8ba88dbc0cbe27bb033be5c2f1597319217a2 100644
 --- a/alvr/client_openxr/src/lib.rs
@@ -165,12 +197,25 @@ index c3b4f9e9629037a7a0dd2b6ab5776765ff4770a3..e42d6c87cacc1725bcbb631f5783a979
      bool m_enableColorCorrection;
      float m_brightness;
 diff --git a/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl b/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl
-index e77a8ab6a2f6820f385524a4baa12e3b95038891..ae16edbb147ddb351bab29c552e57c6b4b6fae72 100644
+index e77a8ab6a2f6820f385524a4baa12e3b95038891..830e3e4572cb257b0658302442d6b3d6e5f65a88 100644
 --- a/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl
 +++ b/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl
-@@ -14,7 +14,8 @@ SamplerState trilinearSampler {
+@@ -12,9 +12,20 @@ SamplerState trilinearSampler {
+ 	//AddressV = Wrap;
+ };
  
- float4 main(float2 uv : TEXCOORD0) : SV_Target {
+-float4 main(float2 uv : TEXCOORD0) : SV_Target {
++// Match the compositor's quad VS signature. Supplying only TEXCOORD leaves
++// register linkage ambiguous in standalone D3D11 readback fixtures and does
++// not describe the production PS_INPUT interface.
++struct FoveationPixelInput {
++	float4 position : SV_POSITION;
++	float2 uv : TEXCOORD0;
++	uint view : VIEW;
++};
++
++float4 main(FoveationPixelInput input) : SV_Target {
++	float2 uv = input.uv;
  	bool isRightEye = uv.x > 0.5;
 -	float2 eyeUV = TextureToEyeUV(uv, isRightEye) / eyeSizeRatio;
 +	float2 outputEyeUV = TextureToEyeUV(uv, isRightEye);
@@ -178,7 +223,7 @@ index e77a8ab6a2f6820f385524a4baa12e3b95038891..ae16edbb147ddb351bab29c552e57c6b
  
  	float2 shift = CenterShiftForEye(isRightEye);
  
-@@ -24,10 +25,12 @@ float4 main(float2 uv : TEXCOORD0) : SV_Target {
+@@ -24,10 +35,12 @@ float4 main(float2 uv : TEXCOORD0) : SV_Target {
  
  	float2 loBound = c0 * (shift + 1.) / c2;
  	float2 hiBound = c0 * (shift - 1.) / c2 + 1.;
@@ -193,13 +238,12 @@ index e77a8ab6a2f6820f385524a4baa12e3b95038891..ae16edbb147ddb351bab29c552e57c6b
  
  	float2 center = eyeUV * c2 / edgeRatio + c1;
  	float2 d2 = eyeUV * c2;
-@@ -39,6 +42,51 @@ float4 main(float2 uv : TEXCOORD0) : SV_Target {
+@@ -39,6 +52,51 @@ float4 main(float2 uv : TEXCOORD0) : SV_Target {
  	float2 rightEdge = g2 * center + (1. - g2) * d3;
  
  	float2 compressedUV = underBound * leftEdge + inBound * center + overBound * rightEdge;
 +	if (blurOnly > .5) compressedUV = outputEyeUV;
- 
--	return compositionTexture.Sample(trilinearSampler, EyeToTextureUV(compressedUV, isRightEye));
++
 +	// One bilinear source tap aliases a 1.5–2x squeezed band. Integrate the
 +	// source-pixel box with exact overlap weights. The bounded 9x9 support covers
 +	// the 2x profile plus s=1 while smoothstep is C1 at the centre-band join.
@@ -243,11 +287,12 @@ index e77a8ab6a2f6820f385524a4baa12e3b95038891..ae16edbb147ddb351bab29c552e57c6b
 +		colour += weight * compositionTexture.SampleLevel(trilinearSampler, EyeToTextureUV(sampleUV, isRightEye), 0);
 +		totalWeight += weight;
 +	}
-+
+ 
+-	return compositionTexture.Sample(trilinearSampler, EyeToTextureUV(compressedUV, isRightEye));
 +	return colour / max(totalWeight, 1e-6);
  }
 diff --git a/alvr/server_openvr/cpp/alvr_server/shader/FoveatedRendering.hlsli b/alvr/server_openvr/cpp/alvr_server/shader/FoveatedRendering.hlsli
-index f920ea68e45fdb72e43f5be24424ccb6c03cd6f9..d7924b55a739887de0e903895509ce25510d80e7 100644
+index f920ea68e45fdb72e43f5be24424ccb6c03cd6f9..8b47b8f4f07273e3533440a73abfd0b506d2f571 100644
 --- a/alvr/server_openvr/cpp/alvr_server/shader/FoveatedRendering.hlsli
 +++ b/alvr/server_openvr/cpp/alvr_server/shader/FoveatedRendering.hlsli
 @@ -6,6 +6,8 @@ cbuffer FoveationVars {
@@ -259,131 +304,142 @@ index f920ea68e45fdb72e43f5be24424ccb6c03cd6f9..d7924b55a739887de0e903895509ce25
  };
  
  // The two eyes have mirrored, asymmetric horizontal frusta, and TextureToEyeUV below mirrors the
-@@ -27,4 +29,4 @@ float2 EyeToTextureUV(float2 eyeUV, bool isRightEye) {
+@@ -22,9 +24,10 @@ float2 TextureToEyeUV(float2 textureUV, bool isRightEye) {
+ }
+ 
+ float2 EyeToTextureUV(float2 eyeUV, bool isRightEye) {
+-	// saturate is used to avoid color bleeding between the two sides of the texture or with the black border when filtering
+-	//float2 clampedUV = saturate(eyeUV);
++	// Aligned encoder padding maps the final output texels past the logical eye
++	// edge. Clamp before converting to stereo texture coordinates so that a
++	// padded right-eye texel cannot sample across the centre seam.
++	float2 clampedUV = saturate(eyeUV);
  	// left: x / 2; right 1 - (x / 2)
- 	//return float2(clampedUV.x / 2. + float(isRightEye) * (1. - clampedUV.x), clampedUV.y);
- 	return float2(eyeUV.x * .5 + float(isRightEye) * (1. - eyeUV.x), eyeUV.y);
+-	//return float2(clampedUV.x / 2. + float(isRightEye) * (1. - clampedUV.x), clampedUV.y);
+-	return float2(eyeUV.x * .5 + float(isRightEye) * (1. - eyeUV.x), eyeUV.y);
 -}
 \ No newline at end of file
++	return float2(clampedUV.x * .5 + float(isRightEye) * (1. - clampedUV.x), clampedUV.y);
 +}
 diff --git a/alvr/server_openvr/cpp/platform/win32/CompressAxisAlignedPixelShader.cso b/alvr/server_openvr/cpp/platform/win32/CompressAxisAlignedPixelShader.cso
-index f6b2c18493f4c5435044a46766561d7eb2d3d798..8067bd6d5d4e394477135313201e71521ea7e62f 100644
+index f6b2c18493f4c5435044a46766561d7eb2d3d798..07a35b89442463b537d41ac4ed530dfc15a2b1b1 100644
 GIT binary patch
-literal 35528
-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
-X$@6N)npM8lIMJ)S-}h;}<E#G%e1R}D
+literal 35592
+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
+Sm2Wmq^y=>SeH!oh>i+>>F*%0-
 
 literal 1948
 zcma)7J#Q015S?4cXU7h~3PM6uCu$m81Vq6taeP375socGg9(a2R1qK{Q6Pg51xTq7
@@ -403,7 +459,7 @@ z^QDbzkow1f!S6lqV`OQaq|8C>Hv>+;k>uYhd>x(llT@)?k*{+Qbp{tj|C2rkpX`0e
 LVeHpi_=)`o15lhk
 
 diff --git a/alvr/server_openvr/cpp/platform/win32/FFR.cpp b/alvr/server_openvr/cpp/platform/win32/FFR.cpp
-index f6dcb9f16f748bd60698408638666d40ec4fd234..9188ea5b8fb0579d6eff54bef152aed1d8aff795 100644
+index f6dcb9f16f748bd60698408638666d40ec4fd234..3ac00abe9da431bcf4161a1fd75a6c05b81571c3 100644
 --- a/alvr/server_openvr/cpp/platform/win32/FFR.cpp
 +++ b/alvr/server_openvr/cpp/platform/win32/FFR.cpp
 @@ -28,13 +28,13 @@ struct FoveationVars {
@@ -433,13 +489,16 @@ index f6dcb9f16f748bd60698408638666d40ec4fd234..9188ea5b8fb0579d6eff54bef152aed1
  
      float optimizedEyeWidth = foveationScaleX * targetEyeWidth;
      float optimizedEyeHeight = foveationScaleY * targetEyeHeight;
-@@ -97,8 +97,8 @@ FoveationVars CalculateFoveationVars(
+@@ -97,8 +97,11 @@ FoveationVars CalculateFoveationVars(
               centerShiftRightYAligned,
               edgeRatioX,
               edgeRatioY,
 -             0.f,
 -             0.f };
-+             std::clamp(Settings::Instance().m_foveationPeripheralSoftness, 0.f, 1.f),
++             // The Rust session validator rejects malformed values before this
++             // point. Do not silently turn an invalid requested profile into a
++             // different softness value here.
++             Settings::Instance().m_foveationPeripheralSoftness,
 +             Settings::Instance().m_foveationBlurOnly ? 1.f : 0.f };
  }
  }

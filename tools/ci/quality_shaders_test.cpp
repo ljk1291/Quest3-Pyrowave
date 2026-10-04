@@ -25,9 +25,12 @@ struct Warp {
               D3D11_SDK_VERSION,&device,nullptr,&context));
         const char *source=R"(
             cbuffer Bounds : register(b1) { float4 uvBounds; float4 viewControl; };
-            struct O { float4 pos:SV_POSITION; float2 uv:TEXCOORD; uint view:VIEW; };
+            struct O { float4 pos:SV_POSITION; float2 uv:TEXCOORD0; uint view:VIEW; };
             O VS(uint id:SV_VertexID) {
-                float2 p=float2((id==1)?3:-1,(id==2)?-3:1);
+                // A four-vertex strip keeps interpolated UVs in [0,1]. The
+                // oversized full-screen triangle used by older fixtures made
+                // the WARP seam fixture's b1 UV bounds hard to audit.
+                float2 p=float2((id&1)?1:-1,(id&2)?-1:1);
                 O o; o.pos=float4(p,0,1);
                 float2 uv=float2((p.x+1)*.5,(1-p.y)*.5);
                 o.uv=lerp(uvBounds.xy,uvBounds.zw,uv); o.view=(uint)viewControl.x; return o;
@@ -83,8 +86,8 @@ struct Warp {
         }
         context->OMSetRenderTargets(targets,pointers.data(),nullptr);
         D3D11_VIEWPORT vp={0,0,float(dw),float(dh),0,1};context->RSSetViewports(1,&vp);
-        context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        context->VSSetShader(vs.Get(),nullptr,0);context->PSSetShader(ps,nullptr,0);context->Draw(3,0);
+        context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+        context->VSSetShader(vs.Get(),nullptr,0);context->PSSetShader(ps,nullptr,0);context->Draw(4,0);
         context->OMSetRenderTargets(0,nullptr,nullptr);
         std::vector<std::vector<float>> result(targets,std::vector<float>(dw*dh));
         desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
@@ -126,15 +129,43 @@ int main(int argc,char **argv) {
         auto fjoin=foveation; fjoin[6]=fjoin[7]=2.f/7.f;
         auto joinDc=w.draw(foveated.Get(),std::vector<float>(128,.37f),16,8,16,8,fjoin,uv)[0];
         for(float x:joinDc) require(std::abs(x-.37f)<1e-6f,"foveation join emitted black");
-        std::vector<float> foveatedStereo(128); for(unsigned y=0;y<8;y++) for(unsigned x=8;x<16;x++) foveatedStereo[y*16+x]=1;
-        // Blur-only retains matching source/output geometry while exercising
-        // the same source-pixel filter. A compressed profile needs its real
-        // smaller optimized dimensions, which this compact seam fixture does
-        // not model.
-        auto seamFoveation=foveation; seamFoveation[15]=1;
-        auto fseam=w.draw(foveated.Get(),foveatedStereo,16,8,16,8,seamFoveation,uv)[0];
-        for(unsigned y=0;y<8;y++) for(unsigned x=0;x<16;x++)
-            require(std::abs(fseam[y*16+x]-(x<8?0.f:1.f))<1e-6f,"foveation crossed eye seam");
+        // Actual Medium-profile geometry from CalculateFoveationVars:
+        // target=256, centre=0.6, ratio=2 -> aligned centre=.59375,
+        // unpadded scale=.796875, output=224, eyeSizeRatio=204/224.
+        // This executes compressedUV/localSqueeze on a genuinely smaller
+        // surface and catches cross-eye sampling in aligned padding.
+        const std::vector<float> compressedFoveation={
+            u32bits(256),u32bits(256),u32bits(224),u32bits(224),
+            204.f/224.f,204.f/224.f,.59375f,.59375f,0,0,0,0,2,2,1,0};
+        std::vector<float> compressedStereo(512*256,.25f);
+        for(unsigned y=0;y<256;y++) for(unsigned x=256;x<512;x++) compressedStereo[y*512+x]=.75f;
+        // Render the two compositor viewports separately, as production does.
+        // The synthetic full-screen vertex shader otherwise assigns its exact
+        // UV=.5 centre boundary pixel to the left branch. Both logical eye
+        // edges include aligned padding, so this catches a cross-eye read.
+        auto fleft=w.draw(foveated.Get(),compressedStereo,512,256,224,224,
+                          compressedFoveation,{0,0,.5f,1})[0];
+        auto fright=w.draw(foveated.Get(),compressedStereo,512,256,224,224,
+                           compressedFoveation,{.5f,0,1,1})[0];
+        for(float value:fleft) require(std::abs(value-.25f)<1e-5f,"foveation left eye crossed seam");
+        for(unsigned y=0;y<224;y++) for(unsigned x=0;x<224;x++)
+            require(std::abs(fright[y*224+x]-.75f)<1e-5f,"foveation right eye crossed seam");
+        // A non-flat eye proves the compressed UV/local squeeze path is active.
+        // At the outer ring the Medium mapping samples farther toward the source
+        // edge than identity output UV would. The 9x9 footprint is also active
+        // here because peripheralSoftness is one.
+        std::vector<float> compressedGradient(512*256);
+        for(unsigned y=0;y<256;y++) for(unsigned x=0;x<512;x++) {
+            const float eyeX=float(x % 256)/255.f;
+            compressedGradient[y*512+x]=(x<256 ? .10f+.30f*eyeX : .60f+.20f*eyeX);
+        }
+        auto fgradient=w.draw(foveated.Get(),compressedGradient,512,256,224,224,
+                              compressedFoveation,{0,0,.5f,1})[0];
+        const float identityLeft=.10f+.30f*((8.f+.5f)/224.f);
+        if (std::abs(fgradient[112*224+8]-identityLeft) <= .005f) {
+            std::cerr << "compressed foveation did not apply its outer local squeeze: "
+                      << fgradient[112*224+8] << " identity " << identityLeft << '\n'; return 1;
+        }
         std::vector<float> ramp(24);for(unsigned y=0;y<4;y++)for(unsigned x=0;x<6;x++)ramp[y*6+x]=float(x)/5;
         auto fractional=w.draw(area.Get(),ramp,6,4,4,4,params,uv)[0];
         const float expected[]={1.f/15,1.f/3,2.f/3,14.f/15};
