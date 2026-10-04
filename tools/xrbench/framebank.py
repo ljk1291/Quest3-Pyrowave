@@ -277,7 +277,7 @@ class _OwnedPcJobRegistry:
         state=unattended.json_read(state_path); host=unattended.Host(state.get("adb","adb"))
         identity=host.process_identity(pid)
         return unattended.register_owned_pc_job(state_path,pid,identity["path"],identity["started_epoch_s"],arm_path=arm_path or unattended.ARM,host=host)
-    def unregister(self, state_path:Path, pid:int):
+    def unregister(self, state_path:Path, pid:int, *, completion_observed=False):
         from tools.quest3 import unattended
         return unattended.unregister_owned_pc_job(state_path,pid)
 
@@ -338,7 +338,13 @@ class WindowGuard:
                 raise
             finally:
                 if registered:
-                    try: self.job_registry.unregister(self.window/"state.json",proc.pid)
+                    try: self.job_registry.unregister(self.window/"state.json",proc.pid,
+                                                     completion_observed=proc.poll() is not None)
+                    except TypeError:
+                        # Keep injected legacy registries usable in CPU tests;
+                        # the production supervised registry receives explicit
+                        # Popen completion evidence above.
+                        self.job_registry.unregister(self.window/"state.json",proc.pid)
                     except Exception:
                         if proc.poll() is None: proc.terminate()
                         raise PermissionError("WO-0 owned PC job could not be unregistered")
