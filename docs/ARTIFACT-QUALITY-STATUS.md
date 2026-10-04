@@ -38,12 +38,13 @@ Read with Get-NetAdapter; no network changes. Negotiated link speed is not goodp
 
 **Resumed, 2026-10-04:** Fresh preflight after the goal resumed confirms ComfyUI
 idle (zero running/pending), 13275 MiB free VRAM and no quality safety stops.
-The first Q3a NVENC cell encoded/decoded both eyes, then scoring stopped when the
-monitor hit a transient Windows state-file replacement error. The monitor and
-controller are confirmed absent, and no owned jobs remain. Retained frame and
-bitstream identities are verified for score-only recovery after the supervisor
-repair passes CPU CI. No encode repetition is needed. All source work continues
-on its own branches.
+The first Q3a NVENC cell encoded/decoded both eyes. Scoring exposed a transient
+Windows state-file replacement error, then two process-discovery false positives
+(a Git path mention and unreadable CPU Python arguments). Repairs passed CPU CI;
+the stopped attempts have no remaining jobs. Score-only recovery is running under
+a new finite lease, verifying the retained frame/bitstream hashes and preserving
+the failed attempts. Only the other nine NVENC cells require encoding. Source
+work continues on its own branches; no native settings or defaults changed.
 The earlier [preflight stop](../results/q3a-preflight-blocked-2026-10-04.json) remains
 historical evidence; no arm, headset, installed-pair or settings changes occurred.
 
@@ -148,6 +149,25 @@ Take the first unblocked item. Items marked ∥ are independent.
 ## Log
 
 <!-- Codex appends entries here: date, checkpoint, verified (links), remaining, blocked? -->
+
+- 2026-10-04, Q3a guard repairs and Pyro adapter boundary review:
+  [PR 33](https://github.com/ljk1291/Quest3-Pyrowave/pull/33) merged as `cdc55b9`
+  after [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37164586939).
+  The retry then identified a Git file scan mentioning ComfyUI as a backend;
+  [PR 34](https://github.com/ljk1291/Quest3-Pyrowave/pull/34) fixes executable and
+  entry-point recognition. Its follow-up [PR 35](https://github.com/ljk1291/Quest3-Pyrowave/pull/35)
+  distinguishes unreadable Python arguments from actual per-PID GPU compute
+  evidence, with 30 targeted tests and [green CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37165108956).
+  Unknown process-inventory failures, active compute backends, the VRAM margin,
+  driver faults and stop marker remain enforced. Both stopped retries report
+  closed leases, zero owned jobs and no cleanup errors. A fourth finite attempt
+  is rescoring the same retained H.264 encode before the remaining nine cells.
+  [PR 31](https://github.com/ljk1291/Quest3-Pyrowave/pull/31) merged as `eb2332b`
+  after [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37164918510),
+  including the corrected full-parent crop-coordinate builder. The subsequent
+  Q3b review is correcting shared scorer/tool boundaries, peripheral masks and
+  per-frame provenance before any Pyro Q3 or foveation GPU trial. Native
+  WO-10/WO-8/timing CI remains required; no headset or installed-pair changes.
 
 - 2026-10-04, Q3a scoring recovery and WO-13 merge: both 400-Mbps-total H.264
   eye streams completed with 90 verified decodes; scoring stopped after the first
