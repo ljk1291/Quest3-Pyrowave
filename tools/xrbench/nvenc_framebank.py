@@ -1117,6 +1117,42 @@ def _score_pair_windows(tools, distorted: Path, reference: Path, info: fb.Y4MInf
             "windows_one_based": {"1-90": [1, 90], "10-89": [10, 89]}}
 
 
+def _display_reuse_evidence(*, is_crop: bool, reference: Path, decoded: Path,
+                            ref_info: fb.Y4MInfo, decoded_info: fb.Y4MInfo,
+                            display_ref: Path, display_dec: Path,
+                            display_info: fb.Y4MInfo, decoded_display_info: fb.Y4MInfo,
+                            codec_ppd: float, display_ppd: float) -> dict | None:
+    """Prove a crop display score is the codec score before reusing it.
+
+    ``_write_display`` deliberately goes through the generic resize helper even
+    when its requested dimensions match.  It is therefore never assumed to be
+    an identity operation: all file payloads, headers and HVS calibration must
+    agree before the two score-window objects are shared.
+    """
+    if not is_crop:
+        return None
+    codec_calibration = fb.hvs_calibration_for_vertical_ppd(codec_ppd, ref_info.height)
+    display_calibration = fb.hvs_calibration_for_vertical_ppd(display_ppd, display_info.height)
+    checks = {
+        "reference_file_sha256_equal": fb.sha256_file(reference) == fb.sha256_file(display_ref),
+        "decoded_file_sha256_equal": fb.sha256_file(decoded) == fb.sha256_file(display_dec),
+        "reference_header_equal": ref_info == display_info,
+        "decoded_header_equal": decoded_info == decoded_display_info,
+        "cross_header_equal": ref_info == decoded_info == display_info == decoded_display_info,
+        "hvs_calibration_equal": codec_calibration == display_calibration,
+    }
+    if not all(checks.values()):
+        return None
+    return {"reused_from": "codec_only", "reason": "bit_identical_native_crop_display",
+            "checks": checks, "codec_calibration": codec_calibration,
+            "display_calibration": display_calibration,
+            "reference_sha256": fb.sha256_file(reference), "decoded_sha256": fb.sha256_file(decoded),
+            "windows_one_based": {"1-90": [1, 90], "10-89": [10, 89]},
+            # One full and one trimmed score_pair each contain the ffmpeg
+            # aggregate and HVS subprocess. This counts stages, not speed.
+            "duplicate_score_stages_skipped": 4}
+
+
 def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, source_info,
                        decoded, decoded_info, reference, ref_info, timeout, keep_artifacts,
                        *, matching_blur_reference=None):
@@ -1169,10 +1205,19 @@ def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, 
     fb._write_display(decoded, decoded_info, display_dec, presentation_eye)
     display_info = fb.inspect_y4m(display_ref); decoded_display_info = fb.inspect_y4m(display_dec)
     display_ppd = codec_ppd if is_crop else plan["hvs_calibration"]["display"]["vertical_pixels_per_degree"]
-    row["displayed"] = fb.score_pair(tools, display_dec, display_ref, directory,
-                                      display_ppd, image_height=presentation_eye[1], **common)
-    row["displayed_windows"] = _score_pair_windows(tools, display_dec, display_ref, display_info,
-        directory / "display-windows", display_ppd, guard, timeout, all_score=row["displayed"])
+    reuse = _display_reuse_evidence(is_crop=is_crop, reference=reference, decoded=decoded,
+        ref_info=ref_info, decoded_info=decoded_info, display_ref=display_ref, display_dec=display_dec,
+        display_info=display_info, decoded_display_info=decoded_display_info,
+        codec_ppd=codec_ppd, display_ppd=display_ppd)
+    if reuse is not None:
+        row["displayed"] = copy.deepcopy(row["codec_only"])
+        row["displayed_windows"] = copy.deepcopy(row["codec_only_windows"])
+        row["displayed_reused_from_codec_only"] = reuse
+    else:
+        row["displayed"] = fb.score_pair(tools, display_dec, display_ref, directory,
+                                          display_ppd, image_height=presentation_eye[1], **common)
+        row["displayed_windows"] = _score_pair_windows(tools, display_dec, display_ref, display_info,
+            directory / "display-windows", display_ppd, guard, timeout, all_score=row["displayed"])
     row["crops"] = {}
     row["crop_windows"] = {}
     score_crops, excluded = _crop_context_for_cell(plan, cell)
@@ -1411,7 +1456,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
 
 
 def sanitized_report(result: dict) -> dict:
-    keep = ("label", "codec", "rate_mbps", "fps", "eye_width", "eye_height", "encoded_chroma", "cap_bytes", "bits_per_pixel", "source_geometry", "nvenc_profile", "streams", "bitstream", "encode_process_completion_diagnostic", "decode_process_completion_diagnostic", "score_conversion_process_completion_diagnostic", "decoded_raw_wrapper", "codec_only", "codec_only_windows", "displayed", "displayed_windows", "fence_metrics", "crops", "crop_windows", "error")
+    keep = ("label", "codec", "rate_mbps", "fps", "eye_width", "eye_height", "encoded_chroma", "cap_bytes", "bits_per_pixel", "source_geometry", "nvenc_profile", "streams", "bitstream", "encode_process_completion_diagnostic", "decode_process_completion_diagnostic", "score_conversion_process_completion_diagnostic", "decoded_raw_wrapper", "codec_only", "codec_only_windows", "displayed", "displayed_windows", "displayed_reused_from_codec_only", "fence_metrics", "crops", "crop_windows", "error")
     def native_public(record):
         if not isinstance(record, dict):
             return None
