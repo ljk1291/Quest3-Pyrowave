@@ -2,6 +2,34 @@ import pytest
 from tools.quest3 import unattended as u
 
 
+@pytest.mark.parametrize('name,command,path,expected', [
+    ('git.exe', 'git ls-files -- ComfyUI_windows_portable/outputs', '', False),
+    ('git.exe', 'git show ComfyUI/main.py --port 8192', '', False),
+    ('firefox.exe', 'firefox http://127.0.0.1:8192', '', False),
+    ('python.exe', 'python inspect.py ComfyUI/main.py', '', False),
+    ('python.exe', 'python -c "print(\'ComfyUI\')"', '', False),
+    ('python.exe', 'python -m unittest tests.comfyui', '', False),
+    ('python.exe', 'python -s ComfyUI/main.py --windows-standalone-build', '', True),
+    ('python.exe', 'python main.py --port 8192', '', True),
+    ('pythonw.exe', 'pythonw main.py', 'C:/ComfyUI/.venv/pythonw.exe', True),
+    ('python.exe', 'python -m comfyui', '', True),
+    ('ComfyUI.exe', 'ComfyUI.exe', '', True),
+    ('python.exe', None, '', True),
+])
+def test_comfy_detection_checks_the_backend_entry_point(name,command,path,expected):
+    assert u.is_comfy_backend_process(dict(Name=name,CommandLine=command,ExecutablePath=path)) is expected
+
+
+def test_backend_inventory_failure_is_not_treated_as_idle(monkeypatch):
+    class Host(u.Host):
+        def _comfy_pids(self): return [{'discovery_error':'backend_process_inventory_unavailable'}]
+        def _comfy_queue(self): return {'known':True,'running':0,'pending':0}
+    monkeypatch.setattr(u.shutil,'which',lambda name:None)
+    sample=Host().gpu_sample()
+    assert sample['comfy']['known'] is False
+    assert 'comfy_queue_active_or_unknown' in sample['conflicts']
+
+
 @pytest.mark.parametrize('physical,status,passes',[(True,2,True),(True,5,True),
                                                  (False,2,False),(True,3,False)])
 def test_ac_classified_power_requires_charging_and_pinned_physical_usb(physical,status,passes):
