@@ -296,6 +296,15 @@ class NvencFramebankTests(unittest.TestCase):
         self.assertEqual([(c["eye_width"],c["eye_height"]) for c in plan["cells"]],[(1984,2112),(2624,2776)])
         self.assertTrue(all(c["source_transform"]["kind"]=="wo8_foveation" for c in plan["cells"]))
 
+    def test_q3b_bands_use_exact_wo8_source_space_ramp(self):
+        cell={"source_transform":nf.foveation_transform_descriptor(profile="light",softness=.5,blur_only=False)}
+        info=fb.Y4MInfo(5248,2776,90,1,"420","FULL",5248*2776*3//2,90)
+        centre=nf._q3b_centre_rect(cell,info)
+        self.assertEqual(centre["kind"],"wo8_exact_zero_softness_ramp")
+        self.assertGreater(centre["width"],1000)
+        mask,desc=nf._q3b_periphery_mask(cell,info,{"eye":"left","x":0,"y":0,"width":200,"height":200})
+        self.assertEqual(mask.dtype,np.bool_); self.assertEqual(desc["criterion"],"softness_ramp>0")
+
     def test_mocked_runner_wraps_raw_planes_and_keeps_observed_metadata(self):
         with tempfile.TemporaryDirectory() as root:
             root = Path(root); source = self.source(root)

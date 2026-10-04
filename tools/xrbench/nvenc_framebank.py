@@ -940,6 +940,52 @@ def _q3b_periphery_mask(cell: dict, info: fb.Y4MInfo, rect: dict):
                   "total_pixels": int(mask.size)}
 
 
+def _q3b_centre_rect(cell: dict, info: fb.Y4MInfo) -> dict:
+    """Largest chroma-aligned left-eye rectangle before the WO-8 edge ramp."""
+    from .foveation import encoded_size, softness_ramp
+    config = _q3b_config(cell["source_transform"]); w, h = info.width // 2, info.height
+    # Probe the two centre axes separately. Ramp zero is the exact aligned
+    # source-space central band, including any later diagnostic centre shift.
+    ux = np.stack(((np.arange(w) + .5) / w, np.full(w, .5)), axis=-1)
+    uy = np.stack((np.full(h, .5), (np.arange(h) + .5) / h), axis=-1)
+    size = encoded_size(w, h, config)
+    good_x = np.flatnonzero(softness_ramp(ux, (w, h), size, config) == 0)
+    good_y = np.flatnonzero(softness_ramp(uy, (w, h), size, config) == 0)
+    if not len(good_x) or not len(good_y):
+        raise ValueError("Q3b WO-8 has no centre band")
+    x0, x1 = int(good_x[0]), int(good_x[-1] + 1)
+    y0, y1 = int(good_y[0]), int(good_y[-1] + 1)
+    x0 -= x0 % 2; y0 -= y0 % 2; x1 -= x1 % 2; y1 -= y1 % 2
+    if x1 - x0 < 4 or y1 - y0 < 4:
+        raise ValueError("Q3b centre band is too small for C420 scoring")
+    return {"eye":"left", "x":x0, "y":y0, "width":x1-x0, "height":y1-y0,
+            "kind":"wo8_exact_zero_softness_ramp"}
+
+
+def _write_eye_rect(source: Path, info: fb.Y4MInfo, rect: dict, output: Path) -> fb.Y4MInfo:
+    out_info = fb.Y4MInfo(rect["width"], rect["height"], info.fps_num, info.fps_den, info.chroma,
+        info.color_range, fb._frame_bytes(rect["width"], rect["height"], info.chroma), info.frames)
+    offset = 0 if rect["eye"] == "left" else info.width // 2
+    with fb._open_writer(output, out_info) as out:
+        for _, planes, _ in fb.iter_y4m(source, info):
+            cut=[]
+            for plane, factor in zip(planes, (1,2,2)):
+                x=(offset + rect["x"])//factor; y=rect["y"]//factor
+                cut.append(plane[y:y+rect["height"]//factor, x:x+rect["width"]//factor])
+            fb._write_frame(out, out_info, cut)
+    return out_info
+
+
+def _q3b_centre_scores(tools, reference, decoded, blur_reference, info, cell, directory, ppd, guard, timeout):
+    rect=_q3b_centre_rect(cell, info); directory=Path(directory)/"centre-hvs"; directory.mkdir(parents=True,exist_ok=True)
+    sharp, got, blur = directory/"sharp.y4m", directory/"decoded.y4m", directory/"blur.y4m"
+    ci=_write_eye_rect(reference, info, rect, sharp); _write_eye_rect(decoded, info, rect, got); _write_eye_rect(blur_reference, info, rect, blur)
+    sharp_scores=_score_pair_windows(tools, got, sharp, ci, directory/"sharp", ppd, guard, timeout)
+    blur_scores=_score_pair_windows(tools, got, blur, ci, directory/"blur", ppd, guard, timeout)
+    delta={key: sharp_scores[key]["psnr_hvs_m_h"]["value"]-blur_scores[key]["psnr_hvs_m_h"]["value"] for key in ("1-90","10-89")}
+    return {"rectangle":rect,"sharp_reference":sharp_scores,"matching_blur_reference":blur_scores,"hvs_delta_sharp_minus_blur_db":delta}
+
+
 def _crop_context_for_cell(plan: dict, cell: dict) -> tuple[list[dict], dict[str, dict]]:
     """Map fixed full-FOV crops into a cropped source without inventing pixels.
 
@@ -1074,6 +1120,9 @@ def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, 
                                         image_height=ref_info.height, **common)}
     row["codec_only_windows"] = _score_pair_windows(tools, decoded, reference, ref_info,
         directory / "codec-windows", codec_ppd, guard, timeout, all_score=row["codec_only"])
+    if matching_blur_reference is not None:
+        row["centre_hvs"] = _q3b_centre_scores(tools, reference, decoded, matching_blur_reference,
+            ref_info, cell, directory, codec_ppd, guard, timeout)
     if "fence_rectangles" in plan:
         from . import fence_metrics
         fence_rect = (plan["fence_rectangles"]["cropped"]["mapped"] if cell.get("source_geometry") == "crop"
