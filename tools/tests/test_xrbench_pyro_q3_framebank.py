@@ -128,7 +128,7 @@ class PyroQ3FramebankTests(unittest.TestCase):
         from xrbench import nvenc_framebank as nv
         with tempfile.TemporaryDirectory() as root:
             root=Path(root); source=root/'cropped.y4m'; source.write_bytes(b'x')
-            tools={name:root/(name+'.exe') for name in ('encode','decode','psnr_hvs_m_h')}
+            tools={name:root/(name+'.exe') for name in ('encode','decode','psnr_hvs_m_h','ffmpeg')}
             for path in tools.values(): path.write_bytes(b'x')
             info=fb.Y4MInfo(5248,2776,90,1,'420','FULL',5248*2776*3//2,90)
             for profile in ('light-s0','blur-only-light-s05'):

@@ -282,7 +282,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
     raw_plan = Path(plan_path).read_bytes(); plan = validate_plan(json.loads(raw_plan)); source = Path(source)
     info = _require_cropped_source(source); guard = fb.WindowGuard(Path(window), supervised=supervised)
     if _source_contract(source, info) != plan["source"]: raise ValueError("source contract differs from frozen plan")
-    required = {"encode", "decode", "psnr_hvs_m_h"}
+    required = {"encode", "decode", "psnr_hvs_m_h", "ffmpeg"}
     if set(tools) != required: raise ValueError("Pyro Q3 runner requires exactly encode/decode/psnr_hvs_m_h tools")
     fb.required_tools(tools); guard.status(); build = verify_split_bundles(tools, Path(tools_metadata), scorer_tools_metadata)
     out = Path(private_out)
@@ -352,12 +352,12 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
 
 
 def sanitized_report(result: dict) -> dict:
-    keep = ("phase", "profile", "wavelet", "rate_mbps", "fps", "eye_width", "eye_height", "stereo_width", "cap_bytes", "bits_per_pixel", "bitstream", "native_encoder_telemetry", "codec_only", "displayed", "crops", "codec_only_windows", "displayed_windows", "crop_windows", "error")
+    keep = ("phase", "profile", "wavelet", "rate_mbps", "fps", "eye_width", "eye_height", "stereo_width", "cap_bytes", "bits_per_pixel", "bitstream", "native_encoder_telemetry", "codec_only", "displayed", "crops", "codec_only_windows", "displayed_windows", "crop_windows", "centre_hvs", "fence_metrics", "q3b_transform", "error")
     return {"schema": SCHEMA, "kind": "pyro_q3_framebank_sanitized", "complete": result.get("complete") is True,
             "failure_reasons": list(result.get("failure_reasons", [])), "frozen_plan_sha256": result.get("frozen_plan_sha256"),
             "source_sha256": result.get("source_sha256_end"), "tool_provenance": result.get("tool_provenance_end"),
             "tools_build_provenance": result.get("tools_build_provenance"), "module_hashes": result.get("module_hashes"),
-            "hvs_gpu_sanity": result.get("hvs_gpu_sanity"), "cells": [{k: r.get(k) for k in keep} for r in result.get("cells", [])],
+            "hvs_gpu_sanity": result.get("hvs_gpu_sanity"), "source": result.get("source_sha256_start"), "requested_phase": result.get("requested_phase"), "selected_plan_indices": result.get("selected_plan_indices"), "cells": [{k: r.get(k) for k in keep} for r in result.get("cells", [])],
             "optical_latency_ms": None, "display_fps": None}
 
 
@@ -371,7 +371,7 @@ def main(argv=None):
     plan.add_argument("--horizontal-pixels-per-degree", type=float)
     plan.add_argument("--include-q3b-hooks", action="store_true")
     run = sub.add_parser("run", help="run a frozen Q3a plan under an owner-supervised lease")
-    for name in ("plan", "source", "private-out", "report", "window", "encode", "decode", "psnr-hvs-m-h", "tools-metadata"):
+    for name in ("plan", "source", "private-out", "report", "window", "encode", "decode", "psnr-hvs-m-h", "ffmpeg", "tools-metadata"):
         run.add_argument("--" + name, required=True)
     run.add_argument("--scorer-tools-metadata", help="separate verified bundle for the HVS scorer")
     run.add_argument("--command-timeout-s", type=float, default=900)
@@ -389,7 +389,7 @@ def main(argv=None):
         print("wrote frozen Q3 PyroWave plan with", len(frozen["cells"]), "cells")
         return 0
     result = run_plan(Path(args.plan), Path(args.source), Path(args.private_out),
-                      {"encode": args.encode, "decode": args.decode, "psnr_hvs_m_h": args.psnr_hvs_m_h}, Path(args.window),
+                      {"encode": args.encode, "decode": args.decode, "psnr_hvs_m_h": args.psnr_hvs_m_h, "ffmpeg": args.ffmpeg}, Path(args.window),
                       tools_metadata=Path(args.tools_metadata),
                       scorer_tools_metadata=Path(args.scorer_tools_metadata) if args.scorer_tools_metadata else None,
                       command_timeout_s=args.command_timeout_s, keep_artifacts=args.keep_artifacts,
