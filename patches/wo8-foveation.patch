@@ -1,0 +1,588 @@
+diff --git a/alvr/client_core/src/c_api.rs b/alvr/client_core/src/c_api.rs
+index d1ef049fe0030d637b8370e3433b8e76e1fc94e3..7ea650a488b87362015792be11ed5918ded5c64b 100644
+--- a/alvr/client_core/src/c_api.rs
++++ b/alvr/client_core/src/c_api.rs
+@@ -20,7 +20,8 @@ use alvr_graphics::{
+ };
+ use alvr_packets::{ButtonEntry, ButtonValue, FaceData, ViewParams};
+ use alvr_session::{
+-    CodecType, FoveatedEncodingConfig, MediacodecPropType, MediacodecProperty, UpscalingConfig,
++    CodecType, FoveatedEncodingConfig, FoveationProfile, MediacodecPropType, MediacodecProperty,
++    UpscalingConfig,
+ };
+ use std::{
+     cell::RefCell,
+@@ -788,12 +789,17 @@ pub unsafe extern "C" fn alvr_start_stream_opengl(config: AlvrStreamConfig) {
+         convert_swapchain_array(config.swapchain_textures, config.swapchain_length);
+     let foveated_encoding = config.enable_foveation.then_some(FoveatedEncodingConfig {
+         force_enable: true,
++        // The C API carries arbitrary numeric values rather than one of the
++        // fixed desktop profiles. Preserve that legacy contract explicitly.
++        profile: FoveationProfile::Custom,
+         center_size_x: config.foveation_center_size_x,
+         center_size_y: config.foveation_center_size_y,
+         center_shift_x: config.foveation_center_shift_x,
+         center_shift_y: config.foveation_center_shift_y,
+         edge_ratio_x: config.foveation_edge_ratio_x,
+         edge_ratio_y: config.foveation_edge_ratio_y,
++        peripheral_softness: 0.0,
++        blur_only: false,
+         // The gaze-driven centre is chosen by the server; the client only decodes what it sends.
+         follow_gaze: false,
+     });
+diff --git a/alvr/client_openxr/src/lib.rs b/alvr/client_openxr/src/lib.rs
+index 045573703658f91b5448e231ac8269b5c7fe2fdb..29c8ba88dbc0cbe27bb033be5c2f1597319217a2 100644
+--- a/alvr/client_openxr/src/lib.rs
++++ b/alvr/client_openxr/src/lib.rs
+@@ -432,7 +432,10 @@ pub fn entry_point() {
+         let capabilities = ClientCapabilities {
+             default_view_resolution,
+             refresh_rates: refresh_rates.clone(),
+-            foveated_encoding: false,
++            // The matching server only enables its explicit fixed profile. The
++            // client has the upstream inverse renderer and still rejects a stale
++            // unnegotiated local setting in ParsedStreamConfig.
++            foveated_encoding: platform == Platform::Quest3,
+             encoder_high_profile: galaxy_xr || platform != Platform::Unknown,
+             encoder_10_bits: galaxy_xr || platform != Platform::Unknown,
+             encoder_av1: matches!(
+diff --git a/alvr/client_openxr/src/stream.rs b/alvr/client_openxr/src/stream.rs
+index c7ea7e2f6d94c02bc5c74c4cf752f39e2db9bced..ff8d8b06913e4e4612a957f563c6deb637b1ad0f 100644
+--- a/alvr/client_openxr/src/stream.rs
++++ b/alvr/client_openxr/src/stream.rs
+@@ -68,8 +68,11 @@ impl ParsedStreamConfig {
+             encoding_gamma: config.negotiated_config.encoding_gamma,
+             enable_hdr: config.negotiated_config.enable_hdr,
+             passthrough: config.settings.video.passthrough.as_option().cloned(),
+-            // Match the server full-frame path, including sessions with stale settings.
+-            foveated_encoding_config: None,
++            // Only use the inverse mapping when the matching server negotiated it.
++            // A stale local dashboard setting cannot warp a full-frame stream.
++            foveated_encoding_config: (config.negotiated_config.enable_foveated_encoding)
++                .then(|| config.settings.video.foveated_encoding.as_option().cloned())
++                .flatten(),
+             clientside_foveation_config: None,
+             upscaling: config.settings.video.upscaling.as_option().cloned(),
+             force_software_decoder: config.settings.video.force_software_decoder,
+diff --git a/alvr/server_core/src/connection.rs b/alvr/server_core/src/connection.rs
+index 1054e0fe37a394e3ecfdefdf923eaf6c0f3c74e8..121a9df8bdb635e17277a4ace26124af98ed1d80 100644
+--- a/alvr/server_core/src/connection.rs
++++ b/alvr/server_core/src/connection.rs
+@@ -24,8 +24,8 @@ use alvr_packets::{
+     Tracking, VideoPacketHeader, AUDIO, HAPTICS, STATISTICS, TRACKING, VIDEO,
+ };
+ use alvr_session::{
+-    BodyTrackingBDConfig, BodyTrackingSinkConfig, CodecType, ControllersEmulationMode, FrameSize,
+-    H264Profile, OpenvrConfig, SessionConfig, SocketProtocol,
++    BodyTrackingBDConfig, BodyTrackingSinkConfig, CodecType, ControllersEmulationMode,
++    FoveationProfile, FrameSize, H264Profile, OpenvrConfig, SessionConfig, SocketProtocol,
+ };
+ use alvr_sockets::{
+     PeerType, ProtoControlSocket, StreamSocketBuilder, CONTROL_PORT, KEEPALIVE_INTERVAL,
+@@ -134,15 +134,47 @@ fn openvr_config_with_env(
+         })
+         .unwrap_or(false);
+ 
+-    // Quest3-Pyrowave deliberately bypasses the inherited foveated remapping.
+-    // Stale sessions, force_enable and environment overrides must not re-enable it.
+-    let enable_foveated_encoding = false;
+-    let foveation_center_size_x = 0.0;
+-    let foveation_center_size_y = 0.0;
+-    let foveation_center_shift_x = 0.0;
+-    let foveation_center_shift_y = 0.0;
+-    let foveation_edge_ratio_x = 1.0;
+-    let foveation_edge_ratio_y = 1.0;
++    // This is default-off. Once explicitly enabled, carry every parameter to the
++    // driver rather than letting stale session fields select an undocumented shape.
++    let (enable_foveated_encoding, foveation_center_size_x, foveation_center_size_y,
++        foveation_center_shift_x, foveation_center_shift_y, foveation_edge_ratio_x,
++        foveation_edge_ratio_y, foveation_peripheral_softness, foveation_blur_only) =
++        if let Switch::Enabled(config) = &settings.video.foveated_encoding {
++            let (center, edge, shift) = match config.profile {
++                // These named profiles are deliberately fixed-centre. The shader mirrors
++                // right-eye UVs itself, so a zero shift is the live profile baseline.
++                FoveationProfile::Light => (0.8, 1.5, (0., 0.)),
++                FoveationProfile::Medium => (0.6, 2.0, (0., 0.)),
++                FoveationProfile::H264Fit => (0.5, 2.0, (0., 0.)),
++                FoveationProfile::Custom => (config.center_size_x, config.edge_ratio_x,
++                    (config.center_shift_x, config.center_shift_y)),
++            };
++            // A malformed persisted session must fail closed. Do not clamp an
++            // experimental request into a different geometry or softness.
++            let valid = center.is_finite() && edge.is_finite() && edge >= 1.
++                && shift.0.is_finite() && shift.1.is_finite()
++                && shift.0.abs() < 1. && shift.1.abs() < 1.
++                && config.peripheral_softness.is_finite()
++                && (0.0..=1.0).contains(&config.peripheral_softness)
++                && (!matches!(config.profile, FoveationProfile::Custom) ||
++                    (config.center_size_x.is_finite() && config.center_size_y.is_finite()
++                    && (0.0..=1.0).contains(&config.center_size_x)
++                    && (0.0..=1.0).contains(&config.center_size_y)
++                    && config.edge_ratio_y.is_finite() && config.edge_ratio_y >= 1.));
++            if !valid {
++                warn!("Rejecting malformed foveated encoding configuration");
++                (false, 0., 0., 0., 0., 1., 1., 0., false)
++            } else {
++                let center_y = if matches!(config.profile, FoveationProfile::Custom) {
++                    config.center_size_y
++                } else { center };
++                let edge_y = if matches!(config.profile, FoveationProfile::Custom) {
++                    config.edge_ratio_y
++                } else { edge };
++                (true, center, center_y, shift.0, shift.1, edge, edge_y,
++                 config.peripheral_softness, config.blur_only)
++            }
++        } else { (false, 0., 0., 0., 0., 1., 1., 0., false) };
+ 
+     let mut brightness = 0.0;
+     let mut contrast = 0.0;
+@@ -200,6 +232,8 @@ fn openvr_config_with_env(
+         foveation_center_shift_y,
+         foveation_edge_ratio_x,
+         foveation_edge_ratio_y,
++        foveation_peripheral_softness,
++        foveation_blur_only,
+         enable_color_correction,
+         brightness,
+         contrast,
+@@ -650,7 +684,23 @@ fn connection_pipeline(
+         warn!("Chosen refresh rate not supported. Using {fps}Hz");
+     }
+ 
+-    let enable_foveated_encoding = false;
++    // Foveated encoding remains an explicit, client-negotiated opt-in. The Quest
++    // client advertises support only after the user enabled the setting; no fallback
++    // changes the requested profile.
++    let enable_foveated_encoding = matches!(initial_settings.video.foveated_encoding, Switch::Enabled(_))
++        && initial_settings.video.foveated_encoding.as_option().is_some_and(|config| {
++            config.peripheral_softness.is_finite()
++                && (0.0..=1.0).contains(&config.peripheral_softness)
++                && (!matches!(config.profile, FoveationProfile::Custom) ||
++                    (config.center_size_x.is_finite() && config.center_size_y.is_finite()
++                    && (0.0..=1.0).contains(&config.center_size_x)
++                    && (0.0..=1.0).contains(&config.center_size_y)
++                    && config.edge_ratio_x.is_finite() && config.edge_ratio_x >= 1.0
++                    && config.edge_ratio_y.is_finite() && config.edge_ratio_y >= 1.0
++                    && config.center_shift_x.is_finite() && config.center_shift_y.is_finite()
++                    && config.center_shift_x.abs() < 1.0 && config.center_shift_y.abs() < 1.0))
++        })
++        && (streaming_caps.supports_foveated_encoding || initial_settings.video.foveated_encoding.as_option().is_some_and(|c| c.force_enable));
+ 
+     let encoder_profile = if initial_settings.video.encoder_config.h264_profile == H264Profile::High
+     {
+diff --git a/alvr/server_openvr/cpp/alvr_server/Settings.cpp b/alvr/server_openvr/cpp/alvr_server/Settings.cpp
+index e2f1e79e9aaa5969880655059b5e6b469ad460f0..b71016fe730ec1bcfee1c074c39b00020976dd2f 100644
+--- a/alvr/server_openvr/cpp/alvr_server/Settings.cpp
++++ b/alvr/server_openvr/cpp/alvr_server/Settings.cpp
+@@ -53,6 +53,8 @@ void Settings::Load() {
+         m_foveationCenterShiftY = (float)config.get("foveation_center_shift_y").get<double>();
+         m_foveationEdgeRatioX = (float)config.get("foveation_edge_ratio_x").get<double>();
+         m_foveationEdgeRatioY = (float)config.get("foveation_edge_ratio_y").get<double>();
++        m_foveationPeripheralSoftness = (float)config.get("foveation_peripheral_softness").get<double>();
++        m_foveationBlurOnly = config.get("foveation_blur_only").get<bool>();
+ 
+         m_enableColorCorrection = config.get("enable_color_correction").get<bool>();
+         m_brightness = (float)config.get("brightness").get<double>();
+diff --git a/alvr/server_openvr/cpp/alvr_server/Settings.h b/alvr/server_openvr/cpp/alvr_server/Settings.h
+index c3b4f9e9629037a7a0dd2b6ab5776765ff4770a3..e42d6c87cacc1725bcbb631f5783a97980c4bb30 100644
+--- a/alvr/server_openvr/cpp/alvr_server/Settings.h
++++ b/alvr/server_openvr/cpp/alvr_server/Settings.h
+@@ -31,6 +31,8 @@ public:
+     float m_foveationCenterShiftY;
+     float m_foveationEdgeRatioX;
+     float m_foveationEdgeRatioY;
++    float m_foveationPeripheralSoftness;
++    bool m_foveationBlurOnly;
+ 
+     bool m_enableColorCorrection;
+     float m_brightness;
+diff --git a/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl b/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl
+index e77a8ab6a2f6820f385524a4baa12e3b95038891..830e3e4572cb257b0658302442d6b3d6e5f65a88 100644
+--- a/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl
++++ b/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl
+@@ -12,9 +12,20 @@ SamplerState trilinearSampler {
+ 	//AddressV = Wrap;
+ };
+ 
+-float4 main(float2 uv : TEXCOORD0) : SV_Target {
++// Match the compositor's quad VS signature. Supplying only TEXCOORD leaves
++// register linkage ambiguous in standalone D3D11 readback fixtures and does
++// not describe the production PS_INPUT interface.
++struct FoveationPixelInput {
++	float4 position : SV_POSITION;
++	float2 uv : TEXCOORD0;
++	uint view : VIEW;
++};
++
++float4 main(FoveationPixelInput input) : SV_Target {
++	float2 uv = input.uv;
+ 	bool isRightEye = uv.x > 0.5;
+-	float2 eyeUV = TextureToEyeUV(uv, isRightEye) / eyeSizeRatio;
++	float2 outputEyeUV = TextureToEyeUV(uv, isRightEye);
++	float2 eyeUV = outputEyeUV / eyeSizeRatio;
+ 
+ 	float2 shift = CenterShiftForEye(isRightEye);
+ 
+@@ -24,10 +35,12 @@ float4 main(float2 uv : TEXCOORD0) : SV_Target {
+ 
+ 	float2 loBound = c0 * (shift + 1.) / c2;
+ 	float2 hiBound = c0 * (shift - 1.) / c2 + 1.;
+-	float2 underBound = float2(eyeUV.x < loBound.x, eyeUV.y < loBound.y);
++	// Assign exact joins deterministically. The old three strict predicates
++	// summed to zero at equality and emitted black one-pixel join lines.
++	float2 underBound = float2(eyeUV.x <= loBound.x, eyeUV.y <= loBound.y);
+ 	float2 inBound = float2(loBound.x < eyeUV.x && eyeUV.x < hiBound.x,
+ 							loBound.y < eyeUV.y && eyeUV.y < hiBound.y);
+-	float2 overBound = float2(eyeUV.x > hiBound.x, eyeUV.y > hiBound.y);
++	float2 overBound = float2(eyeUV.x >= hiBound.x, eyeUV.y >= hiBound.y);
+ 
+ 	float2 center = eyeUV * c2 / edgeRatio + c1;
+ 	float2 d2 = eyeUV * c2;
+@@ -39,6 +52,51 @@ float4 main(float2 uv : TEXCOORD0) : SV_Target {
+ 	float2 rightEdge = g2 * center + (1. - g2) * d3;
+ 
+ 	float2 compressedUV = underBound * leftEdge + inBound * center + overBound * rightEdge;
++	if (blurOnly > .5) compressedUV = outputEyeUV;
++
++	// One bilinear source tap aliases a 1.5–2x squeezed band. Integrate the
++	// source-pixel box with exact overlap weights. The bounded 9x9 support covers
++	// the 2x profile plus s=1 while smoothstep is C1 at the centre-band join.
++	// The ramp is in logical source space. The aligned central-band joins are
++	// c0*(1+shift) and 1+c0*(shift-1), not the nominal centre fraction in
++	// encoded UV space. This keeps s=0..1 from blurring the sharp centre.
++	float2 lowJoin = c0 * (shift + 1.);
++	float2 highJoin = 1. + c0 * (shift - 1.);
++	float2 beforeJoin = max(0., (lowJoin - compressedUV) / max(lowJoin, 1e-6));
++	float2 afterJoin = max(0., (compressedUV - highJoin) / max(1. - highJoin, 1e-6));
++	float ramp = smoothstep(0., 1., max(max(beforeJoin.x, afterJoin.x), max(beforeJoin.y, afterJoin.y)));
++	float2 texel = float2(1. / targetResolution.x, 1. / targetResolution.y);
++	// Keep the footprint algebra explicit rather than deriving it from the
++	// hardware derivative of the mapped UV. This is d(sourceUV)/d(eyeUV),
++	// multiplied once by d(outputEyeUV) and the source texel density. The
++	// Python frame-bank port uses the same expression and constants.
++	float2 leftDerivative = (center - d2) / loBound
++		+ (eyeUV / loBound) * (c2 / edgeRatio)
++		+ (1. - eyeUV / loBound) * c2;
++	float2 rightDerivative = -(center - d3) / (1. - hiBound)
++		+ ((1. - eyeUV) / (1. - hiBound)) * (c2 / edgeRatio)
++		+ (1. - (1. - eyeUV) / (1. - hiBound)) * c2;
++	float2 mappingDerivative = underBound * leftDerivative
++		+ inBound * (c2 / edgeRatio) + overBound * rightDerivative;
++	if (blurOnly > .5) mappingDerivative = float2(1., 1.);
++	float2 outputStep = max(abs(ddx(outputEyeUV)), abs(ddy(outputEyeUV)));
++	float2 localSqueeze = max(float2(1., 1.),
++		abs(mappingDerivative / eyeSizeRatio) * outputStep / texel);
++	float2 footprint = localSqueeze * (1. + peripheralSoftness * ramp) * texel;
++	float2 centrePx = compressedUV * targetResolution;
++	float2 loPx = centrePx - footprint * targetResolution * .5;
++	float2 hiPx = centrePx + footprint * targetResolution * .5;
++	int2 basePx = int2(floor(centrePx));
++	float4 colour = 0.; float totalWeight = 0.;
++	[unroll] for (int x = -4; x <= 4; ++x) [unroll] for (int y = -4; y <= 4; ++y) {
++		int2 pixel = basePx + int2(x, y);
++		float2 p0 = float2(pixel); float2 p1 = p0 + 1.;
++		float2 overlap = max(0., min(hiPx, p1) - max(loPx, p0));
++		float weight = overlap.x * overlap.y;
++		float2 sampleUV = (clamp(float2(pixel), 0., targetResolution - 1.) + .5) / targetResolution;
++		colour += weight * compositionTexture.SampleLevel(trilinearSampler, EyeToTextureUV(sampleUV, isRightEye), 0);
++		totalWeight += weight;
++	}
+ 
+-	return compositionTexture.Sample(trilinearSampler, EyeToTextureUV(compressedUV, isRightEye));
++	return colour / max(totalWeight, 1e-6);
+ }
+diff --git a/alvr/server_openvr/cpp/alvr_server/shader/FoveatedRendering.hlsli b/alvr/server_openvr/cpp/alvr_server/shader/FoveatedRendering.hlsli
+index f920ea68e45fdb72e43f5be24424ccb6c03cd6f9..8b47b8f4f07273e3533440a73abfd0b506d2f571 100644
+--- a/alvr/server_openvr/cpp/alvr_server/shader/FoveatedRendering.hlsli
++++ b/alvr/server_openvr/cpp/alvr_server/shader/FoveatedRendering.hlsli
+@@ -6,6 +6,8 @@ cbuffer FoveationVars {
+ 	float2 centerShift;      // left eye
+ 	float2 centerShiftRight; // right eye
+ 	float2 edgeRatio;
++	float peripheralSoftness;
++	float blurOnly;
+ };
+ 
+ // The two eyes have mirrored, asymmetric horizontal frusta, and TextureToEyeUV below mirrors the
+@@ -22,9 +24,10 @@ float2 TextureToEyeUV(float2 textureUV, bool isRightEye) {
+ }
+ 
+ float2 EyeToTextureUV(float2 eyeUV, bool isRightEye) {
+-	// saturate is used to avoid color bleeding between the two sides of the texture or with the black border when filtering
+-	//float2 clampedUV = saturate(eyeUV);
++	// Aligned encoder padding maps the final output texels past the logical eye
++	// edge. Clamp before converting to stereo texture coordinates so that a
++	// padded right-eye texel cannot sample across the centre seam.
++	float2 clampedUV = saturate(eyeUV);
+ 	// left: x / 2; right 1 - (x / 2)
+-	//return float2(clampedUV.x / 2. + float(isRightEye) * (1. - clampedUV.x), clampedUV.y);
+-	return float2(eyeUV.x * .5 + float(isRightEye) * (1. - eyeUV.x), eyeUV.y);
+-}
+\ No newline at end of file
++	return float2(clampedUV.x * .5 + float(isRightEye) * (1. - clampedUV.x), clampedUV.y);
++}
+diff --git a/alvr/server_openvr/cpp/platform/win32/CompressAxisAlignedPixelShader.cso b/alvr/server_openvr/cpp/platform/win32/CompressAxisAlignedPixelShader.cso
+index f6b2c18493f4c5435044a46766561d7eb2d3d798..07a35b89442463b537d41ac4ed530dfc15a2b1b1 100644
+GIT binary patch
+literal 35592
+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
+Sm2Wmq^y=>SeH!oh>i+>>F*%0-
+
+literal 1948
+zcma)7J#Q015S?4cXU7h~3PM6uCu$m81Vq6taeP375socGg9(a2R1qK{Q6Pg51xTq7
+zG}LbVBS8KwC<Ps<Q}EvI&fVE^k&$+HcIVBTk6oX4M?0Ojr|;7F>5uK#+221Gp8cCf
+zBJ#5)Qo(u^V~p_)<6i&HeeP+mV<Z?V#8N6y_PV1^ulI0QX0uuE3_j=K*B?IFd;046
+z!5cXB?{-Im_z!UY8^K=IC3+;XmK`NHfr9av>5W@%Ke~jYL$418BKs|=v|E0E0NhF9
+z^%o+h>O5rQMEu$DQ8Kyh&s<%`ax+QG<Az8>@!6*L^Ed%+VKm#|Wq-0sg4y@bSZb4B
+zeoz+yXKfy^)4&<8dEd6kxtu3pj=v<%kKD#$%5$VHat(Z2z#8b0<%y(?(1YtDP3F%#
+ziUS696XWpNr$PsR&eK@nV^4e^$iqHxH5OBzi?4CHHs;LQh^LLYP_&oIwYka`dIDR$
+z+%Lx&@+L2O*0>V#Mcu`nT1FBZxpk5Px1Qqy{&L~xz?f=^QJb#YBGn!B3;kto`{8UD
+z`#Xp~B#w)DvS!{V^USdF?0ePYv@Y7TM{%hx951{R`trRH&pV$7Uiwmo>z)^CgEk8B
+z6k{>v;@>zqm>Yjnn$vN^;}I+8*O-h$ENqUSd8o};Y;y7Z`W6&d&Y$<a9Gm^2XkOGc
+zFSRi?{U~~7EO$O8wIEIQfcYYC_a>+tiz$~P&+;8HU-p4`zL~O(XSA^v#wS)WQ1hJB
+zMl3N9mp65-$yjWbz762oV7xLvxwtnL(~3GZKg7!4{wl1#8M5fRD7~3x=^Z;Beou_W
+z<fP~?@2-S(-;p@-b@G1B^7cUKzL%jNOYw?W46VN*?TN1C-t$cRTD~8i^M05wW!m&B
+z^QDbzkow1f!S6lqV`OQaq|8C>Hv>+;k>uYhd>x(llT@)?k*{+Qbp{tj|C2rkpX`0e
+LVeHpi_=)`o15lhk
+
+diff --git a/alvr/server_openvr/cpp/platform/win32/FFR.cpp b/alvr/server_openvr/cpp/platform/win32/FFR.cpp
+index f6dcb9f16f748bd60698408638666d40ec4fd234..3ac00abe9da431bcf4161a1fd75a6c05b81571c3 100644
+--- a/alvr/server_openvr/cpp/platform/win32/FFR.cpp
++++ b/alvr/server_openvr/cpp/platform/win32/FFR.cpp
+@@ -28,13 +28,13 @@ struct FoveationVars {
+     float centerShiftRightY;
+     float edgeRatioX;
+     float edgeRatioY;
++    float peripheralSoftness;
++    float blurOnly;
+ 
+     // D3D11 rejects a constant buffer whose size is not a multiple of 16, and the HLSL cbuffer
+     // packs these float2s into four 16-byte registers (64 bytes). Without this the struct is 56
+     // bytes, CreateBuffer fails, and the failure surfaces as "Failed to initialize CEncoder" --
+     // i.e. no video at all, which looks nothing like a foveation bug.
+-    float _padding0;
+-    float _padding1;
+ };
+ 
+ static_assert(sizeof(FoveationVars) % 16 == 0, "FoveationVars must be 16-byte aligned for D3D11");
+@@ -70,8 +70,8 @@ FoveationVars CalculateFoveationVars(
+     float centerShiftRightYAligned = ceil(centerShiftRightY * edgeSizeYAligned / (edgeRatioY * 2.))
+         * (edgeRatioY * 2.) / edgeSizeYAligned;
+ 
+-    float foveationScaleX = (centerSizeXAligned + (1. - centerSizeXAligned) / edgeRatioX);
+-    float foveationScaleY = (centerSizeYAligned + (1. - centerSizeYAligned) / edgeRatioY);
++    float foveationScaleX = Settings::Instance().m_foveationBlurOnly ? 1.f : (centerSizeXAligned + (1. - centerSizeXAligned) / edgeRatioX);
++    float foveationScaleY = Settings::Instance().m_foveationBlurOnly ? 1.f : (centerSizeYAligned + (1. - centerSizeYAligned) / edgeRatioY);
+ 
+     float optimizedEyeWidth = foveationScaleX * targetEyeWidth;
+     float optimizedEyeHeight = foveationScaleY * targetEyeHeight;
+@@ -97,8 +97,11 @@ FoveationVars CalculateFoveationVars(
+              centerShiftRightYAligned,
+              edgeRatioX,
+              edgeRatioY,
+-             0.f,
+-             0.f };
++             // The Rust session validator rejects malformed values before this
++             // point. Do not silently turn an invalid requested profile into a
++             // different softness value here.
++             Settings::Instance().m_foveationPeripheralSoftness,
++             Settings::Instance().m_foveationBlurOnly ? 1.f : 0.f };
+ }
+ }
+ 
+diff --git a/alvr/session/src/lib.rs b/alvr/session/src/lib.rs
+index d382c8f06112881f0e5cc5e5524ef438f259a06b..b03b3ca73d1e369e026ae0e029ff357a2a23e5a1 100644
+--- a/alvr/session/src/lib.rs
++++ b/alvr/session/src/lib.rs
+@@ -81,6 +81,10 @@ pub struct OpenvrConfig {
+     pub foveation_center_shift_y: f32,
+     pub foveation_edge_ratio_x: f32,
+     pub foveation_edge_ratio_y: f32,
++    #[serde(default)]
++    pub foveation_peripheral_softness: f32,
++    #[serde(default)]
++    pub foveation_blur_only: bool,
+     pub enable_color_correction: bool,
+     pub brightness: f32,
+     pub contrast: f32,
+diff --git a/alvr/session/src/settings.rs b/alvr/session/src/settings.rs
+index 989c74f5918bb38458259d05cee0e12a3a543156..6538bee272839a1042327e99597d83bf83ff7b7c 100644
+--- a/alvr/session/src/settings.rs
++++ b/alvr/session/src/settings.rs
+@@ -502,12 +502,29 @@ pub struct ClientsideFoveationConfig {
+     pub vertical_offset_deg: f32,
+ }
+ 
++#[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq, Debug)]
++#[schema(gui = "button_group")]
++pub enum FoveationProfile {
++    #[schema(strings(display_name = "Light (0.8 / 1.5x)"))]
++    Light,
++    #[schema(strings(display_name = "Medium (0.6 / 2x)"))]
++    Medium,
++    #[schema(strings(display_name = "H.264 fit (0.5 / 2x)"))]
++    H264Fit,
++    #[schema(strings(display_name = "Custom"))]
++    Custom,
++}
++
+ #[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq)]
+ pub struct FoveatedEncodingConfig {
+     #[schema(strings(help = "Force enable on smartphone clients"))]
+     #[schema(flag = "hidden")]
+     pub force_enable: bool,
+ 
++    #[schema(strings(display_name = "Foveation profile", help = "Light, Medium and H.264 fit pin the documented fixed centre and edge values. Custom exposes the advanced values below. The feature remains disabled until its parent switch is enabled."))]
++    #[schema(flag = "steamvr-restart")]
++    pub profile: FoveationProfile,
++
+     #[schema(strings(display_name = "Center region width"))]
+     #[schema(gui(slider(min = 0.0, max = 1.0, step = 0.01)))]
+     #[schema(flag = "steamvr-restart")]
+@@ -540,6 +557,15 @@ pub struct FoveatedEncodingConfig {
+     #[schema(flag = "steamvr-restart")]
+     pub edge_ratio_y: f32,
+ 
++    #[schema(strings(display_name = "Peripheral softness", help = "Area-prefilters the squeezed peripheral bands. 0 retains anti-alias filtering only; keep the light profile at 0.5 or below until in-headset review."))]
++    #[schema(gui(slider(min = 0.0, max = 1.0, step = 0.05)))]
++    #[schema(flag = "steamvr-restart")]
++    pub peripheral_softness: f32,
++
++    #[schema(strings(display_name = "Blur peripheral only", help = "Keeps the full encoded geometry and applies the same smoothly ramped peripheral prefilter. It can reduce codec artifacts but does not reduce decoder pixels."))]
++    #[schema(flag = "steamvr-restart")]
++    pub blur_only: bool,
++
+     #[schema(strings(
+         display_name = "Follow gaze",
+         help = "Moves the full-resolution centre to where the eyes are looking, per eye, using the headset's eye tracking. Off pins it to the middle of the view."
+@@ -1906,12 +1932,17 @@ pub fn session_settings_default() -> SettingsDefault {
+                 enabled: false,
+                 content: FoveatedEncodingConfigDefault {
+                     force_enable: false,
++                    profile: FoveationProfileDefault {
++                        variant: FoveationProfileDefaultVariant::Light,
++                    },
+                     center_size_x: 0.20,
+                     center_size_y: 0.178,
+                     center_shift_x: 0.0,
+                     center_shift_y: 0.0,
+                     edge_ratio_x: 3.,
+                     edge_ratio_y: 4.,
++                    peripheral_softness: 0.0,
++                    blur_only: false,
+                     follow_gaze: false,
+                 },
+             },

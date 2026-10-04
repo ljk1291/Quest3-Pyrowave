@@ -4,6 +4,32 @@ Local modifications to third-party clones, kept as patches so the clones themsel
 stay out of this history. Each one applies to a public upstream commit, so patch + base fully
 reconstructs the tree.
 
+## `wo8-foveation.patch`: fixed-centre foveated encoding with area prefilter
+
+This opt-in/default-off overlay restores ALVR's `CompressAxisAlignedPixelShader`
+mapping for fixed-centre profiles: light (0.8 / 1.5x), medium (0.6 / 2x), and
+H.264-fit (0.5 / 2x). It preserves ALVR's 32-pixel packing, right-eye mirroring
+and per-eye seam separation. The base mapping is derived from upstream ALVR's
+foveated encoder and ports the fixed-profile behavior from upstream
+Quest3-Pyrowave commits `061dc0b20cf7f30f2795e5484e28fce42e60fb37` and
+`2b87fc7`; this overlay extends them with medium, H.264-fit, softness and
+blur-only controls.
+
+The shader integrates an exact source-pixel box through its local Jacobian. Its
+9x9 bounded support covers the aligned ratio-2 profile at maximum softness
+without clamping the requested footprint. The
+peripheral softness control multiplies it by `1 + s * smoothstep(...)`; `s=0`
+still enables anti-alias filtering. Blur-only retains full encoded geometry and
+uses the same smooth ramp. The ramp begins at the aligned logical-source joins,
+so it cannot soften the profile's sharp central band. `tools.xrbench.foveation` is the matching native-8-bit
+C420 frame-bank transform; it receives an already WO-10-cropped frame and never
+reapplies crop factors. The live composition texture is `UNORM_SRGB`, so the
+frame-bank path expands centred C420, converts full-range BT.709 R'G'B' to
+linear RGB for filtering, then converts and subsamples once. On reconstruction
+it uses R'G'B' interpolation because `stream.wgsl` samples the staging texture
+before `ENABLE_SRGB_CORRECTION`; that client-domain distinction is intentional.
+It does not claim parity for a nonlinear per-plane YUV average.
+
 Regenerate a patch with `git diff --binary --full-index --output=patches/<name>.patch` from the
 clone (`--output` rather than a shell redirect, so PowerShell cannot re-encode the bytes). Check one still
 matches its clone with `git apply --check -R patches/<name>.patch` — that check is the real
