@@ -70,8 +70,9 @@ It merged as `7302a25` after 55 focused tests, independent review and
 The reduced and matching-blur first-frame hashes match both retained attempts.
 The finite r5 controller is running Q3b with three preparation workers and fresh
 r3 Pyro attempt paths. Its three Light / 9/7 / 1000 Mbps softness cells (0, 0.5,
-1) and Light / 5/3 / 1000 Mbps / softness 0.5 are complete with clean lease
-closure; six Q3b cells remain. Medium / 5/3 / 1000 Mbps / softness 0.5 is active.
+1), Light / 5/3 / 1000 Mbps / softness 0.5 and Medium / 5/3 / 1000 Mbps /
+softness 0.5 are complete with clean lease closure; five Q3b cells remain.
+Medium / 9/7 / 1000 Mbps / softness 0.5 is active.
 Do not repeat completed cells. The first result is worse
 than cropped 9/7 without foveation on the primary fence: 30.832 versus 35.754 dB
 edge PSNR, temporal residual p99 32 versus 19 luma codes (both frames 10–89).
@@ -185,6 +186,39 @@ Take the first unblocked item. Items marked ∥ are independent.
 ## Log
 
 <!-- Codex appends entries here: date, checkpoint, verified (links), remaining, blocked? -->
+
+- 2026-10-04 06:26 UTC, first Medium result completed: CDF 5/3 / 1000 Mbps /
+  softness 0.5 at 2112×2240 encoded pixels per eye, reconstructed to the same
+  2624×2776/eye score domain. All 90 decoded and Q3b frame identities, both
+  score windows, source/corpus/projection/scorer provenance and clean lease
+  closure pass validation. Its reduced input differs intentionally from Light.
+
+  | CDF 5/3 / 1000 Mbps profile | Fence edge PSNR-Y, 10–89 | Temporal mean | Temporal p99 | Whole-image HVS, all-90 |
+  |---|---:|---:|---:|---:|
+  | Cropped, no foveation | 34.288280 dB | 3.702805 | 22 | 39.166110 dB |
+  | Light, softness 0.5 | 30.451866 dB | 5.615133 | 33 | 37.285790 dB |
+  | Medium, softness 0.5 | 36.150850 dB | 2.889889 | 18 | 36.013034 dB |
+
+  These primary-fence and expanded whole-image comparisons share source region,
+  projection/calibration and windows. Medium improves fence edge PSNR by
+  5.698983 dB versus Light and 1.862569 dB versus unfoveated cropped 5/3, but
+  loses 1.272757 / 3.153077 dB whole-image HVS respectively (all-90). Fixed-crop
+  HVS in 10–89, Medium versus Light: UI 40.916910 / 36.049553, tunnel
+  40.264840 / 36.176446, rail 35.881996 / 37.460108 dB. This is a quality
+  tradeoff, not an overall promotion or a Quest timing result.
+  Medium's centre ROI (528,560,1582×1678) and peripheral mask (4,624,784 pixels)
+  differ from Light's (264,280,2112×2218; 2,595,584 pixels). Do not interpret
+  cross-profile centre/peripheral scores as matched-domain gains. Separately,
+  Medium centre sharp/matching-blur HVS is 40.736892 / 40.786983 dB in 10–89;
+  its peripheral sharp edge PSNR/temporal mean/p99 is 30.657437 / 5.413821 / 34,
+  and matching-blur is 40.388626 / 1.814631 / 11. The private publisher now
+  explicitly states this domain qualification; metric calculations, ranking,
+  provenance gates and the live harness are unchanged. Python compilation passes.
+  Private controller report SHA256:
+  `dcb23cce8f8dd228e77bde956d7b6a258ad61d9a768a1c2c8ebcdc56b28cca6f`.
+  Twenty of 25 Q3 rows are complete. Medium / CDF 9/7 is running; five Q3b
+  cells, combined publication, verified stable pair and owner checklist remain.
+  No owner blocker or headset/settings/installed-pair change.
 
 - 2026-10-04, CPU-only mapping preflight for the pending Q3b geometries:
   at source revision `e61621ddd4f4e8b38c392e481f22e677446f8d54`, the allocation

@@ -124,6 +124,18 @@ or a quality result. Do not extrapolate reduced Light's measured fence loss to
 these profiles; use the frozen upcoming scores. Exact bands, representative
 coordinates and the private calculation hash are in the status log.
 
+Measured follow-up, 2026-10-04 06:26 UTC: Medium / CDF 5/3 / 1000 / softness
+0.5 completes all 90 frames with verified provenance and clean closure. In the
+same tight-fence domain, its 36.150850 dB edge PSNR / temporal p99 18 beats
+Light 5/3 (30.451866 / 33) and unfoveated cropped 5/3 (34.288280 / 22).
+However, whole-image all-90 HVS is 36.013034 dB, below Light's 37.285790 and
+unfoveated 5/3's 39.166110. UI/tunnel fixed crops improve versus Light while
+the rail crop worsens. Centre ROIs and peripheral masks differ between these
+profiles, so their separate diagnostics are not matched-domain gains. Keep
+this tradeoff explicit and do not promote a profile from fence metrics alone.
+Q3b is five of ten complete (20 of 25 overall); Medium / 9/7 is running.
+The final ranking, signed pair and owner checklist remain outstanding.
+
 ## 1. Owner input (2026-10-03 21:44)
 
 - **Live decoder caps on Quest 3.** These come from the owner's experience; verify them on
