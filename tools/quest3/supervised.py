@@ -79,13 +79,19 @@ class JobRegistry:
             state['owned_pc_jobs'].append(record)
             u.atomic_write(state_path, state)
             return record
-    def unregister(self, state_path, pid):
+    def unregister(self, state_path, pid, *, completion_observed=False):
         with u.state_lock(state_path):
             state = u.json_read(state_path)
             completed=next((row for row in state['owned_pc_jobs'] if row['pid']==pid),None)
             state['owned_pc_jobs'] = [row for row in state['owned_pc_jobs'] if row['pid'] != pid]
             if completed is not None:
                 completed['completed_epoch_s']=time.time()
+                # Popen.poll()/wait() is the authoritative parent-side proof
+                # that this exact registered child exited. Do not preserve the
+                # stale ``exited: false`` captured at registration.
+                if completion_observed:
+                    completed['exited'] = True
+                    completed['completion_observed_by_parent'] = True
                 state.setdefault('completed_pc_jobs',[]).append(completed)
             u.atomic_write(state_path, state)
             return completed
@@ -97,11 +103,26 @@ def stop_jobs(state, host):
         except Exception as exc: errors.append(str(exc))
     return errors
 
+def _close_owned_jobs(state_path, host, nonce, *, reason):
+    """Best-effort terminal cleanup under the state mutex, without reopening a lease."""
+    with u.state_lock(state_path):
+        state = u.json_read(state_path)
+        if state.get('guard_nonce') != nonce:
+            raise u.Refusal('supervised lease identity changed before cleanup')
+        errors = stop_jobs(state, host)
+        state['closed'] = True
+        state.setdefault('cleanup_errors', []).extend(errors)
+        state.setdefault('cleanup_reasons', []).append(reason)
+        u.atomic_write(state_path, state)
+        if errors:
+            raise u.Refusal('registered PC job cleanup failed')
+
 def worker(directory, nonce):
     directory = Path(directory)
     state_path = directory/'state.json'
     host = u.Host()
-    while True:
+    try:
+      while True:
         # Sample outside the mutex, then exclude freshly registered identities.
         sample = host.gpu_sample()
         sample['gpu_telemetry']=contention.telemetry(host)
@@ -135,6 +156,14 @@ def worker(directory, nonce):
                 u.atomic_write(state_path, state)
                 return
         time.sleep(2)
+    except Exception:
+        (directory/'stop').touch()
+        try:
+            _close_owned_jobs(state_path, host, nonce, reason='monitor_worker_error')
+        except Exception:
+            # The parent session has the independent final cleanup fallback.
+            pass
+        raise
 
 @contextlib.contextmanager
 def session(directory, *, evidence, duration_s=5400, measurement_mode='quality'):
@@ -183,6 +212,15 @@ def session(directory, *, evidence, duration_s=5400, measurement_mode='quality')
                     state['closed'] = True
                     u.atomic_write(path, state)
                 proc.terminate(); proc.wait(timeout=10)
+            # Whether the monitor observed cancellation itself or died first,
+            # the owning session publishes a closed state and stops only jobs
+            # whose identities were registered in this lease.
+            try:
+                _close_owned_jobs(path, host, nonce, reason='session_finally')
+            except Exception:
+                # Preserve the stop marker and surface terminal cleanup failure
+                # to the caller; do not report a successful lease teardown.
+                raise
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)

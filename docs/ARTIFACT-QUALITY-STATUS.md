@@ -36,12 +36,16 @@ Read with Get-NetAdapter; no network changes. Negotiated link speed is not goodp
 
 ## Queue (current owner goal)
 
-**Owner-dependent stop, 2026-10-04:** Q3a's fresh preflight found ComfyUI running
-one job and only **603 MiB free VRAM**, below the **2048 MiB** safety margin.
-No Q3a lease or encode was started. Per the current owner goal, source and GPU
-work are stopped for the owner to finish/pause ComfyUI, free VRAM and confirm.
-Keep the ten-cell frozen plan and completed evidence; resume with a fresh preflight.
-[Sanitized preflight](../results/q3a-preflight-blocked-2026-10-04.json).
+**Resumed, 2026-10-04:** Fresh preflight after the goal resumed confirms ComfyUI
+idle (zero running/pending), 13275 MiB free VRAM and no quality safety stops.
+The first Q3a NVENC cell encoded/decoded both eyes, then scoring stopped when the
+monitor hit a transient Windows state-file replacement error. The monitor and
+controller are confirmed absent, and no owned jobs remain. Retained frame and
+bitstream identities are verified for score-only recovery after the supervisor
+repair passes CPU CI. No encode repetition is needed. All source work continues
+on its own branches.
+The earlier [preflight stop](../results/q3a-preflight-blocked-2026-10-04.json) remains
+historical evidence; no arm, headset, installed-pair or settings changes occurred.
 
 1. Fence metrics and three-cell backfill are complete: [ranked report](../results/fence-backfill-2026-10-04.md).
    Tight left-eye rectangle (1740,1310,240,274); all 270 regenerated decode hashes
@@ -144,6 +148,23 @@ Take the first unblocked item. Items marked ∥ are independent.
 ## Log
 
 <!-- Codex appends entries here: date, checkpoint, verified (links), remaining, blocked? -->
+
+- 2026-10-04, Q3a scoring recovery and WO-13 merge: both 400-Mbps-total H.264
+  eye streams completed with 90 verified decodes; scoring stopped after the first
+  HVS score because the supervised monitor's atomic state replacement raised
+  WinError 5. The stop marker is present; a process inventory confirms both the
+  parent and monitor exited, and the registry contains no jobs. The original
+  failure remains private evidence. [PR 33](https://github.com/ljk1291/Quest3-Pyrowave/pull/33)
+  adds bounded replacement retries and independent parent cleanup; 51 local CPU
+  unittest and 108 unattended pytest cases pass, with CPU CI pending. Recovery
+  verifies all 90 retained reference/decoded frame hashes and both bitstreams
+  before scoring them under a new finite lease; only the other nine NVENC cells
+  need encoding. No owner input is required for this tooling repair.
+  [WO-13 PR 24](https://github.com/ljk1291/Quest3-Pyrowave/pull/24) merged as
+  `1b7af8895ba8558a749528f85749b309c3b9aba3`: native CI at `89dbea86` and
+  [integration CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37164227418)
+  at `47f7a5f3` pass; the integration follow-up changed no native/network source.
+  No network or headset test was run, and no settings or installed pair changed.
 
 - 2026-10-02, checkpoint WO-9/source preparation: adopted the owner’s goal,
   work orders and unattended rules; appended the decoder plan’s quality track
