@@ -744,7 +744,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
 
 
 def sanitized_report(result: dict) -> dict:
-    keep = ("plan_index", "experiment_id", "phase", "profile", "wavelet", "rate_mbps", "fps", "eye_width", "eye_height", "stereo_width", "cap_bytes", "bits_per_pixel", "encoded_chroma", "bitstream", "native_encoder_telemetry", "codec_only", "codec_only_domain", "displayed", "crops", "codec_only_windows", "displayed_windows", "displayed_reused_from_codec_only", "crop_windows", "centre_hvs", "fence_metrics", "q3b_transform", "q3b_encoded_source", "rdo_viewing_density", "rdo_effective", "offline_only_above_wifi_cap", "error")
+    keep = ("plan_index", "experiment_id", "phase", "profile", "source_geometry", "wavelet", "rate_mbps", "fps", "eye_width", "eye_height", "stereo_width", "cap_bytes", "bits_per_pixel", "encoded_chroma", "bitstream", "native_encoder_telemetry", "codec_only", "codec_only_domain", "displayed", "crops", "codec_only_windows", "displayed_windows", "displayed_reused_from_codec_only", "crop_windows", "centre_hvs", "fence_metrics", "q3b_transform", "q3b_encoded_source", "rdo_viewing_density", "rdo_effective", "offline_only_above_wifi_cap", "error")
     return {"schema": SCHEMA, "kind": "pyro_q3_framebank_sanitized", "complete": result.get("complete") is True,
             "failure_reasons": list(result.get("failure_reasons", [])), "frozen_plan_sha256": result.get("frozen_plan_sha256"),
             "source_sha256": result.get("source_sha256_end"), "tool_provenance": result.get("tool_provenance_end"),
