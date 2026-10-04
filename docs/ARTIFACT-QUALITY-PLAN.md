@@ -56,6 +56,12 @@ attempt paths; no completed Q3a encode needs repeating. PR #39 merged as `3512b1
 after 53 focused CPU tests, independent review and green CPU CI; the first retained
 Metro frame matches bit-for-bit. This caches CPU preparation only, with no runtime
 decoder or image-filter change.
+The second CPU-only attempt exposed a duplicated forward transform when producing
+the matching-blur reference. PR #40 (`7302a25`) reuses the same reduced planes and
+adds bounded, ordered CPU preparation (default one, explicitly three for the next
+run). Its 55 focused tests, real reduced/blur frame hashes, independent review and
+CPU CI pass. Both stopped attempts remain private evidence; neither encoded a Q3b
+stream. The r5 plan records the repaired modules and resumes only the ten Q3b cells.
 CPU preparation found stale rate/encoded-calibration metadata on the Q3b SBS row;
 PR #38 (`9d55e32`) repaired it after CPU CI and independent review. Expanded-space
 scoring calibration is unchanged; the actual frozen Metro plan now validates. No runtime,

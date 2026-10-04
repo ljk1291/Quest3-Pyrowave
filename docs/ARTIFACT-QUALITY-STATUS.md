@@ -57,8 +57,16 @@ table for every tile. Its lease closed with zero jobs/errors; partial references
 are retained for byte-identity checks. [PR #39](https://github.com/ljk1291/Quest3-Pyrowave/pull/39)
 merged the exact-output CPU cache as `3512b19` after 53 focused CPU tests,
 independent review and [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37171100761).
-The rebuilt first retained Metro frame is bit-identical. Resume only the ten
-Q3b cells under new attempt paths with the repaired module hashes. Combined publication
+The rebuilt first retained Metro frame is bit-identical. The second attempt also
+stopped during CPU preparation, before encoding, after finding a duplicate forward
+transform for the matching blur reference. Its lease closed cleanly with zero jobs.
+[PR #40](https://github.com/ljk1291/Quest3-Pyrowave/pull/40) removes that duplicate
+and adds explicitly selected CPU preparation workers (default one, maximum three).
+It merged as `7302a25` after 55 focused tests, independent review and
+[CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37172014888).
+The reduced and matching-blur first-frame hashes match both retained attempts.
+Resume only the ten Q3b cells with three workers, the r5 plan and fresh r3 Pyro
+attempt paths; no image filter, runtime decoder or baseline default changed. Combined publication
 and the final stable pair remain outstanding; the 15 completed Q3a rows are retained.
 The earlier [preflight stop](../results/q3a-preflight-blocked-2026-10-04.json) remains
 historical evidence; no arm, headset, installed-pair or settings changes occurred.
