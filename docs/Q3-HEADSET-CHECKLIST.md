@@ -26,6 +26,48 @@ This pin identifies a build for a later authorized session; it does not
 promote any profile to a runtime default or authorize installation, connection,
 or capture.
 
+## Owner session revision — preparation, then confirmation
+
+The owner has requested installation of this verified `80a1635` pair, replacing
+the retained `d1c3b3d4edb3` pair, then Q4, cells **a, a2, b, c, d**, and **f–h**
+on the winning runnable cell. Preparation is authorized now. **Wait for the
+owner's confirmation to begin before installing, issuing ADB commands, starting
+VR or network tests, or changing settings.** Record the confirmation with the
+finite supervised session evidence; do not use or alter the unattended arm file.
+
+Keep the original d1c3 APK/server artifacts and its extracted server directory
+for rollback. Stage the new server in a separate directory. The authorized build
+replacement is distinct from settings restoration: retain the verified 80a1635
+pair after a healthy session and retain d1c3 for a necessary build rollback.
+Snapshot current settings/registration immediately before the first change,
+restore every changed value exactly, and verify them before telling the owner
+that ALVR is fully restored. The owner performs the VD comparison themselves.
+
+Ask for and retain the owner's actual in-headset judgement for every chart and
+Metro cell, each f off/on/off leg, the blinded g sequence, and h movement test.
+Do not infer an image, tracking, controller, audio or motion judgement from
+telemetry or a previous session. Winning-cell selection requires the owner's
+clarity/periphery/motion judgement as well as the recorded live measurements.
+
+### Preparation finding: native RDO proof is blocked on 80a1635
+
+Source inspection during preparation found that the live Windows encoder uses
+`pyrowave_encoder_create()` in `pyrowave_c.cpp`, which sets a release
+`NullLogger` before `Encoder::init()`. That logger suppresses the WO-7
+`PyroWave RDO viewing density` message. The pinned Windows build has
+`PYROWAVE_DEVEL=OFF`; its C API exposes no initialized-density readback.
+Consequently this pair cannot supply the required native RDO confirmation for
+**a, a2 or d**. A process environment value proves intent, not the density
+actually held by the initialized encoder. Do not substitute it for native proof.
+
+The offline frame-bank encoder calls `Encoder` directly, so its retained native
+RDO logs and quality scores are unaffected. The earlier live-log requirement
+was a planned gate, not a gate already demonstrated on 80a1635. A narrowly scoped
+native getter and ALVR log bridge are being prepared separately; using them
+requires a newly built, verified matching pair and an owner decision about the
+explicit 80a1635 pin. Until that decision, retain 80a1635 and mark these live
+RDO-proof gates blocked. No alternate pair is installed automatically.
+
 ## Fixed geometry distinction
 
 The offline crop is a fixed, centred `2624x2776` per eye rectangle derived from
@@ -97,9 +139,9 @@ session_settings.video.fov_crop.content.horizontal_tangent_multiplier = 0.854
 session_settings.video.fov_crop.content.vertical_tangent_multiplier = 0.85
 ```
 
-### Common Pyro allocation baseline for cells a and d
+### Common Pyro allocation baseline for cells a, a2 and d
 
-Cells **a** and **d** use the same allocation baseline. First record each
+Cells **a**, **a2** and **d** use the same allocation baseline. First record each
 property's literal readback, then set and verify both values before the required
 client/decoder restart:
 
@@ -273,20 +315,34 @@ the active RTX 5080 validates the actual negotiated SBS width and height and
 fails closed before encoder creation; retain that query result with the live
 SPS/profile and decoder evidence.
 
+During this owner-session preparation, a private minimal derivative was compiled
+against the pinned ALVR NVENC header and fixture-tested. It queries only H.264
+width/height capabilities and records the RTX 5080 identity, binary/header hashes
+and result. It has not been run against the GPU. After owner confirmation, use
+that fail-closed query before launching cell c; it must accept the runtime
+`3968x2080` side-by-side allocation. Fixture success is not a hardware capability
+result, and the live encoder/decoder readbacks above remain required.
+
 ### RDO-24 is an encoder environment candidate, not a dashboard setting
 
 The current offline-quality preparation candidate uses `PYROWAVE_RDO_PX_PER_DEG=24`.
 Before any authorized runtime application, confirm that the final combined
 quality review still selects it, then record the server process's pre-existing
 value (including unset) before launch.
-The WO-7 encoder parses the environment at encoder initialization and logs both
-the requested value and effective pixels/degree / Nyquist value. Retain that
-startup record; it is the only source-backed effective-value readback. There is
+The WO-7 encoder parses the environment at encoder initialization and emits both
+the requested value and effective pixels/degree / Nyquist value. The offline
+direct-Encoder path retains this record, but the release live C API in 80a1635
+suppresses it; see the [preparation blocker](#preparation-finding-native-rdo-proof-is-blocked-on-80a1635).
+Do not treat a launch environment readback as effective native state. There is
 no dashboard session key or `control` subcommand for RDO density. After the
 cell, restore the original process environment exactly (remove the variable if
 it was unset), restart the affected server process only under the supervised
 procedure, and retain the post-restore unset/original readback. Do not call an
 RDO result comparable unless requested and effective values are both present.
+Scope the override to the owned launch process; never change user or system
+environment values. Starting SteamVR through an existing Steam process can
+lose the launcher's override, so native activation proof is required even when
+the launch configuration is correct.
 
 For each live Pyro cell, capture only after streaming is confirmed. Choose a
 whole duration from 60 through 90 seconds and record it; this is a time-based
@@ -339,6 +395,12 @@ selected codec's verified decoder limit. Retain the values rather than assuming
 1000 Mbps. Router channel/width changes, including any 160 MHz or DFS change,
 are owner-only and must be logged as a new network condition.
 
+The exact 500-Mbps a/a2 rate is covered when the same-condition moving result
+qualifies `Rlive >= 500`: record that headroom-based qualification and the passing
+moving rate. This is an inference from the scheduled Q4 screen, not a directly
+measured 500-Mbps network leg. Do not add an unrequested network leg or describe
+it as a measured 500-Mbps result.
+
 The scheduled moving screen tops out at 1000 Mbps, so its 15% headroom rule
 can qualify at most 850 Mbps. It cannot qualify the exact 1000-Mbps PyroWave
 cell by itself. For the owner's next-session approval, include one conditional
@@ -375,6 +437,7 @@ baseline; it is not a value for any blank cell and does not establish 90 Hz.
 | Cell | GPU decode execution ms | Observed fence completion ms | Fresh submissions/s | Estimated pipeline latency ms | Optical FPS / latency |
 |---|---:|---:|---:|---:|---:|
 | a | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
+| a2 | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
 | b | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
 | c | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
 | d | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
@@ -382,6 +445,7 @@ baseline; it is not a value for any blank cell and does not establish 90 Hz.
 | Cell | Exact intended configuration | Runnable state and gate |
 |---|---|---|
 | a | Today’s full baseline: PyroWave Haar, 4:2:0, Compute, TCP, SDR, 90 Hz, fixed 500 Mbps; `fov_crop=false`, WO-8 off, and the common allocation baseline above. Keep `PYROWAVE_RDO_PX_PER_DEG` **unset only for this server process**; require the native encoder log to report legacy default effective `65.28` px/deg and Nyquist `32.64` cycles/deg (allow the established float-log tolerance). | Baseline comparison only. Record the original process environment and restore it exactly; never blanket-clear other environment values. It is not evidence of a 90 Hz pass merely because the historical rate was ~82–83/s. Require Q4 to establish that the requested rate is transport-feasible; do not silently replace 500 with `Rlive`. |
+| a2 | Immediately after a: identical full-FOV Haar / 500 Mbps configuration and common allocation baseline, except process-local `PYROWAVE_RDO_PX_PER_DEG=24`. | Require the native encoder initialization log to show requested/effective `24` px/deg and Nyquist `12` cycles/deg. Restart the encoder with that process environment; retain all other a settings/property values and compare their readbacks. Use the same chart and owner-selected Metro scene and ask the owner for each judgement. Restore the original process environment exactly when finished. Missing native activation proof or any other changed comparison knob invalidates the a/a2 comparison. |
 | b | Stock single-SBS AV1: WO-10 crop, AV1 Main10 requested, fixed 200 Mbps, 90 Hz, SDR, NVENC `P4`, AQ `Disabled`. Set/read `preferred_codec=AV1`, `use_10bit=true`, `server_overrides_use_10bit=true`, `quality_preset=P4`, and `adaptive_quantization_mode=Disabled`, then restart SteamVR. | This is the P4/AQ-off live comparison, distinct from the offline P1/Spatial-AQ stock-default control. Source supports these settings but AV1 can negotiate/fall back to HEVC. Block/mark inconclusive without AV1 negotiated-codec readback, elementary-stream Main10 proof, MediaCodec identity/output evidence, and the runtime crop proof. `gpu_decode_ms` is null unless a real stock decoder GPU query is added. |
 | c | Stock single-SBS H.264: WO-10 crop + WO-8 `H264Fit`, softness `0.5`, fixed 700 Mbps, 90 Hz, SDR, NVENC `P7`, AQ `Disabled`, 8-bit. | The completed H264Fit row ranks well on the fence; require the final comparison and close the live H.264 audit gates before capture: active-device dimension acceptance/preflight, matching phase-patch provenance, negotiated/decoded `3968x2080` SBS evidence, H.264 SPS/profile evidence, and Quest decoder identity. Explicitly set/read `use_10bit=false`, `server_overrides_use_10bit=true` and AQ `Disabled` to match the offline row, then restore their original values. Stock ALVR two-per-eye H.264 remains unimplemented and the offline dual-stream rows are not runnable live cells. |
 | d | Selected **offline-quality preparation candidate**: PyroWave CDF 9/7, WO-10 crop + WO-8 `Medium` softness `0.5`, 4:2:0, Compute, TCP, SDR, fixed 1000 Mbps, RDO-24 (`PYROWAVE_RDO_PX_PER_DEG=24`), and the common allocation baseline above. Require the native encoder log to report effective `24` px/deg and Nyquist `12` cycles/deg. | The completed Medium default/RDO pair is clean and shares the exact reduced input; RDO-24 has the stronger measured Medium fence: its tight-fence 10–89 edge PSNR-Y / temporal p99 / mean / all-90 HVS are `42.4128 dB / 9 codes / 1.3552 codes / 37.3564`, versus retained default `37.5434 dB / 15.32 codes / 2.6052 codes / 36.2617`. Its broad whole-image HVS remains below cropped Q3a RDO-24 (`43.0088`), which is a recorded transform/profile quality tradeoff rather than a default-setting decision. This is not a runtime promotion: retain the pending 32-row review, Q4 transport qualification at 1000 Mbps, matching WO-8 phase-pinned builds, runtime crop and Medium encoded-geometry readback. Apply the requested/effective RDO environment and restoration gate above; no blur-only substitute for the reduced-encode candidate. |
