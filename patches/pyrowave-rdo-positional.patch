@@ -1,0 +1,205 @@
+diff --git a/pyrowave_encoder.cpp b/pyrowave_encoder.cpp
+index c21165b..2b2d60a 100644
+--- a/pyrowave_encoder.cpp
++++ b/pyrowave_encoder.cpp
+@@ -37,6 +37,12 @@ struct QuantizerPushData
+ 	int32_t block_offset;
+ 	int32_t block_stride;
+ 	float rdo_distortion_scale;
++	int32_t rdo_local_mode;
++	float rdo_requested_ppd;
++	float rdo_uniform_cpd;
++	float rdo_reserved;
++	vec4 rdo_tangent_x;
++	vec4 rdo_tangent_y;
+ };
+ 
+ struct BlockPackingPushData
+@@ -109,6 +115,7 @@ struct Encoder::Impl final : public WaveletBuffers
+ 
+ 	uint32_t sequence_count = 0;
+ 	RDODensity rdo_density = {};
++	RDOLocalMode rdo_local_mode = RDOLocalMode::Disabled;
+ };
+ 
+ float Encoder::Impl::get_quant_rdo_distortion_scale(int level, int component, int band) const
+@@ -480,6 +487,14 @@ bool Encoder::Impl::quant(CommandBuffer &cmd, float quant_scale)
+ 				push.input_layer = float(band);
+ 				push.quant_resolution = 1.0f / decode_quant(encode_quant(1.0f / quant_res));
+ 				push.rdo_distortion_scale = get_quant_rdo_distortion_scale(level, component, band) * (1.0f / 256.0f);
++				push.rdo_local_mode = int32_t(rdo_local_mode);
++				push.rdo_requested_ppd = rdo_density.pixels_per_degree;
++				float horiz = (band & 1) ? 0.75f : 0.25f;
++				float vert = (band & 2) ? 0.75f : 0.25f;
++				push.rdo_uniform_cpd = std::max(8.0f, std::sqrt(horiz * horiz + vert * vert) * rdo_cpd_nyquist(rdo_density) * std::exp2(-float(level)));
++				push.rdo_reserved = 0.0f;
++				push.rdo_tangent_x = vec4(-1.17589234f, 0.71649807f, -0.71649807f, 1.17589234f);
++				push.rdo_tangent_y = vec4(-1.22520507f, 0.83088732f, -1.22520507f, 0.83088732f);
+ 
+ 				int blocks_x = (push.resolution.x + 31) / 32;
+ 				int blocks_y = (push.resolution.y + 31) / 32;
+@@ -1257,11 +1272,30 @@ bool Encoder::init(Device *device, int width_, int height_, ChromaSubsampling ch
+ 		     requested_rdo_density ? requested_rdo_density : "");
+ 		return false;
+ 	}
++	const char *requested_rdo_local = std::getenv("PYROWAVE_RDO_POSITIONAL");
++	if (requested_rdo_local && *requested_rdo_local && std::strcmp(requested_rdo_local, "0") != 0 &&
++		std::strcmp(requested_rdo_local, "1") != 0 && std::strcmp(requested_rdo_local, "2") != 0)
++	{
++		LOGE("PYROWAVE_RDO_POSITIONAL must be 0, 1, or 2.\n");
++		return false;
++	}
++	impl->rdo_local_mode = parse_rdo_local_mode(requested_rdo_local);
++	if (impl->rdo_local_mode != RDOLocalMode::Disabled &&
++		(!requested_rdo_density || !*requested_rdo_density || impl->rdo_density.legacy_equivalent || width_ != 5248 || height_ != 2776))
++	{
++		LOGE("Positional RDO requires explicit non-legacy PYROWAVE_RDO_PX_PER_DEG and cropped 5248x2776 geometry.\n");
++		return false;
++	}
+ 	LOGI("PyroWave RDO viewing density: requested %s, effective %.9g px/deg, Nyquist %.9g cycles/deg%s.\n",
+ 	     requested_rdo_density && *requested_rdo_density ? requested_rdo_density : "(legacy 96 DPI @ 1m)",
+ 	     impl->rdo_density.pixels_per_degree,
+ 	     rdo_cpd_nyquist(impl->rdo_density),
+ 	     impl->rdo_density.legacy_equivalent ? " (legacy-equivalent)" : "");
++	if (impl->rdo_local_mode != RDOLocalMode::Disabled)
++		LOGI("PyroWave positional RDO: mode %d; Session-07 calibration reused for Session-09; "
++		     "per-eye cropped frusta L[-1.17589234,0.71649807,-1.22520507,0.83088732] "
++		     "R[-0.71649807,1.17589234,-1.22520507,0.83088732]; scalar geometric-mean PPD anchored at optical axis.\n",
++		     int(impl->rdo_local_mode));
+ 
+ 	auto ops = device->get_device_features().vk11_props.subgroupSupportedOperations;
+ 	constexpr VkSubgroupFeatureFlags required_features =
+diff --git a/pyrowave_rdo_density.hpp b/pyrowave_rdo_density.hpp
+index 774a115..1cf8499 100644
+--- a/pyrowave_rdo_density.hpp
++++ b/pyrowave_rdo_density.hpp
+@@ -26,6 +26,40 @@ struct RDODensity
+ 	bool legacy_equivalent = true;
+ };
+ 
++enum class RDOLocalMode { Disabled, Tangent, TangentEccentricity };
++struct RDOProjection { float left, right, bottom, top, width, height; };
++
++inline RDOLocalMode parse_rdo_local_mode(const char *requested)
++{
++	if (!requested || !*requested || std::strcmp(requested, "0") == 0) return RDOLocalMode::Disabled;
++	if (std::strcmp(requested, "1") == 0) return RDOLocalMode::Tangent;
++	if (std::strcmp(requested, "2") == 0) return RDOLocalMode::TangentEccentricity;
++	return RDOLocalMode::Disabled;
++}
++
++inline float rdo_tangent_geomean_ppd(float tx, float ty, const RDOProjection &p)
++{
++	constexpr float radians_per_degree = 0.01745329251994329577f;
++	const float common = 1.0f + tx * tx + ty * ty;
++	const float ppdx = p.width / (p.right - p.left) * common / std::sqrt(1.0f + ty * ty) * radians_per_degree;
++	const float ppdy = p.height / (p.top - p.bottom) * common / std::sqrt(1.0f + tx * tx) * radians_per_degree;
++	return std::sqrt(ppdx * ppdy);
++}
++
++inline float rdo_local_ppd(float requested_ppd, float tx, float ty, const RDOProjection &p, RDOLocalMode mode)
++{
++	if (mode == RDOLocalMode::Disabled) return requested_ppd;
++	const float axis = rdo_tangent_geomean_ppd(0.0f, 0.0f, p);
++	float local = requested_ppd * rdo_tangent_geomean_ppd(tx, ty, p) / axis;
++	if (mode == RDOLocalMode::TangentEccentricity) {
++		const float edge = std::max(std::max(std::hypot(p.left, p.bottom), std::hypot(p.left, p.top)),
++		                            std::max(std::hypot(p.right, p.bottom), std::hypot(p.right, p.top)));
++		const float eccentricity = std::sqrt(tx * tx + ty * ty);
++		local /= 1.0f + std::min(1.0f, eccentricity / edge);
++	}
++	return local;
++}
++
+ inline RDODensity parse_rdo_pixels_per_degree(const char *requested)
+ {
+ 	RDODensity density = {};
+diff --git a/pyrowave_rdo_density_test.cpp b/pyrowave_rdo_density_test.cpp
+index 0bd6466..d19a411 100644
+--- a/pyrowave_rdo_density_test.cpp
++++ b/pyrowave_rdo_density_test.cpp
+@@ -59,6 +59,26 @@ int main()
+ 	for (const char *invalid : { "0", "-1", "nan", "inf", "36x", "10001" })
+ 		ASSERT_THAT(!parse_rdo_pixels_per_degree(invalid).valid);
+ 
++	// Position-aware mode is a scalar post-factor. Disabled mode is the exact
++	// requested input, preserving the legacy default arithmetic contract.
++	const RDOProjection left = { -1.17589234f, 0.71649807f, -1.22520507f, 0.83088732f, 2624.0f, 2776.0f };
++	const RDOProjection right = { -0.71649807f, 1.17589234f, -1.22520507f, 0.83088732f, 2624.0f, 2776.0f };
++	ASSERT_THAT(float_bits(rdo_local_ppd(24.0f, 0.3f, -0.2f, left, RDOLocalMode::Disabled)) == float_bits(24.0f));
++	ASSERT_THAT(float_bits(rdo_local_ppd(24.0f, 0.0f, 0.0f, left, RDOLocalMode::Tangent)) == float_bits(24.0f));
++	// The two effective crop frusta are mirror images about the optical axis.
++	ASSERT_THAT(std::fabs(rdo_local_ppd(24.0f, -0.5f, 0.3f, left, RDOLocalMode::Tangent) -
++	                      rdo_local_ppd(24.0f, 0.5f, 0.3f, right, RDOLocalMode::Tangent)) < 1.0e-5f);
++	const float tangent_corner = rdo_local_ppd(24.0f, left.left, left.bottom, left, RDOLocalMode::Tangent);
++	const float eccentric_corner = rdo_local_ppd(24.0f, left.left, left.bottom, left, RDOLocalMode::TangentEccentricity);
++	ASSERT_THAT(std::fabs(eccentric_corner * 2.0f - tangent_corner) < 1.0e-5f);
++	const float inside = rdo_local_ppd(24.0f, -0.2f, 0.2f, left, RDOLocalMode::TangentEccentricity);
++	ASSERT_THAT(inside <= rdo_local_ppd(24.0f, -0.2f, 0.2f, left, RDOLocalMode::Tangent));
++	ASSERT_THAT(inside >= rdo_local_ppd(24.0f, -0.2f, 0.2f, left, RDOLocalMode::Tangent) * 0.5f);
++	ASSERT_THAT(parse_rdo_local_mode(nullptr) == RDOLocalMode::Disabled);
++	ASSERT_THAT(parse_rdo_local_mode("1") == RDOLocalMode::Tangent);
++	ASSERT_THAT(parse_rdo_local_mode("2") == RDOLocalMode::TangentEccentricity);
++	ASSERT_THAT(parse_rdo_local_mode("bad") == RDOLocalMode::Disabled);
++
+ 	std::puts("PYROWAVE_RDO_PX_PER_DEG default parity and validation passed.");
+ 	return 0;
+ }
+diff --git a/shaders/wavelet_quant.comp b/shaders/wavelet_quant.comp
+index 70794e7..da87e47 100644
+--- a/shaders/wavelet_quant.comp
++++ b/shaders/wavelet_quant.comp
+@@ -67,8 +67,44 @@ layout(push_constant) uniform Registers
+     int block_offset;
+     int block_stride;
+     float rdo_distortion_scale;
++    int rdo_local_mode;
++    float rdo_requested_ppd;
++    float rdo_uniform_cpd;
++    float rdo_reserved;
++    vec4 rdo_tangent_x;
++    vec4 rdo_tangent_y;
+ } registers;
+ 
++float rdo_csf(float cpd)
++{
++    return 2.6 * (0.0192 + 0.114 * cpd) * exp(-pow(0.114 * cpd, 1.1));
++}
++
++float local_rdo_scale()
++{
++    if (registers.rdo_local_mode == 0) return 1.0;
++    vec2 uv = (vec2(gl_WorkGroupID.xy) + vec2(0.5)) * 32.0 / vec2(registers.resolution);
++    bool right = uv.x >= 0.5;
++    float eye_u = right ? (uv.x - 0.5) * 2.0 : uv.x * 2.0;
++    float left = right ? registers.rdo_tangent_x.z : registers.rdo_tangent_x.x;
++    float right_edge = right ? registers.rdo_tangent_x.w : registers.rdo_tangent_x.y;
++    float tx = mix(left, right_edge, eye_u);
++    float ty = mix(registers.rdo_tangent_y.x, registers.rdo_tangent_y.y, uv.y);
++    float common = 1.0 + tx * tx + ty * ty;
++    float ppdx = 2624.0 / (right_edge - left) * common / sqrt(1.0 + ty * ty) * 0.017453292519943295;
++    float ppdy = 2776.0 / (registers.rdo_tangent_y.y - registers.rdo_tangent_y.x) * common / sqrt(1.0 + tx * tx) * 0.017453292519943295;
++    float axis_ppdx = 2624.0 / (right_edge - left) * 0.017453292519943295;
++    float axis_ppdy = 2776.0 / (registers.rdo_tangent_y.y - registers.rdo_tangent_y.x) * 0.017453292519943295;
++    float density = registers.rdo_requested_ppd * sqrt(ppdx * ppdy) / sqrt(axis_ppdx * axis_ppdy);
++    if (registers.rdo_local_mode == 2) {
++        float edge = max(max(length(vec2(left, registers.rdo_tangent_y.x)), length(vec2(left, registers.rdo_tangent_y.y))), max(length(vec2(right_edge, registers.rdo_tangent_y.x)), length(vec2(right_edge, registers.rdo_tangent_y.y))));
++        density /= 1.0 + min(1.0, length(vec2(tx, ty)) / edge);
++    }
++    float local_cpd = max(8.0, registers.rdo_uniform_cpd * density / registers.rdo_requested_ppd);
++    float ratio = rdo_csf(local_cpd) / rdo_csf(registers.rdo_uniform_cpd);
++    return ratio * ratio;
++}
++
+ float max4(vec4 v)
+ {
+     vec2 v2 = max(v.xy, v.zw);
+@@ -124,7 +160,7 @@ float compute_square_error(mat2x4 v, int q, out uint num_significant_values)
+     iv = mat2x4(trunc(ldexp(iv[0], ivec4(q))), trunc(ldexp(iv[1], ivec4(q))));
+     mat2x4 err = v - iv;
+     num_significant_values = subgroupClusteredAdd(num_significant_values, 8);
+-    return (dot(err[0], err[0]) + dot(err[1], err[1])) * registers.rdo_distortion_scale;
++    return (dot(err[0], err[0]) + dot(err[1], err[1])) * registers.rdo_distortion_scale * local_rdo_scale();
+ }
+ 
+ struct QuantResult

@@ -34,6 +34,7 @@ def load():
         raise SystemExit("sources.lock.json: openxr_loader must include a release and SHA-256")
     patches = data.get("patches", {})
     for key, path in (("pyrowave_rdo_density", "patches/pyrowave-rdo-density.patch"),
+                      ("pyrowave_rdo_positional", "patches/pyrowave-rdo-positional.patch"),
                       ("wo8_light_centre_phase", "patches/wo8-light-centre-phase.patch")):
         patch = patches.get(key, {})
         if (not isinstance(patch, dict) or patch.get("path") != path
@@ -45,12 +46,13 @@ def load():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--github-env", action="store_true")
-    parser.add_argument("--value", choices=("rust", "android_ndk", "pyrowave_rdo_density_patch_sha256", "wo8_light_centre_phase_patch_sha256"))
+    parser.add_argument("--value", choices=("rust", "android_ndk", "pyrowave_rdo_density_patch_sha256", "pyrowave_rdo_positional_patch_sha256", "wo8_light_centre_phase_patch_sha256"))
     args = parser.parse_args()
     data = load()
     if args.value:
         patch_values = {
             "pyrowave_rdo_density_patch_sha256": "pyrowave_rdo_density",
+            "pyrowave_rdo_positional_patch_sha256": "pyrowave_rdo_positional",
             "wo8_light_centre_phase_patch_sha256": "wo8_light_centre_phase",
         }
         if args.value in patch_values:
@@ -72,6 +74,7 @@ def main():
         "OPENXR_LOADER_AAR": data["openxr_loader"]["android_aar"],
         "OPENXR_LOADER_SHA256": data["openxr_loader"]["sha256"],
         "PYROWAVE_RDO_DENSITY_PATCH_SHA256": data["patches"]["pyrowave_rdo_density"]["sha256"],
+        "PYROWAVE_RDO_POSITIONAL_PATCH_SHA256": data["patches"]["pyrowave_rdo_positional"]["sha256"],
         "WO8_LIGHT_CENTRE_PHASE_PATCH_SHA256": data["patches"]["wo8_light_centre_phase"]["sha256"],
     }
     for key, value in values.items():

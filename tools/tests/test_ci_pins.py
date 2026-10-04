@@ -54,7 +54,7 @@ def test_fetch_script_reads_lock_and_applies_the_complete_alvr_stack_in_order():
 def test_fetch_script_applies_rdo_density_after_the_pyrowave_overlays():
     script = (REPO / "tools/ci/fetch_sources.sh").read_text()
     names = ("pyrowave-cdf53-haar-experiments2-3.patch", "quest3-pyrowave.patch",
-             "pyrowave-rdo-density.patch")
+             "pyrowave-rdo-density.patch", "pyrowave-rdo-positional.patch")
     positions = [script.index(name) for name in names]
     assert positions == sorted(positions)
     assert (REPO / "patches/pyrowave-rdo-density.patch").is_file()
@@ -62,6 +62,10 @@ def test_fetch_script_applies_rdo_density_after_the_pyrowave_overlays():
     expected = LOCK["patches"]["pyrowave_rdo_density"]
     assert expected["path"] == "patches/pyrowave-rdo-density.patch"
     assert expected["sha256"] == hashlib.sha256((REPO / expected["path"]).read_bytes()).hexdigest()
+    positional = LOCK["patches"]["pyrowave_rdo_positional"]
+    assert positional["path"] == "patches/pyrowave-rdo-positional.patch"
+    assert positional["sha256"] == hashlib.sha256((REPO / positional["path"]).read_bytes()).hexdigest()
+    assert "--value pyrowave_rdo_positional_patch_sha256" in script
 
 
 def test_light_phase_patch_is_pinned_and_verified_before_application():

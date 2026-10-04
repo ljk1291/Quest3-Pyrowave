@@ -15,6 +15,8 @@
   "allowed_current_lock_changes": [
     {"path": "patches.pyrowave_rdo_density.path", "old": null, "new": "patches/pyrowave-rdo-density.patch", "role": "codec_encoder_only"},
     {"path": "patches.pyrowave_rdo_density.sha256", "old": null, "new": "1641a9456dd9d9e5811a110016cfe673587e7de56d9a76d709a3ea7599f3a4cc", "role": "codec_encoder_only"},
+    {"path": "patches.pyrowave_rdo_positional.path", "old": null, "new": "patches/pyrowave-rdo-positional.patch", "role": "codec_encoder_only"},
+    {"path": "patches.pyrowave_rdo_positional.sha256", "old": null, "new": "8b88fdebb8ce4de8d4e7d2b3a365f9172e919f5728b15c9f407adcd68b0b6b9b", "role": "codec_encoder_only"},
     {"path": "patches.wo8_light_centre_phase.path", "old": null, "new": "patches/wo8-light-centre-phase.patch", "role": "presentation_foveation_only"},
     {"path": "patches.wo8_light_centre_phase.sha256", "old": null, "new": "4f4ce22430f810c78195d749425f35f77ffdb1a14c844b927dff485c3c91e7f3", "role": "presentation_foveation_only"}
   ]

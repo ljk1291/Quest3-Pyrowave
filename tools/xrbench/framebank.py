@@ -413,6 +413,8 @@ def _lock_change_rows(old: dict, new: dict) -> list[dict]:
 _HISTORICAL_HVS_ALLOWED_LOCK_ROLES = {
     'patches.pyrowave_rdo_density.path': 'codec_encoder_only',
     'patches.pyrowave_rdo_density.sha256': 'codec_encoder_only',
+    'patches.pyrowave_rdo_positional.path': 'codec_encoder_only',
+    'patches.pyrowave_rdo_positional.sha256': 'codec_encoder_only',
     'patches.wo8_light_centre_phase.path': 'presentation_foveation_only',
     'patches.wo8_light_centre_phase.sha256': 'presentation_foveation_only',
 }
@@ -420,7 +422,7 @@ _HISTORICAL_HVS_DESCRIPTOR_RELATIVE = Path(
     'tools/xrbench/historical_locks/qualified-hvs-scorer-b4a61-compatibility.json')
 # Normalized EOL hash of the one reviewed descriptor. It is intentionally not
 # a generic descriptor mechanism: callers must name this tracked proof.
-_HISTORICAL_HVS_DESCRIPTOR_SHA256 = 'cc452a7a7ca1140b7ad7df21483b15bea72f15ce8dcdbc64a3d5e0433fd7749c'
+_HISTORICAL_HVS_DESCRIPTOR_SHA256 = '2d7c0886ff21adf2d0d15ba6bc8daff1d07c1a816488632d1c975f8e8e37d9df'
 
 
 def _verify_tools_build_against_lock(tools, metadata_path, *, lock_hash: str, lock_data: dict):
