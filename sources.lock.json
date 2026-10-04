@@ -30,7 +30,7 @@
     },
     "stock_mediacodec_telemetry": {
       "path": "patches/stock-mediacodec-telemetry.patch",
-      "sha256": "951d79bdc8312466c49dc82491a45017df19efc8cf7509e6e85e5bc1b4862b58"
+      "sha256": "8c9110f17a5a64b4bd79784aeb576023b2b821d0297e8204a3f47a090edbfbd4"
     }
   },
   "rust": "1.97.1",

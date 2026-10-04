@@ -159,7 +159,7 @@ new file mode 100644
 index 0000000000000000000000000000000000000000..2aa20945b5548d838e93ecdfa012149827a32cc0
 --- /dev/null
 +++ b/alvr/client_core/src/video_decoder/stock_telemetry.rs
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,62 @@
 +//! Opt-in MediaCodec diagnostics. MediaCodec exposes no decoder GPU timestamp on this path.
 +
 +use std::{collections::{HashMap, VecDeque}, time::{Duration, Instant}};

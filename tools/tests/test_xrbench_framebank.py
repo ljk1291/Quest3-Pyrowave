@@ -473,7 +473,7 @@ class FrameBankTests(unittest.TestCase):
                               {'path': 'patches.stock_mediacodec_telemetry.path', 'old': None,
                                'new': 'patches/stock-mediacodec-telemetry.patch', 'role': 'client_logging_only'},
                               {'path': 'patches.stock_mediacodec_telemetry.sha256', 'old': None,
-                               'new': '951d79bdc8312466c49dc82491a45017df19efc8cf7509e6e85e5bc1b4862b58', 'role': 'client_logging_only'}]}
+                               'new': '8c9110f17a5a64b4bd79784aeb576023b2b821d0297e8204a3f47a090edbfbd4', 'role': 'client_logging_only'}]}
             descriptor_path = folder / 'compatibility.json'; descriptor_path.write_text(json.dumps(descriptor))
             with self.assertRaisesRegex(ValueError, 'not the reviewed tracked proof'):
                 fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)
