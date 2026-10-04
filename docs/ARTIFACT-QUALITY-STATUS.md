@@ -36,15 +36,19 @@ Read with Get-NetAdapter; no network changes. Negotiated link speed is not goodp
 
 ## Queue (current owner goal)
 
-**Resumed, 2026-10-04:** Fresh preflight after the goal resumed confirms ComfyUI
-idle (zero running/pending), 13275 MiB free VRAM and no quality safety stops.
-The first Q3a NVENC cell encoded/decoded both eyes. Scoring exposed a transient
-Windows state-file replacement error, then two process-discovery false positives
-(a Git path mention and unreadable CPU Python arguments). Repairs passed CPU CI;
-the stopped attempts have no remaining jobs. Score-only recovery is running under
-a new finite lease, verifying the retained frame/bitstream hashes and preserving
-the failed attempts. Only the other nine NVENC cells require encoding. Source
-work continues on its own branches; no native settings or defaults changed.
+**Checkpoint, 2026-10-04:** All ten revised Q3a NVENC rows are complete. The
+resumed quality lease closed with zero owned jobs, no cleanup errors, and unchanged
+source/tool/module provenance. The first row reused its verified retained encode
+and decode; no completed encode was repeated. Full-FOV scoring normalizes the
+Y4M container header: all 90 frame and mask-reference hashes still match the
+parent source exactly. Original combined-report SHA256:
+`3afdc310ab2e4120b4b0e00683533ab6200f39040b70c94367505dbe7e927a35`.
+WO-10, WO-8 and WO-13 are merged; WO-12's audit and WO-11's design are merged.
+The Q3b CPU preflight caught stale per-stream bitrate and encoded calibration
+metadata. [PR #38](https://github.com/ljk1291/Quest3-Pyrowave/pull/38) corrected them
+as `9d55e32` after [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37169330331)
+and independent review; actual expanded-space scoring calibration is unchanged. The five
+Pyro Q3a and ten Q3b rows, combined report and final stable pair remain outstanding.
 The earlier [preflight stop](../results/q3a-preflight-blocked-2026-10-04.json) remains
 historical evidence; no arm, headset, installed-pair or settings changes occurred.
 
@@ -60,6 +64,8 @@ historical evidence; no arm, headset, installed-pair or settings changes occurre
 4. WO-8 on WO-10: upstream light, medium/h264fit, area prefilter, smooth peripheral
    softness and blur-only; shared live/frame-bank mapping and filter with CPU parity
    checks. Every runtime feature default-off; own codex branch and green CI per WO.
+   Merged as `55bb65b` after [full CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37167562493)
+   on resolved source `e61621d`, including actual WARP/software-GLES checks.
 5. Merge WO-8, then Q3b's ten offline cells; report both frame windows, centre and
    periphery, sharp/matching-blur comparisons and crop bands. Publish JSON + Markdown
    ranked by fence metrics then HVS. Preserve exact build/source/tool provenance.

@@ -40,6 +40,19 @@ decode hashes against retained evidence and ranks 9/7/1000, 5/3/1000, Haar/500 i
 that order for edge PSNR and temporal residuals in both score windows. This is
 sequence reconstruction error, not optical shimmer. [Exact crop geometry](../results/q3-crop-geometry-2026-10-04.json)
 uses left offset (278,274), right (170,274), 2624×2776/eye and unchanged density.
+
+### Source and Q3 checkpoint (2026-10-04)
+
+WO-10, WO-8 and WO-13 are merged; WO-12 remains an audit and WO-11 a design.
+WO-8's resolved source `e61621d` passed full Android/Windows CI and merged as
+`55bb65b`. All runtime features remain opt-in/default-off. Q3b adapter PR #36 and
+exact-score reuse PR #37 passed CPU CI and merged as `c80fb3f` / `150dcff`;
+51 combined CPU tests pass. Ten Q3a NVENC rows are complete under a clean closed
+quality lease. The final combined ranking waits for five Pyro Q3a and ten Q3b rows.
+CPU preparation found stale rate/encoded-calibration metadata on the Q3b SBS row;
+PR #38 (`9d55e32`) repaired it after CPU CI and independent review. Expanded-space
+scoring calibration is unchanged; the actual frozen Metro plan now validates. No runtime,
+headset, installed-pair, arm or network change has occurred.
 The old wood/gravel crop is partially excluded; other fixed crops and fence fit.
 The revised Q3 comparisons and source work below remain required.
 
