@@ -1229,6 +1229,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
     for index, cell in enumerate(plan["cells"] if not result["failure_reasons"] else []):
         directory = private_out / f"cell-{index:02d}-{cell['codec']}-{cell['rate_mbps']}-{cell['eye_width']}x{cell['eye_height']}"
         directory.mkdir(); row = dict(cell); ref = directory / "reference.y4m"; stream = directory / ("encoded." + _ext(cell["codec"])); raw_decoded = directory / "decoded.raw"; decoded = directory / "decoded.y4m"
+        stage = "prepare"
         try:
             q3b_transform = cell.get("source_transform")
             score_ref = ref; score_blur = None; score_ref_info = None
@@ -1245,6 +1246,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
             if [x["source_sha256"] for x in identities] != [x["source_sha256"] for x in plan["source"]["frame_identity"]]:
                 raise ValueError("source_frame_identity_drift")
             if row["nvenc_profile"]["layout"] == "dual_eye":
+                stage = "encode"
                 left_ref, right_ref = directory / "reference-left.y4m", directory / "reference-right.y4m"
                 left_info, right_info = _split_stereo_y4m(ref, ref_info, left_ref, right_ref)
                 streams = []
@@ -1262,6 +1264,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                         raise RuntimeError("nvenc_encode_failed")
                     idr_evidence = validate_initial_idr(eye_stream, cell["codec"], eye_info.frames)
                     eye_probe_path = directory / f"bitstream-probe-{eye_name}.json"
+                    stage = "decode"
                     eye_cell = dict(stream_cell); eye_cell["stereo_width"] = eye_info.width; eye_cell["eye_height"] = eye_info.height
                     probe = validate_probe(_run_json(guard, probe_command(needed["ffprobe"], eye_stream, eye_probe_path), eye_probe_path, directory, command_timeout_s), eye_cell, eye_info.frames)
                     code, _, _, decode_timing = _run_timed(guard, decode_command(needed["ffmpeg"], eye_stream, eye_native_raw, eye_info.frames, probe["pix_fmt"]), directory, command_timeout_s)
@@ -1293,11 +1296,13 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                     "actual_mbps_external_f90_normalization": sum(x["bitstream"]["actual_mbps_external_f90_normalization"] for x in streams),
                     "per_stream_mbps_requested": cell["per_stream_mbps"]}
             else:
+                stage = "encode"
                 code, _, _, timing = _run_timed(guard, encode_command(needed["ffmpeg"], ref, stream, row), directory, command_timeout_s, encode_frames=ref_info.frames)
                 if code or not stream.is_file() or stream.stat().st_size <= 0:
                     raise RuntimeError("nvenc_encode_failed")
                 idr_evidence = validate_initial_idr(stream, cell["codec"], ref_info.frames)
                 probe_json = directory / "bitstream-probe.json"
+                stage = "decode"
                 probe = validate_probe(_run_json(guard, probe_command(needed["ffprobe"], stream, probe_json), probe_json, directory, command_timeout_s), row, ref_info.frames)
                 row["bitstream"] = {**probe, "initial_idr_evidence": idr_evidence,
                     "actual_elementary_stream_bytes": stream.stat().st_size,
@@ -1323,6 +1328,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
             fb._assert_same_frames(ref, decoded, ref_info)
             score_decoded = decoded; score_decoded_info = decoded_info
             if q3b_transform is not None:
+                stage = "reconstruct"
                 score_decoded = directory / "score-reconstructed-decoded.y4m"
                 _reconstruct_q3b_decoded(decoded, decoded_info, score_decoded, score_ref_info, q3b_transform)
                 score_decoded_info = fb.inspect_y4m(score_decoded)
@@ -1332,10 +1338,14 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                 for (i, _, digest), x in zip(fb.iter_y4m(decoded, decoded_info), identities)]
             if len(row["decoded_frame_identity"]) != ref_info.frames:
                 raise ValueError("decoded_identity_or_geometry_mismatch")
+            stage = "scoring"
             row.update(_same_frame_scores(plan, index, cell, scoring_tools, guard, directory, source,
                 source_info, score_decoded, score_decoded_info, score_ref, score_ref_info or ref_info,
                 command_timeout_s, keep_artifacts, matching_blur_reference=score_blur))
         except (PermissionError, TimeoutError, ValueError, RuntimeError) as exc:
+            row["error_stage"] = stage
+            row["error_type"] = type(exc).__name__
+            row["error_detail"] = str(exc)
             row["error"] = str(exc) if str(exc) in {"nvenc_encode_failed", "nvenc_decode_failed", "decoded_identity_or_geometry_mismatch"} else "cell_failed"
             result["failure_reasons"].append(row["error"])
         result["cells"].append(row)
