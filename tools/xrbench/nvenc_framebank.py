@@ -79,6 +79,27 @@ def revised_q3a_cells() -> tuple[dict, ...]:
     )
 
 
+def revised_q3b_cells() -> tuple[dict, ...]:
+    """Published ten-cell Q3b matrix; rates are total stream rates."""
+    pyro = lambda label, wavelet, profile, softness, blur=False: {
+        "label": label, "runner": "pyrowave", "codec": "pyrowave", "wavelet": wavelet,
+        "mbps_total": 1000, "profile": profile, "softness": softness, "blur_only": blur}
+    return (
+        pyro("pyrowave-97-light-s0-1000", "97", "light", 0.0),
+        pyro("pyrowave-97-light-s05-1000", "97", "light", 0.5),
+        pyro("pyrowave-97-light-s1-1000", "97", "light", 1.0),
+        pyro("pyrowave-53-light-s05-1000", "53", "light", 0.5),
+        pyro("pyrowave-53-medium-s05-1000", "53", "medium", 0.5),
+        pyro("pyrowave-97-medium-s05-1000", "97", "medium", 0.5),
+        {"label":"h264-h264fit-s05-700", "runner":"nvenc", "codec":"h264", "layout":"stereo_sbs",
+         "mbps_total":700, "preset":"p7", "profile":"h264fit", "softness":.5, "blur_only":False},
+        pyro("pyrowave-97-h264fit-s05-1000", "97", "h264fit", 0.5),
+        {"label":"h264-dual-blur-light-s05-700", "runner":"nvenc", "codec":"h264", "layout":"dual_eye",
+         "mbps_total":700, "preset":"p7", "profile":"light", "softness":.5, "blur_only":True},
+        pyro("pyrowave-97-blur-light-s05-1000", "97", "light", .5, True),
+    )
+
+
 def _tool(value):
     path = fb._tool_path(value)
     if path is None:
@@ -211,6 +232,25 @@ def _revised_cell(base: dict, *, codec: str, rate_mbps: int, preset: str,
     return row
 
 
+def _canonical_crop_geometry(value: dict) -> dict:
+    """Accept the public geometry record without weakening its fixed pixels.
+
+    ``fence_metrics.crop_geometry`` returns executable geometry without a
+    ``kind`` member, while the public Q3 artifact wraps that value under
+    ``geometry``.  Add only this schema discriminator after proving the exact
+    crop fields exist; coordinates and tangents are copied untouched.
+    """
+    if not isinstance(value, dict):
+        raise ValueError("revised Q3a requires frozen per-eye crop geometry")
+    geometry = copy.deepcopy(value)
+    if geometry.get("kind") is None:
+        required = {"source_eye", "target_eye", "eyes"}
+        if not required.issubset(geometry):
+            raise ValueError("revised Q3a requires frozen per-eye crop geometry")
+        geometry["kind"] = "per_eye_crop"
+    return geometry
+
+
 def build_revised_q3a_plan(source: Path, vertical_pixels_per_degree: float, *,
                            projection_evidence: str, crop_evidence: str,
                            crop_geometry: dict, fence_rectangle: dict, crops, fixture: bool = False,
@@ -236,6 +276,7 @@ def build_revised_q3a_plan(source: Path, vertical_pixels_per_degree: float, *,
         fence_rectangle = fence_rectangle["original"]
     if isinstance(fence_rectangle, dict) and isinstance(fence_rectangle.get("fence"), dict):
         fence_rectangle = fence_rectangle["fence"].get("original")
+    crop_geometry = _canonical_crop_geometry(crop_geometry)
     if not isinstance(crop_geometry, dict) or crop_geometry.get("kind") != "per_eye_crop":
         raise ValueError("revised Q3a requires frozen per-eye crop geometry")
     crop_eye = tuple(crop_geometry.get("target_eye", ()))
@@ -317,6 +358,34 @@ def with_foveation_source(plan: dict, *, profile: str, softness: float, blur_onl
     raise RuntimeError("Q3b reduced-plane adapter and band scoring are not implemented")
 
 
+def build_revised_q3b_nvenc_plan(source: Path, vertical_pixels_per_degree: float, **kwargs) -> dict:
+    """Freeze Q3b's two NVENC rows; PyroWave owns the other eight rows.
+
+    Encoded geometry is deliberately reduced per cell. The frozen source crop
+    and all score references remain at 2624x2776 per eye.
+    """
+    base = build_revised_q3a_plan(source, vertical_pixels_per_degree, **kwargs)
+    crop = next(row for row in base["cells"] if row["label"] == "h264-dual-p7-400")
+    cells = []
+    for label, layout, transform in (
+        ("h264-h264fit-s05-700", "stereo_sbs", foveation_transform_descriptor(profile="h264fit", softness=.5, blur_only=False)),
+        ("h264-dual-blur-light-s05-700", "dual_eye", foveation_transform_descriptor(profile="light", softness=.5, blur_only=True)),
+    ):
+        from .foveation import FoveationConfig, encoded_size
+        width, height = encoded_size(2624, 2776, FoveationConfig(transform["profile"], transform["softness"], transform["blur_only"]))
+        encoded_base = dict(crop, eye_width=width, eye_height=height, stereo_width=width * 2,
+                            cap_bytes=fb.cap_bytes(700, fb.FPS), bits_per_pixel=fb.bpp(fb.cap_bytes(700, fb.FPS), width, height))
+        row = _revised_cell(encoded_base, codec="h264", rate_mbps=700, preset="p7", layout=layout,
+                            spatial_aq=False, label=label, source_geometry="crop")
+        row["source_transform"] = transform
+        row["score_vertical_pixels_per_degree"] = float(vertical_pixels_per_degree)
+        cells.append(row)
+    base.update(cells=cells, q3_revision="2026-10-04-q3b")
+    base["hvs_calibration"]["codec_cells"] = [fb.hvs_calibration_for_vertical_ppd(
+        vertical_pixels_per_degree * 2776 / kwargs.get("full_eye", fb.DISPLAY_EYE)[1], 2776) for _ in cells]
+    return base
+
+
 def _validate_source_adapter(plan: dict) -> None:
     adapter = plan.get("source_adapter")
     if adapter is None:  # schema-1 compatibility only
@@ -387,8 +456,18 @@ def validate_plan(plan: dict) -> dict:
         if score_ppd is not None and (cell.get("source_geometry") != "crop" or
                                       not isinstance(score_ppd, (int, float)) or not math.isfinite(score_ppd) or score_ppd <= 0):
             raise ValueError("cropped score PPD is invalid")
+        transform = cell.get("source_transform")
+        if transform is not None:
+            if plan.get("q3_revision") != "2026-10-04-q3b":
+                raise ValueError("WO-8 transform is only valid for Q3b")
+            try:
+                if transform != foveation_transform_descriptor(profile=transform.get("profile"),
+                    softness=transform.get("softness"), blur_only=transform.get("blur_only")):
+                    raise ValueError
+            except (AttributeError, ValueError, TypeError) as exc:
+                raise ValueError("Q3b cell transform drifted") from exc
         copied = dict(cell)
-        copied.pop("codec", None); copied.pop("nvenc_profile", None)
+        copied.pop("codec", None); copied.pop("nvenc_profile", None); copied.pop("source_transform", None)
         copied["wavelet"] = "haar"  # only to invoke the shared manifest validator
         cells.append(copied)
     normalized["cells"] = cells
@@ -764,6 +843,157 @@ def _stream_reference_for_cell(plan: dict, source: Path, source_info: fb.Y4MInfo
     return info, identities
 
 
+def _q3b_config(transform: dict):
+    """Construct the frozen WO-8 transform; no default transform is implied."""
+    if not isinstance(transform, dict) or transform.get("kind") != "wo8_foveation":
+        raise ValueError("Q3b cell requires an explicit WO-8 transform")
+    try:
+        from .foveation import FoveationConfig
+        return FoveationConfig(profile=transform["profile"], softness=transform["softness"],
+                               blur_only=transform["blur_only"])
+    except (ImportError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Q3b WO-8 transform is unavailable or invalid") from exc
+
+
+def _stream_q3b_sources(source: Path, source_info: fb.Y4MInfo, geometry: dict, transform: dict,
+                        encoded_path: Path, sharp_path: Path, blur_path: Path):
+    """Encode reduced WO-8 planes, while retaining full crop score references.
+
+    The encoded path is the *only* input to the codec.  The sharp and matching
+    blur paths remain expanded cropped space for post-decode quality scoring.
+    """
+    try:
+        from . import fence_metrics
+        from .foveation import encode_planes, blur_reference
+    except ImportError as exc:
+        raise ValueError("Q3b source modules are unavailable") from exc
+    config = _q3b_config(transform)
+    expanded = tuple(geometry["target_eye"])
+    first = None
+    identities = []
+    for index, planes, digest in fb.iter_y4m(source, source_info):
+        cropped = (planes if (source_info.width, source_info.height) ==
+                   (geometry["target_eye"][0] * 2, geometry["target_eye"][1])
+                   else fence_metrics.crop_frame(planes, geometry))
+        encoded = encode_planes(cropped, config)
+        if encoded.expanded_eye != expanded or encoded.chroma420 is not True:
+            raise ValueError("Q3b WO-8 expanded geometry/chroma drifted")
+        if first is None:
+            first = encoded
+            small = encoded.encoded_eye
+            encoded_info = fb.Y4MInfo(small[0] * 2, small[1], source_info.fps_num, source_info.fps_den,
+                source_info.chroma, source_info.color_range,
+                fb._frame_bytes(small[0] * 2, small[1], source_info.chroma), source_info.frames)
+            score_info = fb.Y4MInfo(expanded[0] * 2, expanded[1], source_info.fps_num, source_info.fps_den,
+                source_info.chroma, source_info.color_range,
+                fb._frame_bytes(expanded[0] * 2, expanded[1], source_info.chroma), source_info.frames)
+            encoded_out = fb._open_writer(encoded_path, encoded_info)
+            sharp_out = fb._open_writer(sharp_path, score_info)
+            blur_out = fb._open_writer(blur_path, score_info)
+        elif encoded.encoded_eye != first.encoded_eye:
+            raise ValueError("Q3b WO-8 encoded geometry changed by frame")
+        encoded_hash = fb._write_frame(encoded_out, encoded_info, encoded.planes)
+        sharp_hash = fb._write_frame(sharp_out, score_info, cropped)
+        blur_hash = fb._write_frame(blur_out, score_info, blur_reference(cropped, config))
+        identities.append({"source_frame": index, "source_sha256": digest,
+                           "encoded_reference_sha256": encoded_hash,
+                           "sharp_reference_sha256": sharp_hash, "blur_reference_sha256": blur_hash})
+    if first is None:
+        raise ValueError("Q3b source has no frames")
+    encoded_out.close(); sharp_out.close(); blur_out.close()
+    return encoded_info, score_info, identities, {"transform": copy.deepcopy(transform),
+        "expanded_eye": list(first.expanded_eye), "encoded_eye": list(first.encoded_eye),
+        "encoded_stereo": [first.encoded_eye[0] * 2, first.encoded_eye[1]],
+        "encoded_chroma": "420"}
+
+
+def _reconstruct_q3b_decoded(decoded_small: Path, encoded_info: fb.Y4MInfo, score_path: Path,
+                              score_info: fb.Y4MInfo, transform: dict) -> None:
+    """Expand a decoded reduced WO-8 frame only after the codec stage."""
+    try:
+        from .foveation import EncodedPlanes, reconstruct_planes
+    except ImportError as exc:
+        raise ValueError("Q3b reconstruction module is unavailable") from exc
+    config = _q3b_config(transform)
+    template = EncodedPlanes((np.empty((0, 0), np.uint8),) * 3,
+        (score_info.width // 2, score_info.height), (encoded_info.width // 2, encoded_info.height), True, config)
+    with fb._open_writer(score_path, score_info) as out:
+        for _, planes, _ in fb.iter_y4m(decoded_small, encoded_info):
+            fb._write_frame(out, score_info, reconstruct_planes(planes, template))
+
+
+def _q3b_periphery_mask(cell: dict, info: fb.Y4MInfo, rect: dict):
+    """Frozen source-space band classification for a Q3b fence rectangle."""
+    try:
+        from .foveation import encoded_size, softness_ramp
+    except ImportError as exc:
+        raise ValueError("Q3b band classifier is unavailable") from exc
+    config = _q3b_config(cell["source_transform"])
+    eye_w, eye_h = info.width // 2, info.height
+    x = (np.arange(rect["width"]) + rect["x"] + .5) / eye_w
+    y = (np.arange(rect["height"]) + rect["y"] + .5) / eye_h
+    xx, yy = np.meshgrid(x, y)
+    ramp = softness_ramp(np.stack((xx, yy), axis=-1), (eye_w, eye_h),
+                         encoded_size(eye_w, eye_h, config), config)
+    mask = ramp > 0
+    return mask, {"kind": "wo8_source_space_periphery", "profile": config.profile,
+                  "softness": config.softness, "blur_only": config.blur_only,
+                  "criterion": "softness_ramp>0", "selected_pixels": int(mask.sum()),
+                  "total_pixels": int(mask.size)}
+
+
+def _q3b_centre_rect(cell: dict, info: fb.Y4MInfo) -> dict:
+    """Largest chroma-aligned left-eye rectangle before the WO-8 edge ramp."""
+    from .foveation import encoded_size, softness_ramp
+    config = _q3b_config(cell["source_transform"]); w, h = info.width // 2, info.height
+    # Probe the two centre axes separately. Ramp zero is the exact aligned
+    # source-space central band, including any later diagnostic centre shift.
+    ux = np.stack(((np.arange(w) + .5) / w, np.full(w, .5)), axis=-1)
+    uy = np.stack((np.full(h, .5), (np.arange(h) + .5) / h), axis=-1)
+    size = encoded_size(w, h, config)
+    good_x = np.flatnonzero(softness_ramp(ux, (w, h), size, config) == 0)
+    good_y = np.flatnonzero(softness_ramp(uy, (w, h), size, config) == 0)
+    if not len(good_x) or not len(good_y):
+        raise ValueError("Q3b WO-8 has no centre band")
+    x0, x1 = int(good_x[0]), int(good_x[-1] + 1)
+    y0, y1 = int(good_y[0]), int(good_y[-1] + 1)
+    # Start inward (ceil to even), never widen the zero-ramp centre band.
+    x0 = (x0 + 1) // 2 * 2; y0 = (y0 + 1) // 2 * 2; x1 -= x1 % 2; y1 -= y1 % 2
+    if x1 - x0 < 4 or y1 - y0 < 4:
+        raise ValueError("Q3b centre band is too small for C420 scoring")
+    return {"eye":"left", "x":x0, "y":y0, "width":x1-x0, "height":y1-y0,
+            "kind":"wo8_exact_zero_softness_ramp"}
+
+
+def _write_eye_rect(source: Path, info: fb.Y4MInfo, rect: dict, output: Path) -> fb.Y4MInfo:
+    out_info = fb.Y4MInfo(rect["width"], rect["height"], info.fps_num, info.fps_den, info.chroma,
+        info.color_range, fb._frame_bytes(rect["width"], rect["height"], info.chroma), info.frames)
+    offset = 0 if rect["eye"] == "left" else info.width // 2
+    with fb._open_writer(output, out_info) as out:
+        for _, planes, _ in fb.iter_y4m(source, info):
+            cut=[]
+            for plane, factor in zip(planes, (1,2,2)):
+                x=(offset + rect["x"])//factor; y=rect["y"]//factor
+                cut.append(plane[y:y+rect["height"]//factor, x:x+rect["width"]//factor])
+            fb._write_frame(out, out_info, cut)
+    return out_info
+
+
+def _q3b_centre_scores(tools, reference, decoded, blur_reference, info, cell, directory, ppd, guard, timeout):
+    rect=_q3b_centre_rect(cell, info); directory=Path(directory)/"centre-hvs"; directory.mkdir(parents=True,exist_ok=True)
+    sharp, got, blur = directory/"sharp.y4m", directory/"decoded.y4m", directory/"blur.y4m"
+    ci=_write_eye_rect(reference, info, rect, sharp); _write_eye_rect(decoded, info, rect, got); _write_eye_rect(blur_reference, info, rect, blur)
+    sharp_scores=_score_pair_windows(tools, got, sharp, ci, directory/"sharp", ppd, guard, timeout)
+    blur_scores=_score_pair_windows(tools, got, blur, ci, directory/"blur", ppd, guard, timeout)
+    delta={}
+    for key in ("1-90","10-89"):
+        a,b=sharp_scores[key]["psnr_hvs_m_h"]["value"],blur_scores[key]["psnr_hvs_m_h"]["value"]
+        delta[key]=a-b if math.isfinite(a) and math.isfinite(b) else None
+    if any(value is None for value in delta.values()):
+        raise ValueError("Q3b centre HVS delta is indeterminate")
+    return {"rectangle":rect,"sharp_reference":sharp_scores,"matching_blur_reference":blur_scores,"hvs_delta_sharp_minus_blur_db":delta}
+
+
 def _crop_context_for_cell(plan: dict, cell: dict) -> tuple[list[dict], dict[str, dict]]:
     """Map fixed full-FOV crops into a cropped source without inventing pixels.
 
@@ -888,23 +1118,50 @@ def _score_pair_windows(tools, distorted: Path, reference: Path, info: fb.Y4MInf
 
 
 def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, source_info,
-                       decoded, decoded_info, reference, ref_info, timeout, keep_artifacts):
+                       decoded, decoded_info, reference, ref_info, timeout, keep_artifacts,
+                       *, matching_blur_reference=None):
     """Use exactly the established display and fixed-crop score path."""
     common = dict(frames=ref_info.frames, guard=guard, env=os.environ.copy(), timeout_s=timeout)
     codec_ppd = cell.get("score_vertical_pixels_per_degree",
                          plan["hvs_calibration"]["codec_cells"][cell_index]["vertical_pixels_per_degree"])
     row = {"codec_only": fb.score_pair(tools, decoded, reference, directory, codec_ppd,
                                         image_height=ref_info.height, **common)}
+    if matching_blur_reference is not None:
+        # Keep the legacy key for report compatibility, while making clear it
+        # scores the decoded reduced planes only after reconstruction.
+        row["codec_only_domain"] = "expanded_reconstructed_cropped_y4m"
     row["codec_only_windows"] = _score_pair_windows(tools, decoded, reference, ref_info,
         directory / "codec-windows", codec_ppd, guard, timeout, all_score=row["codec_only"])
+    if matching_blur_reference is not None:
+        row["centre_hvs"] = _q3b_centre_scores(tools, reference, decoded, matching_blur_reference,
+            ref_info, cell, directory, codec_ppd, guard, timeout)
     if "fence_rectangles" in plan:
         from . import fence_metrics
         fence_rect = (plan["fence_rectangles"]["cropped"]["mapped"] if cell.get("source_geometry") == "crop"
                       else plan["fence_rectangles"]["full_fov"])
-        row["fence_metrics"] = fence_metrics.score_y4m(reference, decoded, fence_rect, guard)
+        if matching_blur_reference is None:
+            row["fence_metrics"] = fence_metrics.score_y4m(reference, decoded, fence_rect, guard)
+        else:
+            # Retain the tight frozen fence as the primary ranking metric. It
+            # can lie wholly in the central band, so it cannot stand in for a
+            # periphery result.
+            primary = fence_metrics.score_y4m(reference, decoded, fence_rect, guard)
+            if any(not window["valid"] for window in primary["windows"].values()):
+                raise ValueError("Q3b primary tight fence edge mask is empty or invalid")
+            band_rect = {"eye":"left", "x":0, "y":0, "width":ref_info.width//2, "height":ref_info.height}
+            mask, descriptor = _q3b_periphery_mask(cell, ref_info, band_rect)
+            descriptor["rectangle"] = band_rect
+            peripheral = fence_metrics.score_against_references(
+                reference, decoded, band_rect, guard, matching_blur_reference=matching_blur_reference,
+                region_mask=mask, region_descriptor=descriptor)
+            for result in peripheral.values():
+                if any(not window["valid"] for window in result["windows"].values()):
+                    raise ValueError("Q3b periphery edge mask is empty or invalid")
+            row["fence_metrics"] = {"primary_tight_fence":primary, "peripheral_band":peripheral}
     display_ref = directory / "source-display.y4m"; display_dec = directory / "decoded-display.y4m"
     is_crop = cell.get("source_geometry", "full_fov") == "crop"
-    presentation_eye = (cell["eye_width"], cell["eye_height"]) if is_crop else plan["presentation_eye"]
+    presentation_eye = ((ref_info.width // 2, ref_info.height) if cell.get("source_transform") is not None
+                        else (cell["eye_width"], cell["eye_height"])) if is_crop else plan["presentation_eye"]
     # Crop rows score reconstructed cropped space against their cropped
     # reference. Full-FOV rows retain the established source-vs-decoded path.
     fb._write_display(reference if is_crop else source, ref_info if is_crop else source_info,
@@ -996,12 +1253,24 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
     for index, cell in enumerate(plan["cells"] if not result["failure_reasons"] else []):
         directory = private_out / f"cell-{index:02d}-{cell['codec']}-{cell['rate_mbps']}-{cell['eye_width']}x{cell['eye_height']}"
         directory.mkdir(); row = dict(cell); ref = directory / "reference.y4m"; stream = directory / ("encoded." + _ext(cell["codec"])); raw_decoded = directory / "decoded.raw"; decoded = directory / "decoded.y4m"
+        stage = "prepare"
         try:
-            ref_info, identities = _stream_reference_for_cell(plan, source, source_info, cell, ref)
+            q3b_transform = cell.get("source_transform")
+            score_ref = ref; score_blur = None; score_ref_info = None
+            if q3b_transform is None:
+                ref_info, identities = _stream_reference_for_cell(plan, source, source_info, cell, ref)
+            else:
+                score_ref = directory / "score-sharp-reference.y4m"
+                score_blur = directory / "score-blur-reference.y4m"
+                ref_info, score_ref_info, identities, q3b_provenance = _stream_q3b_sources(
+                    source, source_info, plan["source_adapter"]["geometry"], q3b_transform,
+                    ref, score_ref, score_blur)
+                row["q3b_transform"] = q3b_provenance
             row["identity_count"] = len(identities)
             if [x["source_sha256"] for x in identities] != [x["source_sha256"] for x in plan["source"]["frame_identity"]]:
                 raise ValueError("source_frame_identity_drift")
             if row["nvenc_profile"]["layout"] == "dual_eye":
+                stage = "encode"
                 left_ref, right_ref = directory / "reference-left.y4m", directory / "reference-right.y4m"
                 left_info, right_info = _split_stereo_y4m(ref, ref_info, left_ref, right_ref)
                 streams = []
@@ -1019,6 +1288,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                         raise RuntimeError("nvenc_encode_failed")
                     idr_evidence = validate_initial_idr(eye_stream, cell["codec"], eye_info.frames)
                     eye_probe_path = directory / f"bitstream-probe-{eye_name}.json"
+                    stage = "decode"
                     eye_cell = dict(stream_cell); eye_cell["stereo_width"] = eye_info.width; eye_cell["eye_height"] = eye_info.height
                     probe = validate_probe(_run_json(guard, probe_command(needed["ffprobe"], eye_stream, eye_probe_path), eye_probe_path, directory, command_timeout_s), eye_cell, eye_info.frames)
                     code, _, _, decode_timing = _run_timed(guard, decode_command(needed["ffmpeg"], eye_stream, eye_native_raw, eye_info.frames, probe["pix_fmt"]), directory, command_timeout_s)
@@ -1050,11 +1320,13 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                     "actual_mbps_external_f90_normalization": sum(x["bitstream"]["actual_mbps_external_f90_normalization"] for x in streams),
                     "per_stream_mbps_requested": cell["per_stream_mbps"]}
             else:
+                stage = "encode"
                 code, _, _, timing = _run_timed(guard, encode_command(needed["ffmpeg"], ref, stream, row), directory, command_timeout_s, encode_frames=ref_info.frames)
                 if code or not stream.is_file() or stream.stat().st_size <= 0:
                     raise RuntimeError("nvenc_encode_failed")
                 idr_evidence = validate_initial_idr(stream, cell["codec"], ref_info.frames)
                 probe_json = directory / "bitstream-probe.json"
+                stage = "decode"
                 probe = validate_probe(_run_json(guard, probe_command(needed["ffprobe"], stream, probe_json), probe_json, directory, command_timeout_s), row, ref_info.frames)
                 row["bitstream"] = {**probe, "initial_idr_evidence": idr_evidence,
                     "actual_elementary_stream_bytes": stream.stat().st_size,
@@ -1078,14 +1350,26 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
             row["decoded_raw_wrapper"] = wrap_raw_payload(raw_decoded, ref_info, decoded)
             decoded_info = fb.inspect_y4m(decoded)
             fb._assert_same_frames(ref, decoded, ref_info)
+            score_decoded = decoded; score_decoded_info = decoded_info
+            if q3b_transform is not None:
+                stage = "reconstruct"
+                score_decoded = directory / "score-reconstructed-decoded.y4m"
+                _reconstruct_q3b_decoded(decoded, decoded_info, score_decoded, score_ref_info, q3b_transform)
+                score_decoded_info = fb.inspect_y4m(score_decoded)
+                fb._assert_same_frames(score_ref, score_decoded, score_ref_info)
             row["decoded_frame_identity"] = [{"cell_frame": i, "source_frame": x["source_frame"],
-                "reference_sha256": x["reference_sha256"], "decoded_sha256": digest}
+                "reference_sha256": x.get("encoded_reference_sha256", x.get("reference_sha256")), "decoded_sha256": digest}
                 for (i, _, digest), x in zip(fb.iter_y4m(decoded, decoded_info), identities)]
             if len(row["decoded_frame_identity"]) != ref_info.frames:
                 raise ValueError("decoded_identity_or_geometry_mismatch")
+            stage = "scoring"
             row.update(_same_frame_scores(plan, index, cell, scoring_tools, guard, directory, source,
-                       source_info, decoded, decoded_info, ref, ref_info, command_timeout_s, keep_artifacts))
+                source_info, score_decoded, score_decoded_info, score_ref, score_ref_info or ref_info,
+                command_timeout_s, keep_artifacts, matching_blur_reference=score_blur))
         except (PermissionError, TimeoutError, ValueError, RuntimeError) as exc:
+            row["error_stage"] = stage
+            row["error_type"] = type(exc).__name__
+            row["error_detail"] = str(exc)
             row["error"] = str(exc) if str(exc) in {"nvenc_encode_failed", "nvenc_decode_failed", "decoded_identity_or_geometry_mismatch"} else "cell_failed"
             result["failure_reasons"].append(row["error"])
         result["cells"].append(row)

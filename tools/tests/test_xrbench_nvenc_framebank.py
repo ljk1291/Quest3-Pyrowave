@@ -241,6 +241,15 @@ class NvencFramebankTests(unittest.TestCase):
         self.assertEqual(h264["mbps"], 700)
         self.assertEqual(h264["layout"], "dual_eye")
 
+    def test_revised_q3b_matrix_has_two_nvenc_and_eight_pyrowave_cells(self):
+        cells = nf.revised_q3b_cells()
+        self.assertEqual(len(cells), 10)
+        self.assertEqual(sum(c["runner"] == "nvenc" for c in cells), 2)
+        self.assertEqual(sum(c["runner"] == "pyrowave" for c in cells), 8)
+        nvenc = [c for c in cells if c["runner"] == "nvenc"]
+        self.assertTrue(all(c["mbps_total"] == 700 for c in nvenc))
+        self.assertEqual(nvenc[1]["layout"], "dual_eye")
+
     def test_revised_q3a_plan_freezes_dual_eye_and_mapped_fence(self):
         geometry = {"kind": "per_eye_crop", "source_eye": [3072, 3232], "target_eye": [2624, 2776], "eyes": [
             {"eye": "left", "x": 278, "y": 274, "width": 2624, "height": 2776},
@@ -258,6 +267,43 @@ class NvencFramebankTests(unittest.TestCase):
         dual = next(c for c in plan["cells"] if c["label"] == "h264-dual-p7-700")
         self.assertEqual(dual["per_stream_mbps"], 350)
         self.assertEqual(dual["nvenc_profile"]["preset"], "p7")
+
+    def test_revised_q3a_accepts_public_geometry_wrapper_without_kind(self):
+        public = json.loads((Path(__file__).resolve().parents[2] /
+                             "results/q3-crop-geometry-2026-10-04.json").read_text(encoding="utf-8"))
+        self.assertNotIn("kind", public["geometry"])
+        base_cell = {"fps": 90, "eye_width": 2624, "eye_height": 2776, "stereo_width": 5248,
+                     "encoded_chroma": "420", "cap_bytes": fb.cap_bytes(200), "bits_per_pixel": 1.0}
+        base = {"cells": [base_cell], "hvs_calibration": {"codec_cells": [{}], "crops": []}}
+        with mock.patch.object(nf, "_require_jpeg_full_y4m"), mock.patch.object(fb, "build_plan", return_value=base):
+            plan = nf.build_revised_q3a_plan(Path("source.y4m"), 23.5, projection_evidence="p",
+                crop_evidence="c", crop_geometry=public, fence_rectangle=None, crops=[])
+        self.assertEqual(plan["source_adapter"]["geometry"]["kind"], "per_eye_crop")
+        self.assertEqual(plan["source_adapter"]["geometry"]["eyes"][0]["x"], 278)
+
+    def test_revised_q3b_plan_freezes_reduced_encoded_geometry(self):
+        geometry = {"kind":"per_eye_crop", "source_eye":[3072,3232], "target_eye":[2624,2776],
+                    "eyes":[{"eye":"left","x":278,"y":274,"width":2624,"height":2776},
+                            {"eye":"right","x":170,"y":274,"width":2624,"height":2776}]}
+        base_cell = {"fps":90,"eye_width":2624,"eye_height":2776,"stereo_width":5248,
+                     "encoded_chroma":"420","cap_bytes":fb.cap_bytes(200),"bits_per_pixel":1.0}
+        base={"cells":[base_cell],"hvs_calibration":{"codec_cells":[{}],"crops":[]}}
+        fence={"eye":"left","x":1740,"y":1310,"width":240,"height":274}
+        with mock.patch.object(nf,"_require_jpeg_full_y4m"), mock.patch.object(fb,"build_plan",return_value=base):
+            plan=nf.build_revised_q3b_nvenc_plan(Path("source.y4m"),23.5,projection_evidence="p",crop_evidence="c",
+                crop_geometry=geometry,fence_rectangle=fence,crops=[])
+        self.assertEqual(plan["q3_revision"],"2026-10-04-q3b")
+        self.assertEqual([(c["eye_width"],c["eye_height"]) for c in plan["cells"]],[(1984,2112),(2624,2776)])
+        self.assertTrue(all(c["source_transform"]["kind"]=="wo8_foveation" for c in plan["cells"]))
+
+    def test_q3b_bands_use_exact_wo8_source_space_ramp(self):
+        cell={"source_transform":nf.foveation_transform_descriptor(profile="light",softness=.5,blur_only=False)}
+        info=fb.Y4MInfo(5248,2776,90,1,"420","FULL",5248*2776*3//2,90)
+        centre=nf._q3b_centre_rect(cell,info)
+        self.assertEqual(centre["kind"],"wo8_exact_zero_softness_ramp")
+        self.assertGreater(centre["width"],1000)
+        mask,desc=nf._q3b_periphery_mask(cell,info,{"eye":"left","x":0,"y":0,"width":200,"height":200})
+        self.assertEqual(mask.dtype,np.bool_); self.assertEqual(desc["criterion"],"softness_ramp>0")
 
     def test_mocked_runner_wraps_raw_planes_and_keeps_observed_metadata(self):
         with tempfile.TemporaryDirectory() as root:

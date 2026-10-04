@@ -64,7 +64,7 @@ def _module_hashes():
     root = Path(__file__).resolve().parent
     # The Q3 scorer is imported lazily so the adapter remains source-only until
     # a run starts, but its implementation is still part of a frozen plan.
-    return {name: _hash(root / name) for name in ("pyro_q3_framebank.py", "framebank.py", "nvenc_framebank.py", "fence_metrics.py", "pyrowave_wave.py")}
+    return {name: _hash(root / name) for name in ("pyro_q3_framebank.py", "framebank.py", "nvenc_framebank.py", "fence_metrics.py", "foveation.py", "pyrowave_wave.py")}
 
 
 def _require_cropped_source(source: Path) -> fb.Y4MInfo:
@@ -126,17 +126,27 @@ def build_plan(source: Path, vertical_pixels_per_degree: float, *, projection_ev
              if (c["wavelet"], c["rate_mbps"]) in selected]
     cells = [dict(phase="q3a", source_geometry="crop", score_vertical_pixels_per_degree=float(vertical_pixels_per_degree), **c) for _, c in pairs]
     if include_q3b:
-        cells += [dict(phase="q3b", profile=p, source_geometry="crop", source_transform=_q3b_transform(p), wavelet=w, rate_mbps=r, fps=90,
-                       eye_width=2624, eye_height=2776, stereo_width=5248,
-                       requires_wo8_reduced_encode=True)
-                  for p, w, r in Q3B_ROWS]
+        from .foveation import FoveationConfig, encoded_size
+        for p, w, r in Q3B_ROWS:
+            transform = _q3b_transform(p); ew, eh = encoded_size(2624, 2776,
+                FoveationConfig(transform["profile"], transform["softness"], transform["blur_only"]))
+            cells.append(dict(phase="q3b", profile=p, source_geometry="crop", source_transform=transform,
+                              wavelet=w, rate_mbps=r, fps=90, eye_width=ew, eye_height=eh,
+                              stereo_width=ew*2, cap_bytes=fb.cap_bytes(r,90),
+                              bits_per_pixel=fb.bpp(fb.cap_bytes(r,90),ew,eh),
+                              encoded_chroma="420",
+                              score_vertical_pixels_per_degree=float(vertical_pixels_per_degree),
+                              requires_wo8_reduced_encode=True))
+    calibration_cells = [base["hvs_calibration"]["codec_cells"][i] for i, _ in pairs]
+    if include_q3b:
+        calibration_cells.extend(fb.hvs_calibration_for_vertical_ppd(vertical_pixels_per_degree, 2776)
+                                 for _ in Q3B_ROWS)
     return {"schema": SCHEMA, "kind": "pyro_q3_framebank", "fixture_only": bool(fixture),
             "source": _source_contract(source, info), "source_derivation": {"parent_sha256": _hash(full_source), "parent_geometry": [full_info.width, full_info.height], "operation": "native_per_eye_crop_no_resampling"}, "projection_evidence": projection_evidence.strip(),
             "crop_evidence": crop_evidence.strip(), "crop_geometry": copy.deepcopy(CROP_GEOMETRY),
             "frozen_module_hashes": _module_hashes(), "cells": cells,
             "presentation_eye": base["presentation_eye"], "projection": base["projection"],
-            "crops": base["crops"], "hvs_calibration": {**base["hvs_calibration"],
-                "codec_cells": [base["hvs_calibration"]["codec_cells"][i] for i, _ in pairs]},
+            "crops": base["crops"], "hvs_calibration": {**base["hvs_calibration"], "codec_cells": calibration_cells},
             "source_adapter": {"kind": "per_eye_crop", "geometry": copy.deepcopy(CROP_GEOMETRY),
                                "future_transform": None},
             "fence_rectangles": {**copy.deepcopy(FENCE_RECTANGLES), "cropped": {**copy.deepcopy(FENCE_RECTANGLES["cropped"]), "geometry": copy.deepcopy(CROP_GEOMETRY)}},
@@ -163,20 +173,25 @@ def validate_plan(plan: dict) -> dict:
             c.get("cap_bytes") != fb.cap_bytes(c["rate_mbps"], 90) or c.get("source_geometry") != "crop" or
             c.get("score_vertical_pixels_per_degree") != plan.get("projection", {}).get("vertical_pixels_per_degree") for c in actual_a):
         raise ValueError("Q3a rows drifted")
-    calibration = plan.get("hvs_calibration", {})
-    if not isinstance(calibration, dict) or len(calibration.get("codec_cells", [])) != len(actual_a):
-        raise ValueError("Q3 calibrated scoring contract drifted")
     if plan.get("fence_rectangles", {}).get("cropped", {}).get("mapped") != FENCE_RECTANGLES["cropped"]["mapped"]:
         raise ValueError("Q3 cropped fence rectangle drifted")
     adapter = plan.get("source_adapter", {})
     if adapter.get("kind") != "per_eye_crop" or adapter.get("geometry") != CROP_GEOMETRY:
         raise ValueError("Q3 source adapter geometry drifted")
     actual_b = [c for c in plan.get("cells", []) if c.get("phase") == "q3b"]
+    calibration = plan.get("hvs_calibration", {})
+    if not isinstance(calibration, dict) or len(calibration.get("codec_cells", [])) != len(actual_a) + len(actual_b):
+        raise ValueError("Q3 calibrated scoring contract drifted")
     if actual_b and [(c.get("profile"), c.get("wavelet"), c.get("rate_mbps")) for c in actual_b] != list(Q3B_ROWS):
         raise ValueError("Q3b rows drifted")
     for cell in actual_b:
         if not cell.get("requires_wo8_reduced_encode") or cell.get("source_transform") != _q3b_transform(cell["profile"]):
             raise ValueError("Q3b row lacks reduced-encode requirement")
+        from .foveation import FoveationConfig, encoded_size
+        ew, eh = encoded_size(2624,2776,FoveationConfig(cell["source_transform"]["profile"],cell["source_transform"]["softness"],cell["source_transform"]["blur_only"]))
+        cap=fb.cap_bytes(cell["rate_mbps"],90)
+        if (cell.get("eye_width"),cell.get("eye_height"),cell.get("stereo_width")) != (ew,eh,ew*2) or cell.get("cap_bytes") != cap or cell.get("bits_per_pixel") != fb.bpp(cap,ew,eh) or cell.get("encoded_chroma") != "420" or cell.get("score_vertical_pixels_per_degree") != plan["projection"]["vertical_pixels_per_degree"]:
+            raise ValueError("Q3b reduced geometry/cap/scoring contract drifted")
     return plan
 
 
@@ -193,8 +208,10 @@ def parse_wave(path: Path, cell: dict) -> dict:
         if size <= 0 or cursor + size > len(data): raise ValueError("truncated PyroWave payload")
         sizes.append(size); cursor += size
     if cursor != len(data) or len(sizes) != 90: raise ValueError("PyroWave container frame count mismatch")
+    if any(size > cell["cap_bytes"] for size in sizes): raise ValueError("PyroWave frame payload exceeds frozen cap")
     return {"container_sha256": hashlib.sha256(data).hexdigest(), "container_bytes": len(data),
-            "payload_bytes": sizes, "frames": len(sizes), "header_bytes": len(expected_header)}
+            "payload_bytes": sizes, "frames": len(sizes), "header_bytes": len(expected_header),
+            "payload_bytes_total": sum(sizes), "actual_mbps_payload_f90": sum(sizes)*8*90/len(sizes)/1_000_000}
 
 
 def _native_records(path: Path, payloads: list[int]) -> dict:
@@ -217,13 +234,27 @@ def _native_records(path: Path, payloads: list[int]) -> dict:
     return {"qualified": True, "frames": rows, "semantics": {"submit_to_observed_fence_ms": "completion latency, not GPU execution"}}
 
 
-def _same_frame_scores(plan, index, cell, tools, guard, directory, source, source_info, decoded, decoded_info, timeout, keep_artifacts):
+def _q3b_encoded_source_provenance(path: Path, identities: list[dict]) -> dict:
+    """Bind the generated reduced Y4M to the hashes written by the transform."""
+    records = fb.frame_records(path)
+    expected = [{"source_frame": item["source_frame"],
+                 "source_sha256": item["encoded_reference_sha256"]}
+                for item in identities]
+    if records != expected:
+        raise ValueError("q3b_encoded_source_identity_mismatch")
+    return {"sha256": _hash(path), "frames": len(records),
+            "frame_identity_sha256": hashlib.sha256(
+                fb.report_json(records).encode("utf-8")).hexdigest()}
+
+
+def _same_frame_scores(plan, index, cell, tools, guard, directory, source, source_info, decoded, decoded_info, timeout, keep_artifacts, *, reference=None, reference_info=None, matching_blur_reference=None):
     """Use Q3's shared scorer after its revision is merged; never silently downgrade it."""
     from . import nvenc_framebank as nvenc
     scorer = getattr(nvenc, "_same_frame_scores", None)
     if scorer is None: raise RuntimeError("shared_q3_scorer_unavailable")
+    reference = source if reference is None else reference; reference_info = source_info if reference_info is None else reference_info
     return scorer(plan, index, cell, tools, guard, directory, source, source_info, decoded, decoded_info,
-                  source, source_info, timeout, keep_artifacts)
+                  reference, reference_info, timeout, keep_artifacts, matching_blur_reference=matching_blur_reference)
 
 
 def _result_base(raw_plan: bytes, source: Path, tools: dict, tool_build: dict | None) -> dict:
@@ -263,39 +294,99 @@ def verify_split_bundles(tools: dict, codec_metadata: Path, scorer_metadata: Pat
             "hvs_implementation_unchanged": True}
 
 
+def _select_cells(plan: dict, phase: str | None, cell_indices: list[int] | tuple[int, ...] | None) -> list[tuple[int, dict]]:
+    """Select original manifest indices before opening the GPU scoring gate."""
+    if phase is not None and phase not in ("q3a", "q3b"):
+        raise ValueError("phase must be q3a or q3b")
+    cells = plan["cells"]
+    if cell_indices is None:
+        indices = list(range(len(cells)))
+    else:
+        if not isinstance(cell_indices, (list, tuple)):
+            raise ValueError("cell_indices must be a list of original plan indices")
+        if any(type(index) is not int for index in cell_indices):
+            raise ValueError("cell_indices must contain only integers")
+        if len(set(cell_indices)) != len(cell_indices):
+            raise ValueError("cell_indices must not contain duplicates")
+        if any(index < 0 or index >= len(cells) for index in cell_indices):
+            raise ValueError("cell_indices contains an out-of-range plan index")
+        indices = list(cell_indices)
+    selected = [(index, cells[index]) for index in indices if phase is None or cells[index].get("phase") == phase]
+    if len(selected) != len(indices):
+        raise ValueError("cell_indices includes a cell outside the requested phase")
+    if not selected:
+        raise ValueError("requested selection has no cells")
+    return selected
+
+
 def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, window: Path, *, tools_metadata: Path,
              scorer_tools_metadata: Path | None = None, command_timeout_s: float = 900,
-             keep_artifacts: bool = False, supervised: bool = False, resume: bool = False) -> dict:
+             keep_artifacts: bool = False, supervised: bool = False, resume: bool = False, phase: str | None = None,
+             cell_indices: list[int] | tuple[int, ...] | None = None) -> dict:
     """Run only frozen Q3a rows; Q3b fails closed until a real WO-8 adapter exists."""
     raw_plan = Path(plan_path).read_bytes(); plan = validate_plan(json.loads(raw_plan)); source = Path(source)
     info = _require_cropped_source(source); guard = fb.WindowGuard(Path(window), supervised=supervised)
     if _source_contract(source, info) != plan["source"]: raise ValueError("source contract differs from frozen plan")
-    required = {"encode", "decode", "psnr_hvs_m_h"}
+    required = {"encode", "decode", "psnr_hvs_m_h", "ffmpeg"}
     if set(tools) != required: raise ValueError("Pyro Q3 runner requires exactly encode/decode/psnr_hvs_m_h tools")
     fb.required_tools(tools); guard.status(); build = verify_split_bundles(tools, Path(tools_metadata), scorer_tools_metadata)
+    selected = _select_cells(plan, phase, cell_indices)
+    requested_indices = [index for index, _ in selected]
     out = Path(private_out)
     if out.exists():
         if not resume: raise FileExistsError("private output exists; explicit resume required")
         prior = json.loads((out / "framebank-private.json").read_text(encoding="utf-8"))
         if prior.get("frozen_plan_sha256") != hashlib.sha256(raw_plan).hexdigest() or prior.get("source_sha256_start") != _hash(source) or prior.get("tool_provenance_start") != {k: _hash(v) for k, v in tools.items()}:
             raise ValueError("resume provenance mismatch")
-        if prior.get("complete"): return prior
-        # An interrupted row may have a partial elementary stream. Never encode it again automatically.
-        raise RuntimeError("interrupted run preserved; manual review required before any cell replay")
-    out.mkdir(parents=True); result = _result_base(raw_plan, source, tools, build)
+        if prior.get("failure_reasons"):
+            # An interrupted row may have a partial elementary stream. Never encode it again automatically.
+            raise RuntimeError("interrupted run preserved; manual review required before any cell replay")
+        if not isinstance(prior.get("cells"), list) or any(type(row.get("plan_index")) is not int for row in prior["cells"]):
+            raise ValueError("resume result lacks original plan-index evidence")
+        completed = [row["plan_index"] for row in prior["cells"]]
+        if len(set(completed)) != len(completed):
+            raise ValueError("resume result repeats a plan index")
+        selected = [(index, cell) for index, cell in selected if index not in set(completed)]
+        result = prior
+        if not selected:
+            # All requested cells are already evidenced. Do not reopen the GPU
+            # sanity gate or regenerate any codec artifact on a resume.
+            result["requested_phase"] = phase; result["requested_cell_indices"] = cell_indices
+            result["selected_plan_indices"] = requested_indices
+            result.setdefault("run_scopes", []).append({"phase": phase, "requested_cell_indices": cell_indices,
+                                                         "selected_plan_indices": requested_indices})
+            result["complete"] = not result["failure_reasons"] and all(
+                index in set(completed) for index in requested_indices)
+            (out / "framebank-private.json").write_text(fb.report_json(result), encoding="utf-8")
+            return result
+    else:
+        out.mkdir(parents=True); result = _result_base(raw_plan, source, tools, build)
     try:
         env, _ = fb.codec_environment(os.environ, "haar")
         result["hvs_gpu_sanity"] = fb.hvs_gpu_sanity(tools["psnr_hvs_m_h"], out / "scorer-sanity",
                                                       plan["projection"]["vertical_pixels_per_degree"], guard, env, command_timeout_s)
         if not result["hvs_gpu_sanity"].get("passed"): raise RuntimeError("hvs_gpu_sanity_failed")
-        for index, cell in enumerate(plan["cells"]):
-            if cell["phase"] == "q3b": raise RuntimeError("q3b_reduced_encode_adapter_unavailable")
+        result["requested_phase"] = phase; result["requested_cell_indices"] = cell_indices
+        result["selected_plan_indices"] = requested_indices
+        result.setdefault("run_scopes", []).append({"phase": phase, "requested_cell_indices": cell_indices,
+                                                     "selected_plan_indices": requested_indices})
+        for index, cell in selected:
             directory = out / f"cell-{index:02d}-{cell['wavelet']}-{cell['rate_mbps']}"; directory.mkdir()
-            encoded, decoded = directory / "encoded.wave", directory / "decoded.y4m"; row = copy.deepcopy(cell)
+            encoded, decoded = directory / "encoded.wave", directory / "decoded.y4m"; row = {**copy.deepcopy(cell), "plan_index": index}
             try:
                 env, row["codec_environment"] = fb.codec_environment(os.environ, cell["wavelet"])
+                encode_source, encode_info = source, info
+                score_ref, score_blur, score_info = source, None, info
+                if cell["phase"] == "q3b":
+                    from . import nvenc_framebank as nvenc
+                    encode_source = directory / "reduced-encoded-source.y4m"
+                    score_ref, score_blur = directory / "score-sharp-reference.y4m", directory / "score-blur-reference.y4m"
+                    encode_info, score_info, identities, transform = nvenc._stream_q3b_sources(
+                        source, info, plan["crop_geometry"], cell["source_transform"], encode_source, score_ref, score_blur)
+                    row["q3b_encoded_source"] = _q3b_encoded_source_provenance(encode_source, identities)
+                    row["q3b_transform"] = transform
                 timing = directory / "pyrowave-encode-timing.jsonl"
-                start = time.time(); code, stdout, stderr = guard.run([str(tools["encode"]), str(source), str(encoded), str(cell["cap_bytes"]), "--timing-jsonl", str(timing)], cwd=directory, env=env, timeout_s=command_timeout_s); end = time.time()
+                start = time.time(); code, stdout, stderr = guard.run([str(tools["encode"]), str(encode_source), str(encoded), str(cell["cap_bytes"]), "--timing-jsonl", str(timing)], cwd=directory, env=env, timeout_s=command_timeout_s); end = time.time()
                 if code or not encoded.is_file(): raise RuntimeError("encode_failed")
                 if WAVELET_LABEL[cell["wavelet"]] not in stdout + stderr and not plan["fixture_only"]: raise RuntimeError("encoder_wavelet_not_confirmed")
                 row["encode_wall_interval_s"] = [start, end]; row["bitstream"] = parse_wave(encoded, cell)
@@ -304,32 +395,43 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                 code, stdout, stderr = guard.run([str(tools["decode"]), str(encoded), str(decoded)], cwd=directory, env=env, timeout_s=command_timeout_s)
                 if code or not decoded.is_file(): raise RuntimeError("decode_failed")
                 if WAVELET_LABEL[cell["wavelet"]] not in stdout + stderr and not plan["fixture_only"]: raise RuntimeError("decoder_wavelet_not_confirmed")
-                row["decoded_y4m_header"] = fb.canonicalize_decoded_header(decoded); decoded_info = fb._assert_same_frames(source, decoded, info)
-                row["decoded_frame_identity"] = [{"frame": i, "source_sha256": src["source_sha256"], "decoded_sha256": got} for (i, _, got), src in zip(fb.iter_y4m(decoded, decoded_info), plan["source"]["frame_identity"])]
+                row["decoded_y4m_header"] = fb.canonicalize_decoded_header(decoded); decoded_info = fb._assert_same_frames(encode_source, decoded, encode_info)
+                score_decoded, score_decoded_info = decoded, decoded_info
+                if cell["phase"] == "q3b":
+                    score_decoded = directory / "score-reconstructed-decoded.y4m"
+                    nvenc._reconstruct_q3b_decoded(decoded, decoded_info, score_decoded, score_info, cell["source_transform"])
+                    score_decoded_info = fb._assert_same_frames(score_ref, score_decoded, score_info)
+                row["decoded_frame_identity"] = [{"frame": i, "source_sha256": src["source_sha256"], "decoded_small_sha256": got} for (i, _, got), src in zip(fb.iter_y4m(decoded, decoded_info), plan["source"]["frame_identity"])]
                 if len(row["decoded_frame_identity"]) != 90: raise ValueError("decoded_identity_or_geometry_mismatch")
-                row.update(_same_frame_scores(plan, index, cell, tools, guard, directory, source, info, decoded, decoded_info, command_timeout_s, keep_artifacts))
+                if cell["phase"] == "q3b":
+                    rebuilt = [digest for _, _, digest in fb.iter_y4m(score_decoded, score_decoded_info)]
+                    if len(identities) != 90 or len(rebuilt) != 90: raise ValueError("q3b_transformed_identity_mismatch")
+                    row["q3b_frame_identity"] = [{**identities[i], "decoded_small_sha256": row["decoded_frame_identity"][i]["decoded_small_sha256"], "reconstructed_sha256": rebuilt[i]} for i in range(90)]
+                row.update(_same_frame_scores(plan, index, cell, tools, guard, directory, source, info, score_decoded, score_decoded_info, command_timeout_s, keep_artifacts, reference=score_ref, reference_info=score_info, matching_blur_reference=score_blur))
             except (PermissionError, TimeoutError, ValueError, RuntimeError) as exc:
                 row["error"] = str(exc); result["failure_reasons"].append(row["error"])
             result["cells"].append(row); (out / "framebank-progress.json").write_text(fb.report_json(result), encoding="utf-8")
             if row.get("error"): break
             if not keep_artifacts:
-                encoded.unlink(missing_ok=True); decoded.unlink(missing_ok=True)
+                # Keep the compressed elementary stream for decoder-only audit.
+                decoded.unlink(missing_ok=True)
         result["source_sha256_end"] = _hash(source); result["tool_provenance_end"] = {k: _hash(v) for k, v in tools.items()}
         if result["source_sha256_end"] != result["source_sha256_start"]: result["failure_reasons"].append("source_changed_during_run")
         if result["tool_provenance_end"] != result["tool_provenance_start"]: result["failure_reasons"].append("tool_changed_during_run")
-        result["complete"] = not result["failure_reasons"] and len(result["cells"]) == len(plan["cells"])
+        completed = {row.get("plan_index") for row in result["cells"]}
+        result["complete"] = not result["failure_reasons"] and all(index in completed for index in requested_indices)
     finally:
         (out / "framebank-private.json").write_text(fb.report_json(result), encoding="utf-8")
     return result
 
 
 def sanitized_report(result: dict) -> dict:
-    keep = ("phase", "profile", "wavelet", "rate_mbps", "fps", "eye_width", "eye_height", "stereo_width", "cap_bytes", "bits_per_pixel", "bitstream", "native_encoder_telemetry", "codec_only", "displayed", "crops", "codec_only_windows", "displayed_windows", "crop_windows", "error")
+    keep = ("plan_index", "phase", "profile", "wavelet", "rate_mbps", "fps", "eye_width", "eye_height", "stereo_width", "cap_bytes", "bits_per_pixel", "encoded_chroma", "bitstream", "native_encoder_telemetry", "codec_only", "codec_only_domain", "displayed", "crops", "codec_only_windows", "displayed_windows", "crop_windows", "centre_hvs", "fence_metrics", "q3b_transform", "q3b_encoded_source", "error")
     return {"schema": SCHEMA, "kind": "pyro_q3_framebank_sanitized", "complete": result.get("complete") is True,
             "failure_reasons": list(result.get("failure_reasons", [])), "frozen_plan_sha256": result.get("frozen_plan_sha256"),
             "source_sha256": result.get("source_sha256_end"), "tool_provenance": result.get("tool_provenance_end"),
             "tools_build_provenance": result.get("tools_build_provenance"), "module_hashes": result.get("module_hashes"),
-            "hvs_gpu_sanity": result.get("hvs_gpu_sanity"), "cells": [{k: r.get(k) for k in keep} for r in result.get("cells", [])],
+            "hvs_gpu_sanity": result.get("hvs_gpu_sanity"), "source": result.get("source_sha256_start"), "requested_phase": result.get("requested_phase"), "requested_cell_indices": result.get("requested_cell_indices"), "selected_plan_indices": result.get("selected_plan_indices"), "run_scopes": result.get("run_scopes"), "cells": [{k: r.get(k) for k in keep} for r in result.get("cells", [])],
             "optical_latency_ms": None, "display_fps": None}
 
 
@@ -343,11 +445,14 @@ def main(argv=None):
     plan.add_argument("--horizontal-pixels-per-degree", type=float)
     plan.add_argument("--include-q3b-hooks", action="store_true")
     run = sub.add_parser("run", help="run a frozen Q3a plan under an owner-supervised lease")
-    for name in ("plan", "source", "private-out", "report", "window", "encode", "decode", "psnr-hvs-m-h", "tools-metadata"):
+    for name in ("plan", "source", "private-out", "report", "window", "encode", "decode", "psnr-hvs-m-h", "ffmpeg", "tools-metadata"):
         run.add_argument("--" + name, required=True)
     run.add_argument("--scorer-tools-metadata", help="separate verified bundle for the HVS scorer")
     run.add_argument("--command-timeout-s", type=float, default=900)
     run.add_argument("--keep-artifacts", action="store_true")
+    run.add_argument("--phase", choices=("q3a", "q3b"))
+    run.add_argument("--cell-index", action="append", type=int, dest="cell_indices",
+                     help="original frozen-plan index; repeat to select a finite subset")
     run.add_argument("--supervised", action="store_true", help="require owner-attested frame_bank_pc lease")
     run.add_argument("--resume", action="store_true", help="inspect matching completed output only")
     args = parser.parse_args(argv)
@@ -361,11 +466,12 @@ def main(argv=None):
         print("wrote frozen Q3 PyroWave plan with", len(frozen["cells"]), "cells")
         return 0
     result = run_plan(Path(args.plan), Path(args.source), Path(args.private_out),
-                      {"encode": args.encode, "decode": args.decode, "psnr_hvs_m_h": args.psnr_hvs_m_h}, Path(args.window),
+                      {"encode": args.encode, "decode": args.decode, "psnr_hvs_m_h": args.psnr_hvs_m_h, "ffmpeg": args.ffmpeg}, Path(args.window),
                       tools_metadata=Path(args.tools_metadata),
                       scorer_tools_metadata=Path(args.scorer_tools_metadata) if args.scorer_tools_metadata else None,
                       command_timeout_s=args.command_timeout_s, keep_artifacts=args.keep_artifacts,
-                      supervised=args.supervised, resume=args.resume)
+                      supervised=args.supervised, resume=args.resume, phase=args.phase,
+                      cell_indices=args.cell_indices)
     report = sanitized_report(result); Path(args.report).write_text(fb.report_json(report), encoding="utf-8")
     print("wrote sanitized report: complete=" + str(report["complete"]))
     return 0 if report["complete"] else 2
