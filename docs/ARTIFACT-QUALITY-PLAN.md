@@ -69,6 +69,15 @@ headset, installed-pair, arm or network change has occurred.
 The old wood/gravel crop is partially excluded; other fixed crops and fence fit.
 The revised Q3 comparisons and source work below remain required.
 
+The first r5 Q3b result is complete: Light / 9/7 / 1000 Mbps / softness 0,
+2464×2592 encoded per eye, scored after reconstruction to the cropped source
+geometry. Its frames-10–89 fence edge PSNR is 30.832 dB with temporal residual
+p99 32, worse than cropped 9/7 without foveation (35.754 dB / p99 19). Both
+windows and sharp/matching-blur domains passed validation; its quality lease
+closed cleanly. This is one of ten Q3b rows, not a final ranking or promotion.
+Continue the remaining nine cells without repeating the completed encode; the
+softness-0.5 Light cell is active. See the status log for the exact report hash.
+
 ## 1. Owner input (2026-10-03 21:44)
 
 - **Live decoder caps on Quest 3.** These come from the owner's experience; verify them on

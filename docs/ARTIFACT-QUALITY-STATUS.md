@@ -68,9 +68,15 @@ and adds explicitly selected CPU preparation workers (default one, maximum three
 It merged as `7302a25` after 55 focused tests, independent review and
 [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37172014888).
 The reduced and matching-blur first-frame hashes match both retained attempts.
-Resume only the ten Q3b cells with three workers, the r5 plan and fresh r3 Pyro
-attempt paths; no image filter, runtime decoder or baseline default changed. Combined publication
-and the final stable pair remain outstanding; the 15 completed Q3a rows are retained.
+The finite r5 controller is running Q3b with three preparation workers and fresh
+r3 Pyro attempt paths. Its first Light / 9/7 / 1000 Mbps / softness 0 cell is
+complete with clean lease closure; nine Q3b cells remain. The second Light cell
+(softness 0.5) is active. Do not repeat completed cells. The first result is worse
+than cropped 9/7 without foveation on the primary fence: 30.832 versus 35.754 dB
+edge PSNR, temporal residual p99 32 versus 19 luma codes (both frames 10–89).
+No image filter, runtime decoder or baseline default changed during execution.
+Combined publication and the final stable pair remain outstanding; all 15 Q3a
+rows are retained.
 The earlier [preflight stop](../results/q3a-preflight-blocked-2026-10-04.json) remains
 historical evidence; no arm, headset, installed-pair or settings changes occurred.
 
@@ -178,6 +184,24 @@ Take the first unblocked item. Items marked ∥ are independent.
 ## Log
 
 <!-- Codex appends entries here: date, checkpoint, verified (links), remaining, blocked? -->
+
+- 2026-10-04 03:36 UTC, first Q3b result: Light / CDF 9/7 / 1000 Mbps,
+  softness 0, 2464×2592 encoded per eye, reconstructed to 2624×2776 per eye.
+  All 90 frames completed; both score windows, sharp/matching-blur references,
+  centre/periphery and frame-identity chains pass publication validation.
+  Primary fence (10–89): edge PSNR 30.831871 dB, temporal residual mean 5.330430
+  and p99 32 luma codes. Whole-image all-90 HVS is 38.110736 dB / VMAF 93.872773.
+  This loses to cropped 9/7 without foveation on the fence; no profile promoted.
+  The real three-worker reduced/blur first-frame payloads exactly match the
+  retained earlier attempts, and the sharp first frame matches the cropped source.
+  Private controller report SHA256:
+  `e13177c4f7f28ac580c6c217b809bbe9615c6ead4921962eb81dc7450ca9c663`.
+  Lease closed with zero jobs and no cleanup errors. The private publisher was
+  corrected to read matching peripheral descriptors from each reference result;
+  a missing-descriptor negative test rejects, and the final eight-Pyro-row gate
+  remains unchanged. The next Light/softness-0.5 cell is running; nine Q3b rows,
+  combined publication, final signed pair and owner checklist remain. No owner
+  blocker, headset action or settings change.
 
 - 2026-10-04, offline matrix and native source checkpoint:
   [WO-10 PR 25](https://github.com/ljk1291/Quest3-Pyrowave/pull/25) merged as
