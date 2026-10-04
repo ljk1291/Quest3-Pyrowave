@@ -29,7 +29,7 @@ jobs:
       - run: python3 -m unittest discover -s tests -v
       - name: Geometry-control contract tests
         run: python3 -m unittest tools.tests.test_resolution -v
-      - run: python3 -m unittest tools.tests.test_xrbench_framebank tools.tests.test_xrbench_hvs_scorer tools.tests.test_xrbench_nvenc_framebank -v
+      - run: python3 -m unittest tools.tests.test_xrbench_framebank tools.tests.test_xrbench_hvs_scorer tools.tests.test_xrbench_nvenc_framebank tools.tests.test_xrbench_pyro_q3_framebank -v
       - run: python3 -m unittest tools.tests.test_fence_metrics -v
       - run: python3 -m unittest tools.tests.test_supervised -v
       - name: Network frame-pacing and live frame-size telemetry tests
