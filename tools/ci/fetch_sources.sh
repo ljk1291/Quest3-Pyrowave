@@ -41,6 +41,10 @@ expected_wo8_phase_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value w
 actual_wo8_phase_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/wo8-light-centre-phase.patch")
 [ "$actual_wo8_phase_patch" = "$expected_wo8_phase_patch" ] || { echo "WO-8 Light phase patch hash does not match sources.lock.json" >&2; exit 1; }
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/wo8-light-centre-phase.patch"
+expected_stock_telemetry_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value stock_mediacodec_telemetry_patch_sha256)
+actual_stock_telemetry_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/stock-mediacodec-telemetry.patch")
+[ "$actual_stock_telemetry_patch" = "$expected_stock_telemetry_patch" ] || { echo "stock MediaCodec telemetry patch hash does not match sources.lock.json" >&2; exit 1; }
+apply_patch "$dest/ALVR-20.13.0" "$repo/patches/stock-mediacodec-telemetry.patch"
 
 checkout "$PYROWAVE_URL" "$dest/pyrowave" "$PYROWAVE_BASE"
 # pyrowave's checkout_granite.sh pins a newer Granite (9d44761), which spiked encoder p99 to 14 ms;

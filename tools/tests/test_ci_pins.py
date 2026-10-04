@@ -46,7 +46,7 @@ def test_fetch_script_reads_lock_and_applies_the_complete_alvr_stack_in_order():
     assert "source_lock.py" in script
     names = ("alvr-20.13.0-server-instrumentation.patch", "quest3-alvr.patch",
              "stable-baseline-alvr.patch", "fork-identity-alvr.patch", "wo8-foveation.patch",
-             "wo8-light-centre-phase.patch")
+             "wo8-light-centre-phase.patch", "stock-mediacodec-telemetry.patch")
     positions = [script.index(name) for name in names]
     assert positions == sorted(positions)
 
@@ -74,6 +74,22 @@ def test_light_phase_patch_is_pinned_and_verified_before_application():
     script = (REPO / "tools/ci/fetch_sources.sh").read_text()
     assert script.index("wo8-foveation.patch") < script.index("wo8-light-centre-phase.patch")
     assert "--value wo8_light_centre_phase_patch_sha256" in script
+
+
+def test_stock_mediacodec_telemetry_patch_is_pinned_and_last_in_the_alvr_stack():
+    import hashlib
+    expected = LOCK["patches"]["stock_mediacodec_telemetry"]
+    assert expected["path"] == "patches/stock-mediacodec-telemetry.patch"
+    patch = REPO / expected["path"]
+    assert patch.is_file()
+    assert expected["sha256"] == hashlib.sha256(patch.read_bytes()).hexdigest()
+    text = patch.read_text(encoding="utf-8")
+    assert "debug.alvr.stock_mediacodec_telemetry" in text
+    assert "decoder_gpu_ms=unavailable_no_mediacodec_timestamp_query" in text
+    assert "queue_to_image_reader_callback_wall_ms" in text
+    script = (REPO / "tools/ci/fetch_sources.sh").read_text()
+    assert script.index("wo8-light-centre-phase.patch") < script.index("stock-mediacodec-telemetry.patch")
+    assert "--value stock_mediacodec_telemetry_patch_sha256" in script
 
 
 def test_source_lock_rejects_malformed_light_phase_pin(tmp_path):
@@ -110,6 +126,7 @@ def test_lock_emitter_uses_exact_values():
     assert actual["PYROWAVE_BASE"] == LOCK["pyrowave"]["commit"]
     assert actual["GRANITE_COMMIT"] == LOCK["granite"]["commit"]
     assert actual["WO8_LIGHT_CENTRE_PHASE_PATCH_SHA256"] == LOCK["patches"]["wo8_light_centre_phase"]["sha256"]
+    assert actual["STOCK_MEDIACODEC_TELEMETRY_PATCH_SHA256"] == LOCK["patches"]["stock_mediacodec_telemetry"]["sha256"]
 
 
 def test_toolchain_is_read_from_the_lock_by_posix_builds():

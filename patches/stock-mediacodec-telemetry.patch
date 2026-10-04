@@ -1,0 +1,222 @@
+diff --git a/alvr/client_core/src/video_decoder/android.rs b/alvr/client_core/src/video_decoder/android.rs
+index d63644247eacf32df8343608ce83fdb23ded183c..55b82bdd2251b797098e018adf763fac7d22b9fb 100644
+--- a/alvr/client_core/src/video_decoder/android.rs
++++ b/alvr/client_core/src/video_decoder/android.rs
+@@ -1,4 +1,4 @@
+-use super::VideoDecoderConfig;
++use super::{stock_telemetry, VideoDecoderConfig};
+ use alvr_common::{
+     anyhow::{anyhow, bail, Context, Result},
+     error, info,
+@@ -23,7 +23,7 @@ use std::{
+     ptr,
+     sync::{Arc, Weak},
+     thread::{self, JoinHandle},
+-    time::Duration,
++    time::{Duration, Instant},
+ };
+ 
+ struct FakeThreadSafe<T>(T);
+@@ -42,6 +42,7 @@ type SharedMediaCodec = Arc<FakeThreadSafe<MediaCodec>>;
+ 
+ pub struct VideoDecoderSink {
+     inner: Arc<Mutex<Option<SharedMediaCodec>>>,
++    stock_telemetry: Option<Arc<Mutex<stock_telemetry::Tracker>>>,
+ }
+ 
+ unsafe impl Send for VideoDecoderSink {}
+@@ -67,7 +68,11 @@ impl VideoDecoderSink {
+                 // NB: the function expects the timestamp in micros, but nanos is used to have
+                 // complete precision, so when converted back to Duration it can compare correctly
+                 // to other Durations
+-                decoder.queue_input_buffer(buffer, 0, data.len(), timestamp.as_nanos() as _, 0)?;
++                if let Some(telemetry) = &self.stock_telemetry { telemetry.lock().queued(timestamp, Instant::now()); }
++                if let Err(error) = decoder.queue_input_buffer(buffer, 0, data.len(), timestamp.as_nanos() as _, 0) {
++                    if let Some(telemetry) = &self.stock_telemetry { telemetry.lock().queue_failed(timestamp); }
++                    return Err(error.into());
++                }
+ 
+                 Ok(true)
+             }
+@@ -207,6 +212,7 @@ fn decoder_lifecycle(
+     decoder_sink: Arc<Mutex<Option<SharedMediaCodec>>>,
+     decoder_ready_notifier: Arc<Condvar>,
+     image_queue: Arc<Mutex<VecDeque<QueuedImage>>>,
++    stock_telemetry: Option<Arc<Mutex<stock_telemetry::Tracker>>>,
+     image_reader: &mut ImageReader,
+ ) -> Result<()> {
+     // 2x: keep the target buffering in the middle of the max amount of queuable frames
+@@ -214,6 +220,7 @@ fn decoder_lifecycle(
+ 
+     image_reader.set_image_listener(Box::new({
+         let image_queue = Arc::clone(&image_queue);
++        let stock_telemetry = stock_telemetry.clone();
+         move |image_reader| {
+             let mut image_queue_lock = image_queue.lock();
+ 
+@@ -225,6 +232,9 @@ fn decoder_lifecycle(
+             match image_reader.acquire_next_image() {
+                 Ok(AcquireResult::Image(image)) => {
+                     let timestamp = Duration::from_nanos(image.timestamp().unwrap() as u64);
++                    if let Some(telemetry) = &stock_telemetry {
++                        if let Some(line) = telemetry.lock().completed(timestamp, Instant::now()) { info!("{line}"); }
++                    }
+ 
+                     if let Some(callback) = frame_result_callback.upgrade() {
+                         callback(Ok(timestamp));
+@@ -300,8 +310,8 @@ fn decoder_lifecycle(
+ 
+     info!("Using AMediaCodec format:{} ", format);
+ 
+-    let decoder = if config.force_software_decoder {
+-        decoder_attempt_setup(config.codec, true, None, &format, &image_reader)?
++    let (decoder, stock_route) = if config.force_software_decoder {
++        (decoder_attempt_setup(config.codec, true, None, &format, &image_reader)?, "forced_software".into())
+     } else {
+         let named = decoder_name.as_deref().map(|name| {
+             decoder_attempt_setup(config.codec, false, Some(name), &format, &image_reader)
+@@ -313,25 +323,26 @@ fn decoder_lifecycle(
+                     "Using named decoder {}",
+                     decoder_name.as_deref().unwrap_or_default()
+                 );
+-                d
++                (d, format!("named_requested:{}; actual_mediacodec_name=unavailable", decoder_name.as_deref().unwrap_or_default()))
+             }
+             _ => {
+                 // Hardware decoders sometimes fail at the CSD-0.
+                 // May as well fall back if this occurs.
+                 match decoder_attempt_setup(config.codec, false, None, &format, &image_reader) {
+-                    Ok(d) => d,
++                    Ok(d) => (d, "default_mime; actual_mediacodec_name=unavailable".into()),
+                     Err(e) => {
+                         // would be "warn!" but this is a severe caveat and a pretty major error.
+                         error!(
+                             "Attempting software fallback due to error in default decoder: {e:#}"
+                         );
+ 
+-                        decoder_attempt_setup(config.codec, true, None, &format, &image_reader)?
++                        (decoder_attempt_setup(config.codec, true, None, &format, &image_reader)?, "software_fallback; actual_mediacodec_name=unavailable".into())
+                     }
+                 }
+             }
+         }
+     };
++    if let Some(telemetry) = stock_telemetry { telemetry.lock().set_route(stock_route); }
+ 
+     let decoder = Arc::new(FakeThreadSafe(decoder));
+ 
+@@ -383,6 +394,12 @@ fn decoder_lifecycle(
+     Ok(())
+ }
+ 
++fn stock_telemetry_enabled() -> bool {
++    let mut property = [0u8; 92];
++    let length = unsafe { libc::__system_property_get(c"debug.alvr.stock_mediacodec_telemetry".as_ptr(), property.as_mut_ptr().cast()) };
++    stock_telemetry::enabled_from_property(&property[..length.max(0) as usize])
++}
++
+ // Create a sink/source pair
+ pub fn video_decoder_split(
+     config: VideoDecoderConfig,
+@@ -393,6 +410,7 @@ pub fn video_decoder_split(
+     let decoder_sink = Arc::new(Mutex::new(None::<SharedMediaCodec>));
+     let decoder_ready_notifier = Arc::new(Condvar::new());
+     let image_queue = Arc::new(Mutex::new(VecDeque::<QueuedImage>::new()));
++    let stock_telemetry = stock_telemetry_enabled().then(|| Arc::new(Mutex::new(stock_telemetry::Tracker::new())));
+ 
+     let dequeue_thread = thread::spawn({
+         let config = config.clone();
+@@ -426,6 +444,7 @@ pub fn video_decoder_split(
+                 decoder_sink,
+                 decoder_ready_notifier,
+                 Arc::clone(&image_queue),
++                stock_telemetry.clone(),
+                 &mut image_reader,
+             ) {
+                 frame_result_callback(Err(e));
+@@ -450,6 +469,7 @@ pub fn video_decoder_split(
+ 
+     let sink = VideoDecoderSink {
+         inner: decoder_sink,
++        stock_telemetry,
+     };
+     let source = VideoDecoderSource {
+         running,
+diff --git a/alvr/client_core/src/video_decoder/mod.rs b/alvr/client_core/src/video_decoder/mod.rs
+index ce7eeadc0a0c2fa19cbbdba3e83b75294b3445b6..7c853979b42f5ebaf6bc34055f6078804587b8e5 100644
+--- a/alvr/client_core/src/video_decoder/mod.rs
++++ b/alvr/client_core/src/video_decoder/mod.rs
+@@ -4,6 +4,7 @@ mod android;
+ mod pyrowave;
+ #[cfg(target_os = "android")]
+ mod pyrowave_udp;
++mod stock_telemetry;
+ #[cfg(any(target_os = "android", test))]
+ mod pyrowave_udp_assembly;
+ pub mod telemetry;
+diff --git a/alvr/client_core/src/video_decoder/stock_telemetry.rs b/alvr/client_core/src/video_decoder/stock_telemetry.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..2aa20945b5548d838e93ecdfa012149827a32cc0
+--- /dev/null
++++ b/alvr/client_core/src/video_decoder/stock_telemetry.rs
+@@ -0,0 +1,60 @@
++//! Opt-in MediaCodec diagnostics. MediaCodec exposes no decoder GPU timestamp on this path.
++
++use std::{collections::{HashMap, VecDeque}, time::{Duration, Instant}};
++
++const MAX_TRACKED: usize = 256;
++
++pub(crate) fn enabled_from_property(value: &[u8]) -> bool { value == b"1" }
++
++pub(crate) struct Tracker {
++    route: String,
++    queued: HashMap<Duration, Instant>,
++    order: VecDeque<Duration>,
++    completed: u64,
++    unpaired: u64,
++    sum_ms: f64,
++}
++
++impl Tracker {
++    pub(crate) fn new() -> Self {
++        Self { route: String::new(), queued: HashMap::new(), order: VecDeque::new(), completed: 0, unpaired: 0, sum_ms: 0.0 }
++    }
++    pub(crate) fn set_route(&mut self, route: String) { self.route = route; }
++    pub(crate) fn queued(&mut self, timestamp: Duration, now: Instant) {
++        if self.queued.remove(&timestamp).is_some() { self.unpaired += 1; }
++        self.order.retain(|value| *value != timestamp);
++        if self.order.len() == MAX_TRACKED {
++            if let Some(oldest) = self.order.pop_front() { if self.queued.remove(&oldest).is_some() { self.unpaired += 1; } }
++        }
++        self.order.push_back(timestamp);
++        self.queued.insert(timestamp, now);
++    }
++    pub(crate) fn queue_failed(&mut self, timestamp: Duration) {
++        if self.queued.remove(&timestamp).is_some() { self.unpaired += 1; }
++        self.order.retain(|value| *value != timestamp);
++    }
++    pub(crate) fn completed(&mut self, timestamp: Duration, now: Instant) -> Option<String> {
++        let Some(queued) = self.queued.remove(&timestamp) else { self.unpaired += 1; return None; };
++        self.order.retain(|value| *value != timestamp);
++        let elapsed_ms = now.saturating_duration_since(queued).as_secs_f32() * 1_000.0;
++        self.completed += 1;
++        self.sum_ms += elapsed_ms as f64;
++        (self.completed % 90 == 0).then(|| format!(
++            "[STOCK_MEDIACODEC] route={} matched_completion_samples={} unpaired_queue_or_callback={} queue_to_image_reader_callback_wall_ms_last={elapsed_ms:.3} queue_to_image_reader_callback_wall_ms_mean={:.3} decoder_gpu_ms=unavailable_no_mediacodec_timestamp_query pipeline_latency=separate_client_statistics_total_pipeline_latency",
++            self.route, self.completed, self.unpaired, self.sum_ms / self.completed as f64))
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]
++    fn property_is_exact_and_tracker_bounds_duplicate_failed_and_unpaired_entries() {
++        assert!(enabled_from_property(b"1")); assert!(!enabled_from_property(b"0"));
++        let start = Instant::now(); let mut tracker = Tracker::new();
++        tracker.queued(Duration::from_nanos(1), start); tracker.queued(Duration::from_nanos(1), start);
++        tracker.queue_failed(Duration::from_nanos(1)); assert!(tracker.completed(Duration::from_nanos(1), start).is_none());
++        for id in 2..=258 { tracker.queued(Duration::from_nanos(id), start); }
++        assert!(tracker.queued.len() <= MAX_TRACKED); assert!(tracker.unpaired >= 3);
++    }
++}

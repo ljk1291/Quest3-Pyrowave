@@ -469,7 +469,11 @@ class FrameBankTests(unittest.TestCase):
                               {'path': 'patches.wo8_light_centre_phase.path', 'old': None,
                                'new': 'patches/wo8-light-centre-phase.patch', 'role': 'presentation_foveation_only'},
                               {'path': 'patches.wo8_light_centre_phase.sha256', 'old': None,
-                               'new': '4f4ce22430f810c78195d749425f35f77ffdb1a14c844b927dff485c3c91e7f3', 'role': 'presentation_foveation_only'}]}
+                               'new': '4f4ce22430f810c78195d749425f35f77ffdb1a14c844b927dff485c3c91e7f3', 'role': 'presentation_foveation_only'},
+                              {'path': 'patches.stock_mediacodec_telemetry.path', 'old': None,
+                               'new': 'patches/stock-mediacodec-telemetry.patch', 'role': 'client_logging_only'},
+                              {'path': 'patches.stock_mediacodec_telemetry.sha256', 'old': None,
+                               'new': '139613124b744fc15f35d0a85b3a66d0e3611b99c5d92ae5cc6c492d09562b03', 'role': 'client_logging_only'}]}
             descriptor_path = folder / 'compatibility.json'; descriptor_path.write_text(json.dumps(descriptor))
             with self.assertRaisesRegex(ValueError, 'not the reviewed tracked proof'):
                 fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)

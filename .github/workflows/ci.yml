@@ -52,10 +52,24 @@ jobs:
           sudo apt-get install -y --no-install-recommends libegl-dev libgles-dev libegl-mesa0 libgl1-mesa-dri
           g++ -std=c++17 -O2 -Wall -Wextra -Werror tools/pyroclient/gpu_readback_gles.cpp tools/pyroclient/gpu_readback_test.cpp -lEGL -lGLESv2 -o /tmp/readback-test
           /tmp/readback-test
+  stock-decoder-telemetry:
+    runs-on: ubuntu-24.04
+    needs: tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load authoritative build pins
+        run: python3 tools/ci/source_lock.py --github-env >> "$GITHUB_ENV"
+      - name: Reconstruct pinned source tree
+        run: sh tools/ci/fetch_sources.sh "$XRWIRED_INPUTS/research"
+      - name: Host-only stock MediaCodec telemetry unit test
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          cd "$XRWIRED_INPUTS/research/ALVR-20.13.0"
+          cargo +"$RUST_TOOLCHAIN" test -p alvr_client_core stock_telemetry --lib
   client:
     runs-on: ubuntu-24.04
     needs: tests
-    if: ${{ !inputs.cpu_only && always() && (needs.tests.result == 'success' || needs.tests.result == 'skipped') }}
+    if: ${{ !inputs.cpu_only && always() && (needs.tests.result == 'success' || needs.tests.result == 'skipped') && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
     steps:
       - uses: actions/checkout@v4
       - name: Load authoritative build pins
@@ -180,7 +194,7 @@ jobs:
   streamer:
     runs-on: windows-2022
     needs: tests
-    if: ${{ !inputs.cpu_only && always() && (needs.tests.result == 'success' || needs.tests.result == 'skipped') }}
+    if: ${{ !inputs.cpu_only && always() && (needs.tests.result == 'success' || needs.tests.result == 'skipped') && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
     env:
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
     steps:
