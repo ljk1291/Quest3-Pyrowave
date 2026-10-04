@@ -1,0 +1,19 @@
+diff --git a/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp b/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp
+index 60a501111c0beb4d95f13c908b626488bea486bf..50a567a33a9b36da592e90b65370f5c45d4dee7c 100644
+--- a/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp
++++ b/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp
+@@ -131,6 +131,14 @@ void VideoEncoderPyroWave::Initialize() {
+     encoderInfo.chroma = Chroma444() ? PYROWAVE_CHROMA_SUBSAMPLING_444 : PYROWAVE_CHROMA_SUBSAMPLING_420;
+     encoderInfo.wavelet = Haar() ? PYROWAVE_WAVELET_HAAR : Legall53() ? PYROWAVE_WAVELET_CDF53 : PYROWAVE_WAVELET_CDF97;
+     PYRO_OR_THROW(pyrowave_encoder_create(&encoderInfo, &m_pyroEncoder));
++    pyrowave_encoder_rdo_density rdoDensity = {};
++    PYRO_OR_THROW(pyrowave_encoder_get_rdo_density(m_pyroEncoder, &rdoDensity));
++    // Warn reaches vrserver.txt. These values come from the initialized native
++    // encoder, so a test record does not depend on a suppressed Granite LOGI.
++    Warn("[PYROWAVE] native encoder RDO density applied: %.9g px/deg, Nyquist %.9g cycles/deg, %s\n",
++         rdoDensity.pixels_per_degree,
++         rdoDensity.nyquist_cycles_per_degree,
++         rdoDensity.legacy_equivalent ? "legacy 96 DPI @ 1m" : "PYROWAVE_RDO_PX_PER_DEG");
+     Info("[PYROWAVE] wavelet %s\n", WaveletName());
+ 
+     // What H.264 carries as SPS/PPS, PyroWave carries here: the client's DecoderConfig payload.

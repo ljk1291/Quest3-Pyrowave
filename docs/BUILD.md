@@ -4,7 +4,7 @@ Build Android and Windows from the **same repository commit**. `sources.lock.jso
 
 ## Cloud build contract
 
-`.github/workflows/ci.yml` runs on main, `codex/**`, pull requests and manual dispatch. It reconstructs sources, checks pins/shaders, runs Python/native/Rust checks, compiles both platforms, and verifies the artifact pair. The client/server version includes the repository commit so captures can compare installed versions to build metadata.
+`.github/workflows/ci.yml` runs source and CPU checks on main, `codex/**` and pull requests. A manual dispatch with `cpu_only=false` reconstructs sources, runs the platform builds, and verifies the artifact pair. The client/server version includes the repository commit so captures can compare installed versions to build metadata.
 
 Main and manual builds require repository secrets `QUEST3_SIGNING_KEYSTORE_BASE64` and `QUEST3_SIGNING_KEYSTORE_PASSWORD`. Missing secrets fail the stable build. Branch/PR development builds use a labelled temporary key and are not a persistent installation channel. Keep a private backup of the release keystore/password, outside tracked files. Never paste secrets into issues, logs or reports.
 
