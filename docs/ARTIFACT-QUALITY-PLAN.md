@@ -33,6 +33,16 @@ Read-only Ethernet evidence on 2026-10-04: Get-NetAdapter reports Ethernet Up at
 10.73.813.2024 dated 2024-08-15 (NDIS 6.40). This is link negotiation, not TCP
 goodput; no network setting changed.
 
+### Fence prerequisite completed (2026-10-04)
+
+[The three-cell backfill](../results/fence-backfill-2026-10-04.md) validates all270
+decode hashes against retained evidence and ranks 9/7/1000, 5/3/1000, Haar/500 in
+that order for edge PSNR and temporal residuals in both score windows. This is
+sequence reconstruction error, not optical shimmer. [Exact crop geometry](../results/q3-crop-geometry-2026-10-04.json)
+uses left offset (278,274), right (170,274), 2624×2776/eye and unchanged density.
+The old wood/gravel crop is partially excluded; other fixed crops and fence fit.
+The revised Q3 comparisons and source work below remain required.
+
 ## 1. Owner input (2026-10-03 21:44)
 
 - **Live decoder caps on Quest 3.** These come from the owner's experience; verify them on

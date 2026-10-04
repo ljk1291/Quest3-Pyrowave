@@ -30,11 +30,14 @@ jobs:
       - name: Geometry-control contract tests
         run: python3 -m unittest tools.tests.test_resolution -v
       - run: python3 -m unittest tools.tests.test_xrbench_framebank tools.tests.test_xrbench_hvs_scorer tools.tests.test_xrbench_nvenc_framebank -v
+      - run: python3 -m unittest tools.tests.test_fence_metrics -v
       - run: python3 -m unittest tools.tests.test_supervised -v
       - name: Network frame-pacing and live frame-size telemetry tests
         run: python3 -m pytest tools/tests/test_quest3_network.py tools/tests/test_alvr_events_summary.py -q
       - name: TCP frame receiver protocol build
         run: gcc -std=c11 -Wall -Wextra -Werror tools/udptest/tcpframerecv.c -o /tmp/tcp-frame-receiver
+      - run: python3 -m unittest tools.tests.test_stock_codec_audit -v
+      - run: python3 -m unittest tools.tests.test_dualstream_h264_design -v
       - run: g++ -std=c++17 -Wall -Werror tools/pyroclient/decode_path_test.cpp -o /tmp/decode-path && /tmp/decode-path
       - run: g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/pass_profile_test.cpp -o /tmp/pass-profile && /tmp/pass-profile
       - name: GPU failure-policy state-machine test
