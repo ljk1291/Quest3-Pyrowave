@@ -85,6 +85,12 @@ def test_stock_mediacodec_telemetry_patch_is_pinned_and_last_in_the_alvr_stack()
     assert expected["sha256"] == hashlib.sha256(patch.read_bytes()).hexdigest()
     text = patch.read_text(encoding="utf-8")
     assert "debug.alvr.stock_mediacodec_telemetry" in text
+    assert "MAX_TRACKED: usize = 256" in text
+    assert "queue_failures" in text
+    assert "duplicate_timestamps" in text
+    assert "unpaired_callbacks_or_evictions" in text
+    assert "decoder_s=client_statistics_packet_receive_to_image_reader_callback_wall" in text
+    assert "total_pipeline_latency=client_statistics_input_acquired_to_submit_plus_vsync_queue_estimated" in text
     assert "decoder_gpu_ms=unavailable_no_mediacodec_timestamp_query" in text
     assert "queue_to_image_reader_callback_wall_ms" in text
     script = (REPO / "tools/ci/fetch_sources.sh").read_text()

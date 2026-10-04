@@ -173,37 +173,39 @@ index 0000000000000000000000000000000000000000..2aa20945b5548d838e93ecdfa0121498
 +    queued: HashMap<Duration, Instant>,
 +    order: VecDeque<Duration>,
 +    completed: u64,
-+    unpaired: u64,
++    queue_failures: u64,
++    duplicate_timestamps: u64,
++    unpaired_callbacks_or_evictions: u64,
 +    sum_ms: f64,
 +}
 +
 +impl Tracker {
 +    pub(crate) fn new() -> Self {
-+        Self { route: String::new(), queued: HashMap::new(), order: VecDeque::new(), completed: 0, unpaired: 0, sum_ms: 0.0 }
++        Self { route: String::new(), queued: HashMap::new(), order: VecDeque::new(), completed: 0, queue_failures: 0, duplicate_timestamps: 0, unpaired_callbacks_or_evictions: 0, sum_ms: 0.0 }
 +    }
 +    pub(crate) fn set_route(&mut self, route: String) { self.route = route; }
 +    pub(crate) fn queued(&mut self, timestamp: Duration, now: Instant) {
-+        if self.queued.remove(&timestamp).is_some() { self.unpaired += 1; }
++        if self.queued.remove(&timestamp).is_some() { self.duplicate_timestamps += 1; self.unpaired_callbacks_or_evictions += 1; }
 +        self.order.retain(|value| *value != timestamp);
 +        if self.order.len() == MAX_TRACKED {
-+            if let Some(oldest) = self.order.pop_front() { if self.queued.remove(&oldest).is_some() { self.unpaired += 1; } }
++            if let Some(oldest) = self.order.pop_front() { if self.queued.remove(&oldest).is_some() { self.unpaired_callbacks_or_evictions += 1; } }
 +        }
 +        self.order.push_back(timestamp);
 +        self.queued.insert(timestamp, now);
 +    }
 +    pub(crate) fn queue_failed(&mut self, timestamp: Duration) {
-+        if self.queued.remove(&timestamp).is_some() { self.unpaired += 1; }
++        if self.queued.remove(&timestamp).is_some() { self.queue_failures += 1; }
 +        self.order.retain(|value| *value != timestamp);
 +    }
 +    pub(crate) fn completed(&mut self, timestamp: Duration, now: Instant) -> Option<String> {
-+        let Some(queued) = self.queued.remove(&timestamp) else { self.unpaired += 1; return None; };
++        let Some(queued) = self.queued.remove(&timestamp) else { self.unpaired_callbacks_or_evictions += 1; return None; };
 +        self.order.retain(|value| *value != timestamp);
 +        let elapsed_ms = now.saturating_duration_since(queued).as_secs_f32() * 1_000.0;
 +        self.completed += 1;
 +        self.sum_ms += elapsed_ms as f64;
 +        (self.completed % 90 == 0).then(|| format!(
-+            "[STOCK_MEDIACODEC] route={} matched_completion_samples={} unpaired_queue_or_callback={} queue_to_image_reader_callback_wall_ms_last={elapsed_ms:.3} queue_to_image_reader_callback_wall_ms_mean={:.3} decoder_gpu_ms=unavailable_no_mediacodec_timestamp_query pipeline_latency=separate_client_statistics_total_pipeline_latency",
-+            self.route, self.completed, self.unpaired, self.sum_ms / self.completed as f64))
++            "[STOCK_MEDIACODEC] route={} matched_completion_samples={} queue_failures={} duplicate_timestamps={} unpaired_callbacks_or_evictions={} queue_to_image_reader_callback_wall_ms_last={elapsed_ms:.3} queue_to_image_reader_callback_wall_ms_mean={:.3} decoder_s=client_statistics_packet_receive_to_image_reader_callback_wall decoder_gpu_ms=unavailable_no_mediacodec_timestamp_query total_pipeline_latency=client_statistics_input_acquired_to_submit_plus_vsync_queue_estimated",
++            self.route, self.completed, self.queue_failures, self.duplicate_timestamps, self.unpaired_callbacks_or_evictions, self.sum_ms / self.completed as f64))
 +    }
 +}
 +
@@ -217,6 +219,6 @@ index 0000000000000000000000000000000000000000..2aa20945b5548d838e93ecdfa0121498
 +        tracker.queued(Duration::from_nanos(1), start); tracker.queued(Duration::from_nanos(1), start);
 +        tracker.queue_failed(Duration::from_nanos(1)); assert!(tracker.completed(Duration::from_nanos(1), start).is_none());
 +        for id in 2..=258 { tracker.queued(Duration::from_nanos(id), start); }
-+        assert!(tracker.queued.len() <= MAX_TRACKED); assert!(tracker.unpaired >= 3);
++        assert!(tracker.queued.len() <= MAX_TRACKED); assert_eq!(tracker.queue_failures, 1); assert_eq!(tracker.duplicate_timestamps, 1); assert!(tracker.unpaired_callbacks_or_evictions >= 3);
 +    }
 +}

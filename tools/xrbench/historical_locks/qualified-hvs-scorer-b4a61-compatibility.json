@@ -18,7 +18,7 @@
     {"path": "patches.wo8_light_centre_phase.path", "old": null, "new": "patches/wo8-light-centre-phase.patch", "role": "presentation_foveation_only"},
     {"path": "patches.wo8_light_centre_phase.sha256", "old": null, "new": "4f4ce22430f810c78195d749425f35f77ffdb1a14c844b927dff485c3c91e7f3", "role": "presentation_foveation_only"}
     ,{"path": "patches.stock_mediacodec_telemetry.path", "old": null, "new": "patches/stock-mediacodec-telemetry.patch", "role": "client_logging_only"}
-    ,{"path": "patches.stock_mediacodec_telemetry.sha256", "old": null, "new": "139613124b744fc15f35d0a85b3a66d0e3611b99c5d92ae5cc6c492d09562b03", "role": "client_logging_only"}
+    ,{"path": "patches.stock_mediacodec_telemetry.sha256", "old": null, "new": "951d79bdc8312466c49dc82491a45017df19efc8cf7509e6e85e5bc1b4862b58", "role": "client_logging_only"}
   ]
 }
 

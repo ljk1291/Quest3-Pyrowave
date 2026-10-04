@@ -424,7 +424,7 @@ _HISTORICAL_HVS_DESCRIPTOR_RELATIVE = Path(
     'tools/xrbench/historical_locks/qualified-hvs-scorer-b4a61-compatibility.json')
 # Normalized EOL hash of the one reviewed descriptor. It is intentionally not
 # a generic descriptor mechanism: callers must name this tracked proof.
-_HISTORICAL_HVS_DESCRIPTOR_SHA256 = '4a4a867b2ca72b5391a1815a2dd7617cd05c0f75c36db7588f5af2387e7c77ca'
+_HISTORICAL_HVS_DESCRIPTOR_SHA256 = '4de8e38aaff9f6f985566bec23892ed340ea353bc8662a3f6c9967b883e5288e'
 
 
 def _verify_tools_build_against_lock(tools, metadata_path, *, lock_hash: str, lock_data: dict):
