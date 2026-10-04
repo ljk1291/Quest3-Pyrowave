@@ -79,6 +79,19 @@ def _source_contract(source: Path, info: fb.Y4MInfo) -> dict:
             "frame_identity": fb.frame_records(source)}
 
 
+def _q3b_transform(profile: str) -> dict:
+    """Frozen cell-level WO-8 contract; the implementation remains unavailable here."""
+    blur_only = profile.startswith("blur-only-")
+    if "s0" in profile and "s05" not in profile:
+        softness = 0.0
+    elif "s1" in profile and "s05" not in profile:
+        softness = 1.0
+    else:
+        softness = .5
+    base = profile.removeprefix("blur-only-").rsplit("-s", 1)[0]
+    return {"kind": "wo8_foveation", "profile": base, "softness": softness, "blur_only": blur_only}
+
+
 def build_plan(source: Path, vertical_pixels_per_degree: float, *, projection_evidence: str,
                crop_evidence: str, crops, full_source: Path, horizontal_pixels_per_degree: float | None = None,
                fixture: bool = False, include_q3b: bool = False) -> dict:
@@ -107,7 +120,7 @@ def build_plan(source: Path, vertical_pixels_per_degree: float, *, projection_ev
              if (c["wavelet"], c["rate_mbps"]) in selected]
     cells = [dict(phase="q3a", source_geometry="crop", score_vertical_pixels_per_degree=float(vertical_pixels_per_degree), **c) for _, c in pairs]
     if include_q3b:
-        cells += [dict(phase="q3b", profile=p, wavelet=w, rate_mbps=r, fps=90,
+        cells += [dict(phase="q3b", profile=p, source_geometry="crop", source_transform=_q3b_transform(p), wavelet=w, rate_mbps=r, fps=90,
                        eye_width=2624, eye_height=2776, stereo_width=5248,
                        requires_wo8_reduced_encode=True)
                   for p, w, r in Q3B_ROWS]
@@ -156,7 +169,7 @@ def validate_plan(plan: dict) -> dict:
     if actual_b and [(c.get("profile"), c.get("wavelet"), c.get("rate_mbps")) for c in actual_b] != list(Q3B_ROWS):
         raise ValueError("Q3b rows drifted")
     for cell in actual_b:
-        if not cell.get("requires_wo8_reduced_encode"):
+        if not cell.get("requires_wo8_reduced_encode") or cell.get("source_transform") != _q3b_transform(cell["profile"]):
             raise ValueError("Q3b row lacks reduced-encode requirement")
     return plan
 

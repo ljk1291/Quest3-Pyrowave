@@ -25,6 +25,7 @@ class PyroQ3FramebankTests(unittest.TestCase):
         if include_q3b:
             cells += [dict(phase="q3b", profile=p, wavelet=w, rate_mbps=r, fps=90,
                            eye_width=2624, eye_height=2776, stereo_width=5248,
+                           source_geometry="crop", source_transform=q3._q3b_transform(p),
                            requires_wo8_reduced_encode=True) for p, w, r in q3.Q3B_ROWS]
         return {"schema": 1, "kind": "pyro_q3_framebank", "fixture_only": True,
                 "source": self.source_contract(), "projection_evidence": "p", "crop_evidence": "c",
