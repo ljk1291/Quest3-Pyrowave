@@ -126,6 +126,62 @@ class FoveationTests(unittest.TestCase):
         midpoint=f._bilinear(np.array([[0.,1.]]),np.array([[[.5,.5]]]))[0,0]
         self.assertEqual(midpoint,.5)
         self.assertGreater(float(f._linear_to_srgb(np.array(.5))),midpoint)
+    def test_light_phase_correction_places_aligned_centre_on_texel_centres(self):
+        size=(2624,2776)
+        expected={"light":(-.5/2624,0.), "medium":(0.,0.), "h264fit":(0.,0.)}
+        for profile, phase in expected.items():
+            cfg=FoveationConfig(profile)
+            packed=encoded_size(*size,cfg)
+            actual=tuple(f._sample_phase_uv(full, encoded, cfg.center_fraction, cfg.edge_ratio, 0.)
+                         for full,encoded in zip(size,packed))
+            self.assertTrue(np.allclose(actual,phase,atol=2e-15),profile)
+            # A central output-pixel centre must map to a source texel centre.
+            uv=np.array([[(packed[0]//2+.5)/packed[0],(packed[1]//2+.5)/packed[1]]])
+            source=forward_map_uv(uv,size,packed,cfg)*np.array(size)
+            self.assertTrue(np.allclose(source,np.floor(source)+.5,atol=2e-12),profile)
+        # Float64 rational arithmetic used by the reference leaves Medium-y
+        # with a ~5.7e-14 source-pixel residue. Production f32 shader
+        # arithmetic is exactly aligned; reference output must preserve the
+        # historical quantised source bytes too.
+        medium=FoveationConfig("medium")
+        self.assertEqual(f._sample_phase_uv(2776,2240,medium.center_fraction,medium.edge_ratio,0.),0.)
+        h264=FoveationConfig("h264fit")
+        self.assertEqual(f._sample_phase_uv(2624,1984,h264.center_fraction,h264.edge_ratio,0.),0.)
+        light=FoveationConfig("light")
+        self.assertEqual(f._sample_phase_uv(2624,2464,light.center_fraction,light.edge_ratio,0.),-.5/2624)
+        # Blur-only keeps the full raster and deliberately has no phase translation.
+        blur=FoveationConfig("light",.5,True)
+        self.assertTrue(np.array_equal(forward_map_uv(np.array([[[.5,.5]]]),size,encoded_size(*size,blur),blur),
+                                       np.array([[[.5,.5]]])))
+
+    def test_light_phase_matches_float32_hlsl_and_mirrored_inverse(self):
+        size=(2624,2776); cfg=FoveationConfig("light",center_shift=(.0,.0)); packed=encoded_size(*size,cfg)
+        uv=np.array([[(1374.5/packed[0],1173.5/packed[1])]],np.float32)
+        cpu=forward_map_uv(uv,size,packed,cfg)
+        shader=hlsl_forward_map_uv(uv,size,packed,cfg)
+        self.assertLess(float(np.max(np.abs(cpu-shader))),2e-6)
+        self.assertTrue(np.allclose(cpu*np.array(size),np.floor(cpu*np.array(size))+.5,atol=2e-5))
+        # The fixed per-eye profile also stays invertible after the right-eye
+        # mirrored centre-shift path chooses its own sampling phase.
+        shifted=FoveationConfig("light",.5,False,(.19,-.11)); right=f._eye_config(shifted,True)
+        samples=np.array([[[.17,.23],[.51,.47],[.88,.76]]])
+        for eye in (shifted,right):
+            restored=inverse_map_uv(forward_map_uv(samples,size,packed,eye),size,packed,eye)
+            self.assertLess(float(np.max(np.abs(restored-samples))),1e-9)
+
+    def test_phase_correction_preserves_forward_inverse_and_profile_geometry(self):
+        size=(2624,2776)
+        for profile in ("light","medium","h264fit"):
+            cfg=FoveationConfig(profile,.5)
+            packed=encoded_size(*size,cfg)
+            uv=np.array([[[.13,.31],[.5,.5],[.87,.69]]])
+            self.assertLess(float(np.max(np.abs(inverse_map_uv(forward_map_uv(uv,size,packed,cfg),size,packed,cfg)-uv))),1e-9)
+        # Existing zero-phase profiles retain their prior central samples.
+        self.assertTrue(np.allclose(forward_map_uv(np.array([[(1000.5/2112,.5)]]),size,(2112,2240),FoveationConfig("medium"))*np.array(size),
+                                    [[1263.5,1398.]]))
+        self.assertTrue(np.allclose(forward_map_uv(np.array([[(1000.5/1984,.5)]]),size,(1984,2112),FoveationConfig("h264fit"))*np.array(size),
+                                    [[1328.5,1403.]]))
+
     def test_profile_dimensions_at_wo10_aligned_crop(self):
         # The upstream formula takes the unaligned crop height. It produces these actual
         # packed dimensions; the plan must not overwrite them with target labels.

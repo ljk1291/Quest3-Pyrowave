@@ -1,13 +1,32 @@
 {
-  "integration": {"url": "https://github.com/Terminal-ennui/galaxy-xr-alvr-pyrowave-444", "commit": "54cc8519bddceff57e159e6f39914e373b512809"},
-  "alvr": {"url": "https://github.com/alvr-org/ALVR", "commit": "7eda092dbf0002281410a4222683ec228700cffb"},
-  "pyrowave": {"url": "https://github.com/Themaister/pyrowave", "commit": "d2997ac172bdc00e29c58e3f2938acb7e94580bf"},
-  "granite": {"url": "https://github.com/Themaister/Granite", "commit": "842d9d5686ba8c799a7d34a78a68f98d6aeb5a68"},
-  "cargo_apk": {"url": "https://github.com/zarik5/cargo-apk", "commit": "0fd3126dad5aa1c5f0f26cdae3410f2e5af62c60"},
+  "integration": {
+    "url": "https://github.com/Terminal-ennui/galaxy-xr-alvr-pyrowave-444",
+    "commit": "54cc8519bddceff57e159e6f39914e373b512809"
+  },
+  "alvr": {
+    "url": "https://github.com/alvr-org/ALVR",
+    "commit": "7eda092dbf0002281410a4222683ec228700cffb"
+  },
+  "pyrowave": {
+    "url": "https://github.com/Themaister/pyrowave",
+    "commit": "d2997ac172bdc00e29c58e3f2938acb7e94580bf"
+  },
+  "granite": {
+    "url": "https://github.com/Themaister/Granite",
+    "commit": "842d9d5686ba8c799a7d34a78a68f98d6aeb5a68"
+  },
+  "cargo_apk": {
+    "url": "https://github.com/zarik5/cargo-apk",
+    "commit": "0fd3126dad5aa1c5f0f26cdae3410f2e5af62c60"
+  },
   "patches": {
     "pyrowave_rdo_density": {
       "path": "patches/pyrowave-rdo-density.patch",
       "sha256": "1641a9456dd9d9e5811a110016cfe673587e7de56d9a76d709a3ea7599f3a4cc"
+    },
+    "wo8_light_centre_phase": {
+      "path": "patches/wo8-light-centre-phase.patch",
+      "sha256": "4f4ce22430f810c78195d749425f35f77ffdb1a14c844b927dff485c3c91e7f3"
     }
   },
   "rust": "1.97.1",
