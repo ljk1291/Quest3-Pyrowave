@@ -29,6 +29,19 @@ Q3B_ROWS = (
     ("medium-s05", "53", 1000), ("medium-s05", "97", 1000),
     ("h264fit-s05", "97", 1000), ("blur-only-light-s05", "97", 1000),
 )
+# Owner-selected post-Q3b quality extensions.  ``profile`` is absent for a
+# full native crop; present profiles use WO-8 reduced-plane encode/reconstruct.
+# Default RDO deliberately leaves the environment knob unset, preserving the
+# build's historical constant.  Rates above the Wi-Fi target are offline-only.
+Q3_EXTENSION_ROWS = (
+    {"experiment_id":"q3a_rdo_pyro_97_1000_rdo24", "phase":"q3a", "label":"pyrowave-97-crop-rdo24-1000", "wavelet":"97", "rate_mbps":1000, "rdo_px_per_deg":24},
+    {"experiment_id":"q3a_rdo_pyro_97_1000_rdo36", "phase":"q3a", "label":"pyrowave-97-crop-rdo36-1000", "wavelet":"97", "rate_mbps":1000, "rdo_px_per_deg":36},
+    {"experiment_id":"q3b_rdo_pyro_97_medium_s05_rdo24", "phase":"q3b", "label":"pyrowave-97-medium-s05-rdo24-1000", "wavelet":"97", "rate_mbps":1000, "profile":"medium-s05", "rdo_px_per_deg":24},
+    {"experiment_id":"q3b_phase_pyro_97_light_s05_default_rdo", "phase":"q3b", "label":"pyrowave-97-light-s05-default-rdo-1000", "wavelet":"97", "rate_mbps":1000, "profile":"light-s05", "rdo_px_per_deg":None},
+    {"experiment_id":"q3a_highrate_pyro_97_1500_default_rdo", "phase":"q3a", "label":"pyrowave-97-crop-default-rdo-1500", "wavelet":"97", "rate_mbps":1500, "rdo_px_per_deg":None, "offline_only_above_wifi_cap":True},
+    {"experiment_id":"q3a_highrate_pyro_97_2000_default_rdo", "phase":"q3a", "label":"pyrowave-97-crop-default-rdo-2000", "wavelet":"97", "rate_mbps":2000, "rdo_px_per_deg":None, "offline_only_above_wifi_cap":True},
+    {"experiment_id":"q3a_highrate_pyro_haar_2000_default_rdo", "phase":"q3a", "label":"pyrowave-haar-crop-default-rdo-2000", "wavelet":"haar", "rate_mbps":2000, "rdo_px_per_deg":None, "offline_only_above_wifi_cap":True},
+)
 WAVELET_LABEL = {"haar": "Haar", "53": "CDF 5/3", "97": "CDF 9/7"}
 CROPPED_SOURCE_SHA256 = "4c833e175610488ffa05a8037e52c166424db8308a67a2bfed4ed48861fad2e5"
 FENCE_RECTANGLES = {"full_fov": {"eye": "left", "x": 1740, "y": 1310, "width": 240, "height": 274},
@@ -94,6 +107,26 @@ def _q3b_transform(profile: str) -> dict:
     return {"kind": "wo8_foveation", "profile": base, "softness": softness, "blur_only": blur_only}
 
 
+def _light_phase_identity(value: dict | None) -> dict:
+    if not isinstance(value, dict) or set(value) != {"implementation_revision", "implementation_source_sha256"}:
+        raise ValueError("corrected-Light phase identity must be explicitly supplied")
+    revision=value["implementation_revision"]; digest=value["implementation_source_sha256"]
+    if (not isinstance(revision,str) or not revision or not isinstance(digest,str) or len(digest)!=64 or
+            any(ch not in "0123456789abcdef" for ch in digest)):
+        raise ValueError("corrected-Light phase identity is invalid")
+    return {"implementation_revision":revision,"implementation_source_sha256":digest}
+
+
+def _extension_transform(spec: dict, light_phase_identity: dict | None) -> dict | None:
+    profile=spec.get("profile")
+    if profile is None:
+        return None
+    transform=_q3b_transform(profile)
+    if spec["experiment_id"] == "q3b_phase_pyro_97_light_s05_default_rdo":
+        transform.update(_light_phase_identity(light_phase_identity))
+    return transform
+
+
 def build_plan(source: Path, vertical_pixels_per_degree: float, *, projection_evidence: str,
                crop_evidence: str, crops, full_source: Path, horizontal_pixels_per_degree: float | None = None,
                fixture: bool = False, include_q3b: bool = False) -> dict:
@@ -155,6 +188,84 @@ def build_plan(source: Path, vertical_pixels_per_degree: float, *, projection_ev
                                  "q3b_requires_reduced_encode_then_expanded_score": True}}
 
 
+def _rdo_descriptor(value):
+    """Freeze WO-7 PPD request, float32 Nyquist scale and native-log proof."""
+    import numpy as np
+    if value is None:
+        cpd=float(np.float32(.34) * np.float32(96.0) * np.float32(1.0))
+        return {"mode":"build_default", "environment":None, "requested_ppd":None,
+                "requested_log":"(legacy 96 DPI @ 1m)", "effective_ppd":float(np.float32(cpd * 2.0)),
+                "cpd_nyquist":cpd, "legacy_equivalent":True, "native_log_required":True}
+    if type(value) is not int or not 0 < value <= 10000:
+        raise ValueError("Q3 extension RDO density must be an integer in (0, 10000] or default")
+    return {"mode":"px_per_deg", "environment":{"PYROWAVE_RDO_PX_PER_DEG":str(value)},
+            "requested_ppd":float(value), "requested_log":str(value), "effective_ppd":float(value),
+            "cpd_nyquist":float(value) / 2.0, "legacy_equivalent":False, "native_log_required":True}
+
+
+def _rdo_effective_from_native_log(text: str, requested: dict) -> dict:
+    """Require consistent native PPD/Nyquist logs, allowing only print rounding."""
+    import math
+    import re
+    matches=list(re.finditer(r"PyroWave RDO viewing density: requested (?P<requested>[^,]+), effective (?P<ppd>[0-9]+(?:\.[0-9]+)?) px/deg, Nyquist (?P<cpd>[0-9]+(?:\.[0-9]+)?) cycles/deg(?P<legacy> \(legacy-equivalent\))?", text))
+    if not matches:
+        raise ValueError("native RDO viewing-density log is missing")
+    parsed=[]
+    for match in matches:
+        ppd=float(match.group("ppd")); cpd=float(match.group("cpd")); legacy=bool(match.group("legacy"))
+        if (match.group("requested") != requested["requested_log"] or
+                not math.isclose(ppd,requested["effective_ppd"],rel_tol=0.0,abs_tol=5e-6) or
+                not math.isclose(cpd,requested["cpd_nyquist"],rel_tol=0.0,abs_tol=5e-6) or
+                legacy != requested["legacy_equivalent"]):
+            raise ValueError("native RDO viewing-density log differs from frozen request")
+        parsed.append((match.group("requested"),ppd,cpd,legacy))
+    if len(set(parsed)) != 1:
+        raise ValueError("native RDO viewing-density logs are inconsistent")
+    raw,ppd,cpd,legacy=parsed[0]
+    return {"requested_log":raw, "requested_ppd":requested["requested_ppd"],
+            "effective_ppd":ppd, "cpd_nyquist":cpd, "legacy_equivalent":legacy,
+            "source":"native_encoder_log", "decimal_abs_tolerance":5e-6}
+
+def build_extension_plan(source: Path, vertical_pixels_per_degree: float, *, projection_evidence: str,
+                         crop_evidence: str, crops, full_source: Path,
+                         horizontal_pixels_per_degree: float | None = None, fixture: bool = False,
+                         light_phase_identity: dict | None = None) -> dict:
+    """Freeze the seven owner-selected PyroWave quality-extension rows.
+
+    Historical Q3a/Q3b evidence is not included or rewritten.  This separate
+    manifest makes all new RDO and above-Wi-Fi-cap conditions reviewable.
+    """
+    base=build_plan(source, vertical_pixels_per_degree, projection_evidence=projection_evidence,
+                    crop_evidence=crop_evidence, crops=crops, full_source=full_source,
+                    horizontal_pixels_per_degree=horizontal_pixels_per_degree, fixture=fixture)
+    cells=[]
+    for spec in Q3_EXTENSION_ROWS:
+        row=dict(source_geometry="crop", fps=90, encoded_chroma="420",
+                 score_vertical_pixels_per_degree=float(vertical_pixels_per_degree),
+                 requires_wo8_reduced_encode=False, **copy.deepcopy(spec))
+        transform=_extension_transform(spec, light_phase_identity)
+        if transform is not None:
+            if (not fixture and spec["experiment_id"] == "q3b_phase_pyro_97_light_s05_default_rdo" and
+                    _hash(Path(__file__).resolve().parent / "foveation.py") != transform["implementation_source_sha256"]):
+                raise ValueError("WO-8 corrected-Light source hash is not active; do not freeze this rescore")
+            from .foveation import FoveationConfig, encoded_size
+            ew,eh=encoded_size(2624,2776,FoveationConfig(transform["profile"],transform["softness"],transform["blur_only"]))
+            row.update(source_transform=transform, requires_wo8_reduced_encode=True)
+        else:
+            ew,eh=2624,2776
+        cap=fb.cap_bytes(row["rate_mbps"],90)
+        row.update(eye_width=ew,eye_height=eh,stereo_width=ew*2,cap_bytes=cap,
+                   bits_per_pixel=fb.bpp(cap,ew,eh), rdo_viewing_density=_rdo_descriptor(row.pop("rdo_px_per_deg")))
+        cells.append(row)
+    base.update(cells=cells, extension_matrix={"runner":"pyrowave", "historical_q3b_dropped":["h264-dual-blur-light-s05-700"],
+                "light_phase_identity":_light_phase_identity(light_phase_identity), "quality_windows_one_based":[[1,90],[10,89]], "fence_and_hvs_required":True,
+                "offline_only_above_wifi_cap_mbps":[1500,2000]},
+                hvs_calibration={**base["hvs_calibration"], "codec_cells":[fb.hvs_calibration_for_vertical_ppd(
+                    vertical_pixels_per_degree,2776) for _ in cells]})
+    validate_plan(base)
+    return base
+
+
 def validate_plan(plan: dict) -> dict:
     if not isinstance(plan, dict) or plan.get("schema") != SCHEMA or plan.get("kind") != "pyro_q3_framebank":
         raise ValueError("not a Pyro Q3 frame-bank manifest")
@@ -168,10 +279,11 @@ def validate_plan(plan: dict) -> dict:
     if plan.get("frozen_module_hashes") != _module_hashes():
         raise ValueError("runner module hash drifted; freeze a new plan")
     actual_a = [c for c in plan.get("cells", []) if c.get("phase") == "q3a"]
-    if [(c.get("wavelet"), c.get("rate_mbps")) for c in actual_a] != list(Q3A_ROWS) or any(
+    extension = plan.get("extension_matrix")
+    if extension is None and ([(c.get("wavelet"), c.get("rate_mbps")) for c in actual_a] != list(Q3A_ROWS) or any(
             c.get("eye_width") != 2624 or c.get("eye_height") != 2776 or c.get("stereo_width") != 5248 or
             c.get("cap_bytes") != fb.cap_bytes(c["rate_mbps"], 90) or c.get("source_geometry") != "crop" or
-            c.get("score_vertical_pixels_per_degree") != plan.get("projection", {}).get("vertical_pixels_per_degree") for c in actual_a):
+            c.get("score_vertical_pixels_per_degree") != plan.get("projection", {}).get("vertical_pixels_per_degree") for c in actual_a)):
         raise ValueError("Q3a rows drifted")
     if plan.get("fence_rectangles", {}).get("cropped", {}).get("mapped") != FENCE_RECTANGLES["cropped"]["mapped"]:
         raise ValueError("Q3 cropped fence rectangle drifted")
@@ -182,16 +294,51 @@ def validate_plan(plan: dict) -> dict:
     calibration = plan.get("hvs_calibration", {})
     if not isinstance(calibration, dict) or len(calibration.get("codec_cells", [])) != len(actual_a) + len(actual_b):
         raise ValueError("Q3 calibrated scoring contract drifted")
-    if actual_b and [(c.get("profile"), c.get("wavelet"), c.get("rate_mbps")) for c in actual_b] != list(Q3B_ROWS):
+    if extension is None and actual_b and [(c.get("profile"), c.get("wavelet"), c.get("rate_mbps")) for c in actual_b] != list(Q3B_ROWS):
         raise ValueError("Q3b rows drifted")
     for cell in actual_b:
-        if not cell.get("requires_wo8_reduced_encode") or cell.get("source_transform") != _q3b_transform(cell["profile"]):
+        expected_transform = (_extension_transform(next(row for row in Q3_EXTENSION_ROWS
+                                                        if row["label"] == cell.get("label")),
+                                                  extension.get("light_phase_identity"))
+                              if extension is not None else _q3b_transform(cell["profile"]))
+        if not cell.get("requires_wo8_reduced_encode") or cell.get("source_transform") != expected_transform:
             raise ValueError("Q3b row lacks reduced-encode requirement")
         from .foveation import FoveationConfig, encoded_size
         ew, eh = encoded_size(2624,2776,FoveationConfig(cell["source_transform"]["profile"],cell["source_transform"]["softness"],cell["source_transform"]["blur_only"]))
         cap=fb.cap_bytes(cell["rate_mbps"],90)
         if (cell.get("eye_width"),cell.get("eye_height"),cell.get("stereo_width")) != (ew,eh,ew*2) or cell.get("cap_bytes") != cap or cell.get("bits_per_pixel") != fb.bpp(cap,ew,eh) or cell.get("encoded_chroma") != "420" or cell.get("score_vertical_pixels_per_degree") != plan["projection"]["vertical_pixels_per_degree"]:
             raise ValueError("Q3b reduced geometry/cap/scoring contract drifted")
+    if extension is not None:
+        actual_extension = [cell for cell in plan.get("cells", []) if cell.get("phase") in ("q3a", "q3b")]
+        if ([cell.get("label") for cell in actual_extension] != [row["label"] for row in Q3_EXTENSION_ROWS] or
+                any(cell.get("phase") not in ("q3a","q3b") or cell.get("fps") != 90 or
+                    cell.get("source_geometry") != "crop" for cell in actual_extension) or
+                len(actual_extension) != len(plan.get("cells", []))):
+            raise ValueError("Q3 extension rows drifted")
+        if extension != {"runner":"pyrowave", "historical_q3b_dropped":["h264-dual-blur-light-s05-700"],
+                "light_phase_identity":_light_phase_identity(extension.get("light_phase_identity")), "quality_windows_one_based":[[1,90],[10,89]], "fence_and_hvs_required":True,
+                "offline_only_above_wifi_cap_mbps":[1500,2000]}:
+            raise ValueError("Q3 extension matrix provenance drifted")
+        for cell, spec in zip(actual_extension, Q3_EXTENSION_ROWS):
+            transform = _extension_transform(spec, extension.get("light_phase_identity"))
+            if (cell.get("experiment_id") != spec["experiment_id"] or cell.get("phase") != spec["phase"] or
+                    cell.get("wavelet") != spec["wavelet"] or cell.get("rate_mbps") != spec["rate_mbps"] or
+                    cell.get("source_transform") != transform):
+                raise ValueError("Q3 extension codec row drifted")
+            if cell.get("rdo_viewing_density") != _rdo_descriptor(spec.get("rdo_px_per_deg")):
+                raise ValueError("Q3 extension RDO provenance drifted")
+            if bool(cell.get("offline_only_above_wifi_cap",False)) != bool(spec.get("offline_only_above_wifi_cap",False)):
+                raise ValueError("Q3 extension offline-only label drifted")
+            if transform:
+                from .foveation import FoveationConfig, encoded_size
+                ew,eh=encoded_size(2624,2776,FoveationConfig(transform["profile"],transform["softness"],transform["blur_only"]))
+            else:
+                ew,eh=2624,2776
+            cap=fb.cap_bytes(spec["rate_mbps"],90)
+            if (cell.get("eye_width"),cell.get("eye_height"),cell.get("stereo_width"),cell.get("cap_bytes")) != (ew,eh,ew*2,cap):
+                raise ValueError("Q3 extension encoded geometry/cap drifted")
+            if cell.get("bits_per_pixel") != fb.bpp(cap,ew,eh) or cell.get("encoded_chroma") != "420" or cell.get("score_vertical_pixels_per_degree") != plan["projection"]["vertical_pixels_per_degree"]:
+                raise ValueError("Q3 extension quality contract drifted")
     return plan
 
 
@@ -265,7 +412,8 @@ def _result_base(raw_plan: bytes, source: Path, tools: dict, tool_build: dict | 
             "complete": False, "failure_reasons": []}
 
 
-def verify_split_bundles(tools: dict, codec_metadata: Path, scorer_metadata: Path | None = None) -> dict:
+def verify_split_bundles(tools: dict, codec_metadata: Path, scorer_metadata: Path | None = None,
+                         scorer_compatibility: Path | None = None) -> dict:
     """Verify codec and scorer bundles separately before mixing their binaries.
 
     A telemetry rebuild may replace encode/decode while comparisons deliberately
@@ -283,15 +431,26 @@ def verify_split_bundles(tools: dict, codec_metadata: Path, scorer_metadata: Pat
     scorer_bundle = scorer_metadata.parent
     scorer_tools = {"encode": scorer_bundle / "pyrowave-encode.exe", "decode": scorer_bundle / "pyrowave-decode.exe",
                     "psnr_hvs_m_h": scorer_bundle / "pyrowave-psnr-hvs-m.exe"}
-    scorer = fb.verify_tools_build(scorer_tools, scorer_metadata)
+    if scorer_compatibility is None:
+        scorer = fb.verify_tools_build(scorer_tools, scorer_metadata)
+    else:
+        scorer = fb.verify_historical_hvs_scorer(scorer_tools, scorer_metadata, scorer_compatibility)
     if _hash(tools["psnr_hvs_m_h"]) != _hash(scorer_tools["psnr_hvs_m_h"]):
         raise ValueError("HVS scorer differs from scorer bundle metadata")
-    for key in ("scorer_source", "scorer_shader_sha256", "sources_lock_sha256"):
+    for key in ("scorer_source", "scorer_shader_sha256"):
         if codec.get(key) != scorer.get(key):
             raise ValueError("codec/scorer bundles do not prove the same HVS implementation")
+    if scorer.get('historical_scorer_mode'):
+        if codec.get('sources_lock_sha256') != scorer.get('current_sources_lock_sha256'):
+            raise ValueError('codec bundle does not use the current lock required by historical scorer proof')
+    elif codec.get('sources_lock_sha256') != scorer.get('sources_lock_sha256'):
+        raise ValueError("codec/scorer bundles do not prove the same source-lock record")
     return {"codec_bundle": codec, "scorer_bundle": scorer,
             "separate_scorer_bundle": scorer_metadata != codec_metadata,
-            "hvs_implementation_unchanged": True}
+            "hvs_implementation_unchanged": True,
+            "historical_scorer_mode": scorer.get('historical_scorer_mode') is True,
+            "codec_sources_lock_sha256": codec.get('sources_lock_sha256'),
+            "scorer_sources_lock_sha256": scorer.get('sources_lock_sha256')}
 
 
 def _select_cells(plan: dict, phase: str | None, cell_indices: list[int] | tuple[int, ...] | None) -> list[tuple[int, dict]]:
@@ -322,7 +481,8 @@ def _select_cells(plan: dict, phase: str | None, cell_indices: list[int] | tuple
 def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, window: Path, *, tools_metadata: Path,
              scorer_tools_metadata: Path | None = None, command_timeout_s: float = 900,
              keep_artifacts: bool = False, supervised: bool = False, resume: bool = False, phase: str | None = None,
-             cell_indices: list[int] | tuple[int, ...] | None = None, preparation_workers: int = 1) -> dict:
+             cell_indices: list[int] | tuple[int, ...] | None = None, preparation_workers: int = 1,
+             scorer_compatibility: Path | None = None) -> dict:
     """Run only frozen Q3a rows; Q3b fails closed until a real WO-8 adapter exists."""
     from . import nvenc_framebank as nvenc
     raw_plan = Path(plan_path).read_bytes(); plan = validate_plan(json.loads(raw_plan)); source = Path(source)
@@ -331,7 +491,8 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
     if _source_contract(source, info) != plan["source"]: raise ValueError("source contract differs from frozen plan")
     required = {"encode", "decode", "psnr_hvs_m_h", "ffmpeg"}
     if set(tools) != required: raise ValueError("Pyro Q3 runner requires exactly encode/decode/psnr_hvs_m_h tools")
-    fb.required_tools(tools); guard.status(); build = verify_split_bundles(tools, Path(tools_metadata), scorer_tools_metadata)
+    fb.required_tools(tools); guard.status(); build = verify_split_bundles(
+        tools, Path(tools_metadata), scorer_tools_metadata, scorer_compatibility)
     selected = _select_cells(plan, phase, cell_indices)
     requested_indices = [index for index, _ in selected]
     out = Path(private_out)
@@ -378,20 +539,30 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
             encoded, decoded = directory / "encoded.wave", directory / "decoded.y4m"; row = {**copy.deepcopy(cell), "plan_index": index}
             try:
                 env, row["codec_environment"] = fb.codec_environment(os.environ, cell["wavelet"])
+                rdo = cell.get("rdo_viewing_density")
+                if rdo is not None:
+                    env.update(rdo.get("environment") or {})
+                    row["codec_environment"]["rdo_viewing_density"] = copy.deepcopy(rdo)
                 encode_source, encode_info = source, info
                 score_ref, score_blur, score_info = source, None, info
-                if cell["phase"] == "q3b":
+                if cell.get("source_transform") is not None:
                     encode_source = directory / "reduced-encoded-source.y4m"
                     score_ref, score_blur = directory / "score-sharp-reference.y4m", directory / "score-blur-reference.y4m"
                     encode_info, score_info, identities, transform = nvenc._stream_q3b_sources(
                         source, info, plan["crop_geometry"], cell["source_transform"], encode_source, score_ref, score_blur,
                         preparation_workers=preparation_workers, guard=guard)
                     row["q3b_encoded_source"] = _q3b_encoded_source_provenance(encode_source, identities)
+                    transform_identity={key: transform[key] for key in ("implementation_revision", "implementation_source_sha256") if key in transform}
+                    if transform_identity:
+                        row["q3b_encoded_source"]["source_transform_identity"] = transform_identity
                     row["q3b_transform"] = transform
                 timing = directory / "pyrowave-encode-timing.jsonl"
                 start = time.time(); code, stdout, stderr = guard.run([str(tools["encode"]), str(encode_source), str(encoded), str(cell["cap_bytes"]), "--timing-jsonl", str(timing)], cwd=directory, env=env, timeout_s=command_timeout_s); end = time.time()
                 if code or not encoded.is_file(): raise RuntimeError("encode_failed")
                 if WAVELET_LABEL[cell["wavelet"]] not in stdout + stderr and not plan["fixture_only"]: raise RuntimeError("encoder_wavelet_not_confirmed")
+                if cell.get("rdo_viewing_density") is not None:
+                    row["rdo_effective"] = _rdo_effective_from_native_log(stdout + "\n" + stderr,
+                                                                           cell["rdo_viewing_density"])
                 row["encode_wall_interval_s"] = [start, end]; row["bitstream"] = parse_wave(encoded, cell)
                 row["native_encoder_telemetry"] = _native_records(timing, row["bitstream"]["payload_bytes"])
                 if not row["native_encoder_telemetry"]["qualified"]: raise RuntimeError("native_per_frame_telemetry_missing")
@@ -400,16 +571,17 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                 if WAVELET_LABEL[cell["wavelet"]] not in stdout + stderr and not plan["fixture_only"]: raise RuntimeError("decoder_wavelet_not_confirmed")
                 row["decoded_y4m_header"] = fb.canonicalize_decoded_header(decoded); decoded_info = fb._assert_same_frames(encode_source, decoded, encode_info)
                 score_decoded, score_decoded_info = decoded, decoded_info
-                if cell["phase"] == "q3b":
+                if cell.get("source_transform") is not None:
                     score_decoded = directory / "score-reconstructed-decoded.y4m"
                     nvenc._reconstruct_q3b_decoded(decoded, decoded_info, score_decoded, score_info, cell["source_transform"])
                     score_decoded_info = fb._assert_same_frames(score_ref, score_decoded, score_info)
                 row["decoded_frame_identity"] = [{"frame": i, "source_sha256": src["source_sha256"], "decoded_small_sha256": got} for (i, _, got), src in zip(fb.iter_y4m(decoded, decoded_info), plan["source"]["frame_identity"])]
                 if len(row["decoded_frame_identity"]) != 90: raise ValueError("decoded_identity_or_geometry_mismatch")
-                if cell["phase"] == "q3b":
+                if cell.get("source_transform") is not None:
                     rebuilt = [digest for _, _, digest in fb.iter_y4m(score_decoded, score_decoded_info)]
                     if len(identities) != 90 or len(rebuilt) != 90: raise ValueError("q3b_transformed_identity_mismatch")
-                    row["q3b_frame_identity"] = [{**identities[i], "decoded_small_sha256": row["decoded_frame_identity"][i]["decoded_small_sha256"], "reconstructed_sha256": rebuilt[i]} for i in range(90)]
+                    transform_identity={key: cell["source_transform"][key] for key in ("implementation_revision", "implementation_source_sha256") if key in cell["source_transform"]}
+                    row["q3b_frame_identity"] = [{**identities[i], "decoded_small_sha256": row["decoded_frame_identity"][i]["decoded_small_sha256"], "reconstructed_sha256": rebuilt[i], **({"source_transform_identity":transform_identity} if transform_identity else {})} for i in range(90)]
                 row.update(_same_frame_scores(plan, index, cell, tools, guard, directory, source, info, score_decoded, score_decoded_info, command_timeout_s, keep_artifacts, reference=score_ref, reference_info=score_info, matching_blur_reference=score_blur))
             except (PermissionError, TimeoutError, ValueError, RuntimeError) as exc:
                 row["error"] = str(exc); result["failure_reasons"].append(row["error"])
@@ -429,7 +601,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
 
 
 def sanitized_report(result: dict) -> dict:
-    keep = ("plan_index", "phase", "profile", "wavelet", "rate_mbps", "fps", "eye_width", "eye_height", "stereo_width", "cap_bytes", "bits_per_pixel", "encoded_chroma", "bitstream", "native_encoder_telemetry", "codec_only", "codec_only_domain", "displayed", "crops", "codec_only_windows", "displayed_windows", "displayed_reused_from_codec_only", "crop_windows", "centre_hvs", "fence_metrics", "q3b_transform", "q3b_encoded_source", "error")
+    keep = ("plan_index", "experiment_id", "phase", "profile", "wavelet", "rate_mbps", "fps", "eye_width", "eye_height", "stereo_width", "cap_bytes", "bits_per_pixel", "encoded_chroma", "bitstream", "native_encoder_telemetry", "codec_only", "codec_only_domain", "displayed", "crops", "codec_only_windows", "displayed_windows", "displayed_reused_from_codec_only", "crop_windows", "centre_hvs", "fence_metrics", "q3b_transform", "q3b_encoded_source", "rdo_viewing_density", "rdo_effective", "offline_only_above_wifi_cap", "error")
     return {"schema": SCHEMA, "kind": "pyro_q3_framebank_sanitized", "complete": result.get("complete") is True,
             "failure_reasons": list(result.get("failure_reasons", [])), "frozen_plan_sha256": result.get("frozen_plan_sha256"),
             "source_sha256": result.get("source_sha256_end"), "tool_provenance": result.get("tool_provenance_end"),
@@ -451,6 +623,7 @@ def main(argv=None):
     for name in ("plan", "source", "private-out", "report", "window", "encode", "decode", "psnr-hvs-m-h", "ffmpeg", "tools-metadata"):
         run.add_argument("--" + name, required=True)
     run.add_argument("--scorer-tools-metadata", help="separate verified bundle for the HVS scorer")
+    run.add_argument("--scorer-compatibility", help="tracked historical-HVS compatibility descriptor; scorer-only")
     run.add_argument("--command-timeout-s", type=float, default=900)
     run.add_argument("--keep-artifacts", action="store_true")
     run.add_argument("--phase", choices=("q3a", "q3b"))
@@ -473,6 +646,7 @@ def main(argv=None):
                       {"encode": args.encode, "decode": args.decode, "psnr_hvs_m_h": args.psnr_hvs_m_h, "ffmpeg": args.ffmpeg}, Path(args.window),
                       tools_metadata=Path(args.tools_metadata),
                       scorer_tools_metadata=Path(args.scorer_tools_metadata) if args.scorer_tools_metadata else None,
+                      scorer_compatibility=Path(args.scorer_compatibility) if args.scorer_compatibility else None,
                       command_timeout_s=args.command_timeout_s, keep_artifacts=args.keep_artifacts,
                       supervised=args.supervised, resume=args.resume, phase=args.phase,
                       cell_indices=args.cell_indices, preparation_workers=args.q3b_preparation_workers)

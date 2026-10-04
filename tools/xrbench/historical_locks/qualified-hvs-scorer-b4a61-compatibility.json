@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "kind": "framebank_historical_hvs_scorer_compatibility",
+  "historical_lock_snapshot": "tools/xrbench/historical_locks/sources.lock.b4a61b3ae0bdff818de18c8f97a1a2a1ba80ace7bf636de48093d22ad5aba23b.json",
+  "historical_lock_sha256": "b4a61b3ae0bdff818de18c8f97a1a2a1ba80ace7bf636de48093d22ad5aba23b",
+  "qualified_scorer_bundle": {
+    "tools_metadata_sha256": "4df29db7f5d540049270cc5368db9db211683a768255e4e0abbee8944fb5e64d",
+    "package_metadata_sha256": "2498118f6edc1bfb721f2a75e45acfbe321c2c17e45afba59613a0b73681ec71",
+    "scorer_sha256": "3a203301611812448fa279c669662ce6a65b6f946899d334503608871c167b67",
+    "source_manifest_sha256": "1a595cb750741e51725b9b6e6afd536d4814bac79dce57322b2e0a6feb1fe0c7",
+    "scorer_shader_sha256": "87fd53541193fd2543be754ecb8a6a38f810894993d1c8963e1d86bd8edc30bf",
+    "imports_manifest_sha256": "3a711c67327b7337856811e4a48bb11c093507aa8d7cfcb5c5aca2924f1a4df5",
+    "source_psnr_cpp_sha256": "bf2ed4c7cd2e962e97e468c2fa6b9f0d6068ee7faa441b0f3f001a93b3f3e184"
+  },
+  "allowed_current_lock_changes": [
+    {"path": "patches.pyrowave_rdo_density.path", "old": null, "new": "patches/pyrowave-rdo-density.patch", "role": "codec_encoder_only"},
+    {"path": "patches.pyrowave_rdo_density.sha256", "old": null, "new": "1641a9456dd9d9e5811a110016cfe673587e7de56d9a76d709a3ea7599f3a4cc", "role": "codec_encoder_only"},
+    {"path": "patches.wo8_light_centre_phase.path", "old": null, "new": "patches/wo8-light-centre-phase.patch", "role": "presentation_foveation_only"},
+    {"path": "patches.wo8_light_centre_phase.sha256", "old": null, "new": "4f4ce22430f810c78195d749425f35f77ffdb1a14c844b927dff485c3c91e7f3", "role": "presentation_foveation_only"}
+  ]
+}
+
