@@ -62,7 +62,9 @@ def _hash(path):
 
 def _module_hashes():
     root = Path(__file__).resolve().parent
-    return {name: _hash(root / name) for name in ("pyro_q3_framebank.py", "framebank.py", "fence_metrics.py")}
+    # The Q3 scorer is imported lazily so the adapter remains source-only until
+    # a run starts, but its implementation is still part of a frozen plan.
+    return {name: _hash(root / name) for name in ("pyro_q3_framebank.py", "framebank.py", "nvenc_framebank.py", "fence_metrics.py", "pyrowave_wave.py")}
 
 
 def _require_cropped_source(source: Path) -> fb.Y4MInfo:
@@ -114,7 +116,11 @@ def build_plan(source: Path, vertical_pixels_per_degree: float, *, projection_ev
                          projection_evidence=projection_evidence, crop_evidence=crop_evidence,
                          fixture=fixture, fps=90, wavelets=("haar", "53", "97"),
                          rates_mbps=(800, 1000), geometries=((2624, 2776),),
-                         display_eye=(2624, 2776), crops=crops)
+                         # The parent is the logged full presentation input.
+                         # Resolve its fixed crops in that coordinate space once;
+                         # cells below identify the native 2624x2776 crop that
+                         # is actually encoded and scored.
+                         display_eye=(3072, 3232), crops=crops)
     selected = {(w, r) for w, r in Q3A_ROWS}
     pairs = [(i, c) for i, c in enumerate(base["cells"])
              if (c["wavelet"], c["rate_mbps"]) in selected]

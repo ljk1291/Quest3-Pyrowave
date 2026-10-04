@@ -8,6 +8,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from xrbench import framebank as fb
+from xrbench import nvenc_framebank as nvenc
 from xrbench import pyro_q3_framebank as q3
 from xrbench import pyrowave_wave as wave
 
@@ -55,6 +56,41 @@ class PyroQ3FramebankTests(unittest.TestCase):
         plan = self.plan(); plan["frozen_module_hashes"]["framebank.py"] = "0" * 64
         with self.assertRaisesRegex(ValueError, "module hash drifted"):
             q3.validate_plan(plan)
+
+    def test_build_plan_resolves_fixed_crops_on_the_full_parent_once(self):
+        """Do not let the cropped encode size redefine source crop coordinates."""
+        parent = fb.Y4MInfo(6144, 3232, 90, 1, "420", "FULL", 6144 * 3232 * 3 // 2, 90)
+        cropped = fb.Y4MInfo(5248, 2776, 90, 1, "420", "FULL", 5248 * 2776 * 3 // 2, 90)
+        crops = [{"name": "parent-mark", "eye": "left", "x": .5, "y": .25, "w": .25, "h": .5}]
+        identities = [{"source_frame": i, "source_sha256": f"{i:064x}"} for i in range(90)]
+        real_hash = q3._hash
+        def source_hash(path):
+            return "b" * 64 if Path(path).name in ("cropped.y4m", "parent.y4m") else real_hash(path)
+        with mock.patch.object(q3, "_require_cropped_source", return_value=cropped), \
+             mock.patch.object(fb, "inspect_y4m", return_value=parent), \
+             mock.patch.object(fb, "frame_records", return_value=identities), \
+             mock.patch.object(fb, "sha256_file", return_value="a" * 64), \
+             mock.patch.object(q3, "_hash", side_effect=source_hash):
+            plan = q3.build_plan(Path("cropped.y4m"), 23.5,
+                                 projection_evidence="recorded full-parent projection",
+                                 crop_evidence="reviewed parent crop", crops=crops,
+                                 full_source=Path("parent.y4m"), fixture=True)
+        self.assertEqual(plan["presentation_eye"], [3072, 3232])
+        self.assertEqual(plan["crops"][0]["resolved_pixels"],
+                         {"eye_x": 1536, "stereo_x": 1536, "y": 808,
+                          "width": 768, "height": 1616, "chroma_aligned": True})
+        self.assertEqual([(cell["eye_width"], cell["eye_height"]) for cell in plan["cells"]],
+                         [(2624, 2776)] * len(q3.Q3A_ROWS))
+        self.assertTrue(all(cell["score_vertical_pixels_per_degree"] == 23.5 for cell in plan["cells"]))
+        mapped, excluded = nvenc._crop_context_for_cell(plan, plan["cells"][0])
+        self.assertEqual(excluded, {})
+        self.assertEqual(mapped[0]["resolved_pixels"],
+                         {"eye_x": 1258, "stereo_x": 1258, "y": 534,
+                          "width": 768, "height": 1616, "chroma_aligned": True})
+        # The fake frame-bank hash only models unavailable Y4M I/O; validate
+        # the generated manifest with the runner's real source hashes.
+        plan["frozen_module_hashes"] = q3._module_hashes()
+        self.assertIs(q3.validate_plan(plan), plan)
 
     def test_container_parse_checks_header_exact_payloads_and_frame_count(self):
         cell = self.plan()["cells"][0]
