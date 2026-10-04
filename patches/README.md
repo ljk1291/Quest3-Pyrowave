@@ -1,8 +1,20 @@
 # Patches
 
-Local modifications to third-party clones, kept as patches so the clones themselves (2–4 GB each)
+Local modifications to third-party clones, kept as patches so the clones themselves (2â€“4 GB each)
 stay out of this history. Each one applies to a public upstream commit, so patch + base fully
 reconstructs the tree.
+
+## `wo8-light-centre-phase.patch`: Light aligned-centre texel phase correction
+
+This overlay stacks immediately after `wo8-foveation.patch`. A 32-pixel packed
+allocation can leave Light's 1:1 centre at a half-source-texel intercept
+(87.5 pixels on the 2624-wide Q3 crop). The overlay translates the sampling
+lattice to texel centres, choosing the lower texel for exact ties. The matching offline
+forward/inverse transform and Quest WGSL inverse apply the same translation.
+The current zero-shift Medium and H.264-fit profiles have integer intercepts,
+so their mappings are unchanged; blur-only remains identity. It is part of the
+opt-in/default-off foveation path and includes a regenerated DXBC shader plus
+a WARP reduced-Light gradient readback gate.
 
 ## `wo8-foveation.patch`: fixed-centre foveated encoding with area prefilter
 
@@ -32,7 +44,7 @@ It does not claim parity for a nonlinear per-plane YUV average.
 
 Regenerate a patch with `git diff --binary --full-index --output=patches/<name>.patch` from the
 clone (`--output` rather than a shell redirect, so PowerShell cannot re-encode the bytes). Check one still
-matches its clone with `git apply --check -R patches/<name>.patch` — that check is the real
+matches its clone with `git apply --check -R patches/<name>.patch` â€” that check is the real
 guarantee, because it passes only when the clone equals base + patch.
 
 Two traps when regenerating, both of which have silently produced a patch that dropped work:
@@ -50,12 +62,13 @@ Two traps when regenerating, both of which have silently produced a patch that d
 |---|---|---|---|
 | `alvr-20.13.0-galaxy-xr-client.patch` | `alvr-org/ALVR` | `7eda092` (v20.13.0) | older client-only subset, package `alvr.client.galaxy2013`; superseded by the cumulative patch below, do not stack them |
 | `alvr-20.13.0-server-instrumentation.patch` | `alvr-org/ALVR` | `7eda092` (v20.13.0) | **cumulative: the whole 20.13.0 clone** (71 files: client, PyroWave decoder, streamer, frame ids, bitstream tap, PyroWave encoder, the beta's trimmed settings and streaming profiles, headset telemetry and the dashboard test report; version `20.13.0-pyro.1`); apply it alone |
+| `wo8-light-centre-phase.patch` | `alvr-org/ALVR` | `7eda092` (v20.13.0) plus preceding ALVR overlays through `wo8-foveation.patch` | Light sampling-phase overlay; stack after `wo8-foveation.patch` |
 | `alvr-20.14.1-galaxy-xr-client.patch` | `alvr-org/ALVR` | `a9f6542` (v20.14.1) | the version-comparison client, package `alvr.client.stabletest` |
 | `alvr-ca2deca-XRWIRED.patch` | `alvr-org/ALVR` | `ca2decae968f2fd37b43b777cca4ba597808ba52` | abandoned direct-USB/stereo experiment, package `alvr.client.dev` |
 | `pyrowave-galaxy-xr.patch` | `Themaister/pyrowave` | `d2997ac` | older subset: the standalone decode CLI on Galaxy XR, see below; superseded by the next row |
 | `pyrowave-cdf53-haar-experiments2-3.patch` | `Themaister/pyrowave` | `d2997ac` | **cumulative: the whole pyrowave clone** (14 files incl. the regenerated `shaders/slangmosh.hpp`): Galaxy XR fixes, CDF 5/3 and Haar, precision, the Experiment 3 decoder API; apply it alone |
 | `openxr-sdk-2b99fec-hello_xr.patch` | `KhronosGroup/OpenXR-SDK-Source` | `2b99fec` | the `hello_xr` distortion-grid / stereo decoder test app (9 files); the repo's `.gitattributes` makes checkouts CRLF, so compare ignoring line endings |
-| `alvr-20.14.1-galaxy-xr-client.stale-20260919.patch` | — | — | superseded snapshot, kept for reference only |
+| `alvr-20.14.1-galaxy-xr-client.stale-20260919.patch` | â€” | â€” | superseded snapshot, kept for reference only |
 
 ## Notes
 
@@ -67,8 +80,8 @@ every changed file with the working clone (ALVR 20.13.0, 20.14.1, ca2deca and py
 Among other things it adds
 `target_timestamp_ns` and `video_packet_bytes` to `GraphStatistics`
 (`alvr/events/src/lib.rs`), populated at the emit site in
-`alvr/server_core/src/statistics.rs`. Both values were already in scope there —
-`video_packet_bytes` is what the existing `throughput_bps`/`bitrate_bps` are derived from — so
+`alvr/server_core/src/statistics.rs`. Both values were already in scope there â€”
+`video_packet_bytes` is what the existing `throughput_bps`/`bitrate_bps` are derived from â€” so
 this is a struct-literal edit with no new locking, no call-path change and nothing on the encoder
 thread. It resolves half of the upstream TODO above that literal (the nanosecond timestamp part;
 the dashboard's graph-origin half is left alone).
@@ -102,7 +115,7 @@ sweep ends so a tap left enabled keeps writing. `sweep.py --tap` therefore sets
 
 **Building the patched streamer** needs an ALVR source tree on the PC, which the prebuilt
 `<workspace>\ALVR-20.13.0` install is not. The working arrangement is
-`ALVR-20.13.0-src` alongside it: `git archive HEAD` from this clone (~2.3 MB — `openvr/` is a
+`ALVR-20.13.0-src` alongside it: `git archive HEAD` from this clone (~2.3 MB â€” `openvr/` is a
 submodule and is excluded, so add `openvr/headers` and `openvr/lib/win64` by hand), with `deps`
 junctioned from the ALVR master clone that is already set up there. Then
 `cargo xtask build-streamer --release`.
@@ -219,7 +232,7 @@ offers it. The shader already produces the alpha; the compositor puts passthroug
 a way the setting names hide (`stream.wgsl:151`, `stream.rs:440-450`):
 
 - **Blend** sets `alpha = 1 - threshold` **uniformly for every pixel**. The whole image becomes
-  semi-transparent — a ghost overlay, the "AR glasses" effect its help text describes. It does
+  semi-transparent â€” a ghost overlay, the "AR glasses" effect its help text describes. It does
   *not* make dark areas transparent.
 - **RGB / HSV Chroma Key** computes a per-pixel mask from distance to a key colour, so keying on
   **black (0, 0, 0)** makes the surround transparent while the screen stays solid. This is the one
@@ -275,7 +288,7 @@ for rate in &streaming_caps.supported_refresh_rates {
 }
 ```
 
-So asking for a rate that is not advertised does not fail — it quietly runs at a different one.
+So asking for a rate that is not advertised does not fail â€” it quietly runs at a different one.
 That matters because any encoded-resolution budget derived from the frame period is then wrong in
 the unsafe direction, and the symptom (blown decode) looks like the resolution being too high
 rather than the rate being wrong. The client therefore logs the list once at startup:
@@ -402,12 +415,12 @@ baseline data.
 `alvr-ca2deca-XRWIRED.patch` (19 files) makes MediaCodec decode straight into a
 `SurfaceTexture`-backed `GL_TEXTURE_EXTERNAL_OES` texture instead of ALVR's
 `ImageReader`/`AHardwareBuffer` path, adds Galaxy XR accommodations, and builds NVENC-only
-(`ALVR_NVENC_ONLY`, no Intel VPL). It is **abandoned** — `alvr-20.13.0` solves the same decode
+(`ALVR_NVENC_ONLY`, no Intel VPL). It is **abandoned** â€” `alvr-20.13.0` solves the same decode
 problem far more simply with the `xrw.decoder_name` named-codec override, and the two approaches
 touch the same functions incompatibly. Two pieces in it are still worth lifting: `ProbeTexture()`
-in `VideoEncoderNVENC.cpp` (a CPU-readable staging copy of the pre-encode texture — a real
+in `VideoEncoderNVENC.cpp` (a CPU-readable staging copy of the pre-encode texture â€” a real
 pre-encode pixel tap) and its throttled per-frame telemetry across
-`Present` → `CEncoder::Run` → `Transmit` → `ParseFrameNals`.
+`Present` â†’ `CEncoder::Run` â†’ `Transmit` â†’ `ParseFrameNals`.
 
 `alvr-20.14.1-galaxy-xr-client.stale-20260919.patch` no longer applies (fails at `lib.rs:255`);
 the clone gained `[72.0, 90.0]` refresh rates, `encoder_10_bits` and `last_display_period` logging
@@ -420,11 +433,11 @@ v20.14.1, so the `xrw.decoder_name` override ports between them unchanged. It is
 applied to both, and the two patched files hash identically
 (`5f1429e82d55cf724fe87b3cff79ea51e5f3c1c2bd7ed584880c0c11259f59c7`).
 
-Neither release detects the Galaxy XR — `Platform::SamsungGalaxyXR` only exists upstream after
-v20.14.1 — so both patches fall back to `alvr_system_info::model_name() == "SM-I610"`.
+Neither release detects the Galaxy XR â€” `Platform::SamsungGalaxyXR` only exists upstream after
+v20.14.1 â€” so both patches fall back to `alvr_system_info::model_name() == "SM-I610"`.
 
 One asymmetry remains, and it is deliberate until someone decides otherwise. In the client
-capabilities block the 20.13.0 patch overrides three fields with `galaxy_xr || …` while the
+capabilities block the 20.13.0 patch overrides three fields with `galaxy_xr || â€¦` while the
 20.14.1 patch overrides only `encoder_10_bits`:
 
 | field | 20.13.0 | 20.14.1 |
@@ -554,7 +567,7 @@ the render loop. Only its *logging* was throttled to every 72 frames; the runtim
 
 That cost panel-native streaming outright. `B-15` (3552x3840/eye at 600 Mbps) failed every attempt
 with **"session says Streaming but no frame statistics"** while lighter configurations were
-unaffected — `Q-CONTROL` at 2560/eye ran clean throughout. The symptom names the session and the
+unaffected â€” `Q-CONTROL` at 2560/eye ran clean throughout. The symptom names the session and the
 statistics, so it reads as a server or network fault, and the hunt went there for most of a day.
 
 Bisected by swapping one component at a time against a known-good pair:
@@ -570,7 +583,7 @@ The per-frame probe is now behind `ALVR_REPROJ_PROBE`, read once into a `OnceLoc
 nothing when off, and off is the default.
 
 **The general rule this earns:** a measurement build carries no diagnostic that can change what is
-measured. Throttling the *log* is not enough — the work behind it has to be throttled too, or
+measured. Throttling the *log* is not enough â€” the work behind it has to be throttled too, or
 gated off entirely. A per-frame runtime call is free until the frame budget is tight, and tight is
 exactly the condition worth measuring.
 
@@ -581,14 +594,14 @@ it makes the standalone `pyrowave-decode` CLI usable on Adreno, and it adds thre
 knobs that isolate the Adreno faults found while measuring it.
 
 Why it matters: PyroWave is an intra-only wavelet codec in pure Vulkan compute, and on this
-headset it decodes in **2.67 ms** against the hardware H.264 decoder's **14.8–18.9 ms**. Encoding
+headset it decodes in **2.67 ms** against the hardware H.264 decoder's **14.8â€“18.9 ms**. Encoding
 on the PC and decoding on the headset reached **39.69 dB at 25 Mbps**, against ALVR's H.264 needing
 ~600 Mbps. Decode time, not bitrate, is what has blocked every quality preset in this project
-(see the HEVC result — 82 ms at 2.06 Mpx), so a software decoder that is 6x faster than the
+(see the HEVC result â€” 82 ms at 2.06 Mpx), so a software decoder that is 6x faster than the
 hardware one changes which questions are worth asking.
 
 **The CLI fix.** `decode.cpp` only ever built the compute path, while `bench.cpp` honoured
-`Decoder::device_prefers_fragment_path()` — which returns true for Qualcomm. So the CLI silently
+`Decoder::device_prefers_fragment_path()` â€” which returns true for Qualcomm. So the CLI silently
 took the path that is broken on Adreno. The patch calls the same selector, and because the
 fragment path writes planes as colour attachments rather than storage images, it also adds
 `VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT` to the plane images and splits both image barriers on
@@ -605,8 +618,8 @@ rather than a wrong image, which is the only reason this was quick to find.
 | `PYROWAVE_NO_LINEAR_TEX` | skip the linear-texture payload path, whose images have a hardcoded 1024 height |
 
 **Two Adreno faults were found and both are encoder-side**, which is why they do not block the
-intended use. The compute decode path blanks rows 512–1024, and encoding on the headset ceilings
-around 28 dB. Since the PC encodes and the headset only decodes, neither is on our path — but
+intended use. The compute decode path blanks rows 512â€“1024, and encoding on the headset ceilings
+around 28 dB. Since the PC encodes and the headset only decodes, neither is on our path â€” but
 they are real upstream bugs and worth reporting rather than working around silently.
 
 **The clone is not kept.** It lived in a session scratchpad, so this patch plus `d2997ac` is the
@@ -620,7 +633,7 @@ with `-DANDROID_ABI=arm64-v8a`. On Windows, shaderc must be built with
 The PyroWave encoder is compiled in only when `ALVR_PYROWAVE_DIR` is set at **build** time
 (`alvr/server_openvr/build.rs`, `#ifdef ALVR_PYROWAVE` in `CEncoder.cpp`). A rebuild without it
 succeeds and produces a driver that silently uses NVENC/H.264 whatever `ALVR_PYROWAVE=1` says at
-run time — the client then gets an H.264 DecoderConfig. The recipe that works:
+run time â€” the client then gets an H.264 DecoderConfig. The recipe that works:
 
     cd <workspace>\ALVR-20.13.0-src
     set "ALVR_PYROWAVE_DIR=<workspace>\pyrowave-pc"

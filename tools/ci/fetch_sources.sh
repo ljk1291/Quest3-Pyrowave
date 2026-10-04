@@ -3,7 +3,7 @@
 # sources.lock.json is authoritative: environment variables cannot replace its pins.
 #   <dest>/pyrowave      Themaister/pyrowave at PYROWAVE_BASE + patches/pyrowave-cdf53-haar-experiments2-3.patch,
 #                        with Granite (and its submodules) at GRANITE_COMMIT
-# Both patches are cumulative: base + one patch reproduces the measured clone exactly.
+# The cumulative ALVR patch stack is applied in explicit order below; the Light phase overlay depends on WO-8.
 # Usage: tools/ci/fetch_sources.sh <dest>
 set -eu
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -35,6 +35,7 @@ apply_patch "$dest/ALVR-20.13.0" "$repo/patches/quest3-alvr.patch"
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/stable-baseline-alvr.patch"
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/fork-identity-alvr.patch"
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/wo8-foveation.patch"
+apply_patch "$dest/ALVR-20.13.0" "$repo/patches/wo8-light-centre-phase.patch"
 
 checkout "$PYROWAVE_URL" "$dest/pyrowave" "$PYROWAVE_BASE"
 # pyrowave's checkout_granite.sh pins a newer Granite (9d44761), which spiked encoder p99 to 14 ms;
