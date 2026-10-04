@@ -42,6 +42,17 @@ Q3_EXTENSION_ROWS = (
     {"experiment_id":"q3a_highrate_pyro_97_2000_default_rdo", "phase":"q3a", "label":"pyrowave-97-crop-default-rdo-2000", "wavelet":"97", "rate_mbps":2000, "rdo_px_per_deg":None, "offline_only_above_wifi_cap":True},
     {"experiment_id":"q3a_highrate_pyro_haar_2000_default_rdo", "phase":"q3a", "label":"pyrowave-haar-crop-default-rdo-2000", "wavelet":"haar", "rate_mbps":2000, "rdo_px_per_deg":None, "offline_only_above_wifi_cap":True},
 )
+# This is a new, additive overnight matrix.  It must never be folded into the
+# historical extension above: those rows already have retained evidence and a
+# different experiment identity.
+Q3_OVERNIGHT_STATIC_ROWS = (
+    {"experiment_id":"q3a_overnight_pyro_haar_crop_1000_rdo24", "phase":"q3a", "label":"pyrowave-haar-crop-rdo24-1000", "wavelet":"haar", "rate_mbps":1000, "rdo_px_per_deg":24},
+    {"experiment_id":"q3b_overnight_pyro_haar_medium_s05_1000_rdo24", "phase":"q3b", "label":"pyrowave-haar-medium-s05-rdo24-1000", "wavelet":"haar", "rate_mbps":1000, "profile":"medium-s05", "rdo_px_per_deg":24},
+    {"experiment_id":"q3b_overnight_pyro_53_medium_s05_1000_rdo24", "phase":"q3b", "label":"pyrowave-53-medium-s05-rdo24-1000", "wavelet":"53", "rate_mbps":1000, "profile":"medium-s05", "rdo_px_per_deg":24},
+    {"experiment_id":"q3b_overnight_pyro_97_light_s05_phase_rdo24", "phase":"q3b", "label":"pyrowave-97-light-s05-phase-rdo24-1000", "wavelet":"97", "rate_mbps":1000, "profile":"light-s05", "rdo_px_per_deg":24, "requires_light_phase_identity":True},
+    {"experiment_id":"q3a_overnight_pyro_97_crop_1000_rdo16", "phase":"q3a", "label":"pyrowave-97-crop-rdo16-1000", "wavelet":"97", "rate_mbps":1000, "rdo_px_per_deg":16},
+    {"experiment_id":"q3a_overnight_pyro_97_crop_1000_rdo20", "phase":"q3a", "label":"pyrowave-97-crop-rdo20-1000", "wavelet":"97", "rate_mbps":1000, "rdo_px_per_deg":20},
+)
 WAVELET_LABEL = {"haar": "Haar", "53": "CDF 5/3", "97": "CDF 9/7"}
 CROPPED_SOURCE_SHA256 = "4c833e175610488ffa05a8037e52c166424db8308a67a2bfed4ed48861fad2e5"
 FENCE_RECTANGLES = {"full_fov": {"eye": "left", "x": 1740, "y": 1310, "width": 240, "height": 274},
@@ -87,6 +98,22 @@ def _require_cropped_source(source: Path) -> fb.Y4MInfo:
     return info
 
 
+def _require_full_source(source: Path) -> fb.Y4MInfo:
+    info = fb.inspect_y4m(source)
+    if (info.width, info.height, info.frames, info.chroma, info.color_range, info.fps_num, info.fps_den) != (6144, 3232, 90, "420", "FULL", 90, 1):
+        raise ValueError("Q3 full source must be 6144x3232, C420, full-range, 90 frames at 90 Hz")
+    return info
+
+
+def _require_plan_source(source: Path, plan: dict) -> fb.Y4MInfo:
+    geometry = plan.get("source", {}).get("geometry")
+    if geometry == [5248, 2776]:
+        return _require_cropped_source(source)
+    if geometry == [6144, 3232]:
+        return _require_full_source(source)
+    raise ValueError("plan source geometry is unsupported")
+
+
 def _source_contract(source: Path, info: fb.Y4MInfo) -> dict:
     return {"sha256": _hash(source), "geometry": [info.width, info.height],
             "frames": info.frames, "fps": [info.fps_num, info.fps_den],
@@ -122,9 +149,27 @@ def _extension_transform(spec: dict, light_phase_identity: dict | None) -> dict 
     if profile is None:
         return None
     transform=_q3b_transform(profile)
-    if spec["experiment_id"] == "q3b_phase_pyro_97_light_s05_default_rdo":
+    if spec["experiment_id"] == "q3b_phase_pyro_97_light_s05_default_rdo" or spec.get("requires_light_phase_identity"):
         transform.update(_light_phase_identity(light_phase_identity))
     return transform
+
+
+def _extension_matrix(rows: tuple[dict, ...], light_phase_identity: dict | None, *, kind: str) -> dict:
+    """Exact, schema-visible identity for an additive extension matrix."""
+    # Historical extension plans and their retained result records use this
+    # exact object.  Do not add a generic kind or static-source label here.
+    if rows is Q3_EXTENSION_ROWS:
+        return {"runner":"pyrowave", "historical_q3b_dropped":["h264-dual-blur-light-s05-700"],
+                "light_phase_identity":_light_phase_identity(light_phase_identity), "quality_windows_one_based":[[1,90],[10,89]], "fence_and_hvs_required":True,
+                "offline_only_above_wifi_cap_mbps":[1500,2000]}
+    common = {"runner": "pyrowave", "kind": kind,
+              "quality_windows_one_based": [[1, 90], [10, 89]],
+              "fence_and_hvs_required": True,
+              "static_source_only": True}
+    if any(row.get("requires_light_phase_identity") or
+           row["experiment_id"] == "q3b_phase_pyro_97_light_s05_default_rdo" for row in rows):
+        common["light_phase_identity"] = _light_phase_identity(light_phase_identity)
+    return common
 
 
 def build_plan(source: Path, vertical_pixels_per_degree: float, *, projection_evidence: str,
@@ -229,7 +274,9 @@ def _rdo_effective_from_native_log(text: str, requested: dict) -> dict:
 def build_extension_plan(source: Path, vertical_pixels_per_degree: float, *, projection_evidence: str,
                          crop_evidence: str, crops, full_source: Path,
                          horizontal_pixels_per_degree: float | None = None, fixture: bool = False,
-                         light_phase_identity: dict | None = None) -> dict:
+                         light_phase_identity: dict | None = None,
+                         _rows: tuple[dict, ...] = Q3_EXTENSION_ROWS,
+                         _matrix_kind: str = "owner_quality_extension") -> dict:
     """Freeze the seven owner-selected PyroWave quality-extension rows.
 
     Historical Q3a/Q3b evidence is not included or rewritten.  This separate
@@ -239,13 +286,13 @@ def build_extension_plan(source: Path, vertical_pixels_per_degree: float, *, pro
                     crop_evidence=crop_evidence, crops=crops, full_source=full_source,
                     horizontal_pixels_per_degree=horizontal_pixels_per_degree, fixture=fixture)
     cells=[]
-    for spec in Q3_EXTENSION_ROWS:
+    for spec in _rows:
         row=dict(source_geometry="crop", fps=90, encoded_chroma="420",
                  score_vertical_pixels_per_degree=float(vertical_pixels_per_degree),
                  requires_wo8_reduced_encode=False, **copy.deepcopy(spec))
         transform=_extension_transform(spec, light_phase_identity)
         if transform is not None:
-            if (not fixture and spec["experiment_id"] == "q3b_phase_pyro_97_light_s05_default_rdo" and
+            if (not fixture and (spec["experiment_id"] == "q3b_phase_pyro_97_light_s05_default_rdo" or spec.get("requires_light_phase_identity")) and
                     _hash(Path(__file__).resolve().parent / "foveation.py") != transform["implementation_source_sha256"]):
                 raise ValueError("WO-8 corrected-Light source hash is not active; do not freeze this rescore")
             from .foveation import FoveationConfig, encoded_size
@@ -257,18 +304,117 @@ def build_extension_plan(source: Path, vertical_pixels_per_degree: float, *, pro
         row.update(eye_width=ew,eye_height=eh,stereo_width=ew*2,cap_bytes=cap,
                    bits_per_pixel=fb.bpp(cap,ew,eh), rdo_viewing_density=_rdo_descriptor(row.pop("rdo_px_per_deg")))
         cells.append(row)
-    base.update(cells=cells, extension_matrix={"runner":"pyrowave", "historical_q3b_dropped":["h264-dual-blur-light-s05-700"],
-                "light_phase_identity":_light_phase_identity(light_phase_identity), "quality_windows_one_based":[[1,90],[10,89]], "fence_and_hvs_required":True,
-                "offline_only_above_wifi_cap_mbps":[1500,2000]},
+    base.update(cells=cells, extension_matrix=_extension_matrix(_rows, light_phase_identity, kind=_matrix_kind),
                 hvs_calibration={**base["hvs_calibration"], "codec_cells":[fb.hvs_calibration_for_vertical_ppd(
                     vertical_pixels_per_degree,2776) for _ in cells]})
     validate_plan(base)
     return base
 
 
+def build_overnight_static_plan(source: Path, vertical_pixels_per_degree: float, *, projection_evidence: str,
+                                crop_evidence: str, crops, full_source: Path,
+                                horizontal_pixels_per_degree: float | None = None, fixture: bool = False,
+                                light_phase_identity: dict | None = None) -> dict:
+    """Freeze the six new static-crop native PyroWave cells.
+
+    This deliberately accepts only the reviewed static crop source. Synthetic
+    motion uses a separate runner and may never be substituted here.
+    """
+    return build_extension_plan(source, vertical_pixels_per_degree,
+                                projection_evidence=projection_evidence, crop_evidence=crop_evidence,
+                                crops=crops, full_source=full_source,
+                                horizontal_pixels_per_degree=horizontal_pixels_per_degree,
+                                fixture=fixture, light_phase_identity=light_phase_identity,
+                                _rows=Q3_OVERNIGHT_STATIC_ROWS,
+                                _matrix_kind="overnight_static_rdo")
+
+
+def build_overnight_full_a2_plan(source: Path, vertical_pixels_per_degree: float, *, projection_evidence: str,
+                                 crop_evidence: str, crops, horizontal_pixels_per_degree: float | None = None,
+                                 fixture: bool = False) -> dict:
+    """Freeze static full-parent Haar/500/RDO24 (the a2 control).
+
+    It is deliberately a separate plan because it encodes the full parent,
+    whereas the six overnight native cells encode the reviewed static crop.
+    """
+    source = Path(source); info = _require_full_source(source)
+    base = fb.build_plan(source, vertical_pixels_per_degree,
+                         horizontal_pixels_per_degree=horizontal_pixels_per_degree,
+                         projection_evidence=projection_evidence, crop_evidence=crop_evidence,
+                         fixture=fixture, fps=90, wavelets=("haar",), rates_mbps=(500,),
+                         geometries=((3072, 3232),), display_eye=(3072, 3232), crops=crops)
+    cell = dict(base["cells"][0], experiment_id="q3a_overnight_pyro_haar_full_500_rdo24",
+                phase="q3a", source_geometry="full_fov",
+                score_vertical_pixels_per_degree=float(vertical_pixels_per_degree),
+                rdo_viewing_density=_rdo_descriptor(24), requires_wo8_reduced_encode=False)
+    plan = {"schema": SCHEMA, "kind": "pyro_q3_framebank", "fixture_only": bool(fixture),
+            "source": _source_contract(source, info),
+            "source_derivation": {"operation": "full_parent_no_resampling"},
+            "projection_evidence": projection_evidence.strip(), "crop_evidence": crop_evidence.strip(),
+            "frozen_module_hashes": _module_hashes(), "cells": [cell],
+            "presentation_eye": base["presentation_eye"], "projection": base["projection"],
+            "crops": base["crops"],
+            "hvs_calibration": {**base["hvs_calibration"], "codec_cells": [base["hvs_calibration"]["codec_cells"][0]]},
+            "source_adapter": {"kind": "full_parent", "resampling": "none"},
+            "fence_rectangles": {"full_fov": copy.deepcopy(FENCE_RECTANGLES["full_fov"])},
+            "quality_contract": {"score_windows_one_based": [[1, 90], [10, 89]], "fence_metric": True,
+                                 "per_frame_identity": True, "timing_requires_native_per_frame_record": True},
+            "extension_matrix": {"runner": "pyrowave", "kind": "overnight_full_a2_rdo",
+                                 "static_source_only": True, "quality_windows_one_based": [[1, 90], [10, 89]],
+                                 "fence_and_hvs_required": True}}
+    validate_plan(plan)
+    return plan
+
+
+def _extension_rows_for_matrix(extension: dict) -> tuple[dict, ...]:
+    if not isinstance(extension, dict):
+        raise ValueError("Q3 extension matrix is invalid")
+    if "kind" not in extension:
+        return Q3_EXTENSION_ROWS
+    if extension.get("kind") == "overnight_static_rdo":
+        return Q3_OVERNIGHT_STATIC_ROWS
+    raise ValueError("unrecognized Q3 extension matrix kind")
+
+
+def _validate_overnight_full_a2(plan: dict) -> dict:
+    source = plan.get("source", {})
+    if (source.get("geometry"), source.get("frames"), source.get("fps"), source.get("chroma"), source.get("color_range")) != ([6144, 3232], 90, [90, 1], "420", "FULL"):
+        raise ValueError("overnight full a2 source contract drifted")
+    if plan.get("source_derivation") != {"operation": "full_parent_no_resampling"}:
+        raise ValueError("overnight full a2 derivation drifted")
+    if plan.get("frozen_module_hashes") != _module_hashes():
+        raise ValueError("runner module hash drifted; freeze a new plan")
+    if plan.get("source_adapter") != {"kind": "full_parent", "resampling": "none"}:
+        raise ValueError("overnight full a2 source adapter drifted")
+    if plan.get("fence_rectangles") != {"full_fov": FENCE_RECTANGLES["full_fov"]}:
+        raise ValueError("overnight full a2 fence rectangle drifted")
+    expected_matrix = {"runner": "pyrowave", "kind": "overnight_full_a2_rdo", "static_source_only": True,
+                       "quality_windows_one_based": [[1, 90], [10, 89]], "fence_and_hvs_required": True}
+    if plan.get("extension_matrix") != expected_matrix:
+        raise ValueError("overnight full a2 matrix provenance drifted")
+    cells = plan.get("cells")
+    if not isinstance(cells, list) or len(cells) != 1:
+        raise ValueError("overnight full a2 requires exactly one cell")
+    cell = cells[0]; cap = fb.cap_bytes(500, 90)
+    expected = {"experiment_id": "q3a_overnight_pyro_haar_full_500_rdo24", "phase": "q3a",
+                "source_geometry": "full_fov", "wavelet": "haar", "rate_mbps": 500, "fps": 90,
+                "eye_width": 3072, "eye_height": 3232, "stereo_width": 6144, "encoded_chroma": "420",
+                "cap_bytes": cap, "bits_per_pixel": fb.bpp(cap, 3072, 3232),
+                "score_vertical_pixels_per_degree": plan.get("projection", {}).get("vertical_pixels_per_degree"),
+                "rdo_viewing_density": _rdo_descriptor(24), "requires_wo8_reduced_encode": False}
+    if any(cell.get(key) != value for key, value in expected.items()) or cell.get("source_transform") is not None:
+        raise ValueError("overnight full a2 codec row drifted")
+    calibration = plan.get("hvs_calibration", {})
+    if not isinstance(calibration, dict) or len(calibration.get("codec_cells", [])) != 1:
+        raise ValueError("overnight full a2 calibrated scoring contract drifted")
+    return plan
+
+
 def validate_plan(plan: dict) -> dict:
     if not isinstance(plan, dict) or plan.get("schema") != SCHEMA or plan.get("kind") != "pyro_q3_framebank":
         raise ValueError("not a Pyro Q3 frame-bank manifest")
+    if plan.get("extension_matrix", {}).get("kind") == "overnight_full_a2_rdo":
+        return _validate_overnight_full_a2(plan)
     source = plan.get("source", {})
     if source.get("geometry") != [5248, 2776] or source.get("frames") != 90 or source.get("fps") != [90, 1] or source.get("chroma") != "420" or source.get("color_range") != "FULL":
         raise ValueError("Q3 source contract drifted")
@@ -296,8 +442,9 @@ def validate_plan(plan: dict) -> dict:
         raise ValueError("Q3 calibrated scoring contract drifted")
     if extension is None and actual_b and [(c.get("profile"), c.get("wavelet"), c.get("rate_mbps")) for c in actual_b] != list(Q3B_ROWS):
         raise ValueError("Q3b rows drifted")
+    extension_rows = _extension_rows_for_matrix(extension) if extension is not None else None
     for cell in actual_b:
-        expected_transform = (_extension_transform(next(row for row in Q3_EXTENSION_ROWS
+        expected_transform = (_extension_transform(next(row for row in extension_rows
                                                         if row["label"] == cell.get("label")),
                                                   extension.get("light_phase_identity"))
                               if extension is not None else _q3b_transform(cell["profile"]))
@@ -310,16 +457,15 @@ def validate_plan(plan: dict) -> dict:
             raise ValueError("Q3b reduced geometry/cap/scoring contract drifted")
     if extension is not None:
         actual_extension = [cell for cell in plan.get("cells", []) if cell.get("phase") in ("q3a", "q3b")]
-        if ([cell.get("label") for cell in actual_extension] != [row["label"] for row in Q3_EXTENSION_ROWS] or
+        if ([cell.get("label") for cell in actual_extension] != [row["label"] for row in extension_rows] or
                 any(cell.get("phase") not in ("q3a","q3b") or cell.get("fps") != 90 or
                     cell.get("source_geometry") != "crop" for cell in actual_extension) or
                 len(actual_extension) != len(plan.get("cells", []))):
             raise ValueError("Q3 extension rows drifted")
-        if extension != {"runner":"pyrowave", "historical_q3b_dropped":["h264-dual-blur-light-s05-700"],
-                "light_phase_identity":_light_phase_identity(extension.get("light_phase_identity")), "quality_windows_one_based":[[1,90],[10,89]], "fence_and_hvs_required":True,
-                "offline_only_above_wifi_cap_mbps":[1500,2000]}:
+        if extension != _extension_matrix(extension_rows, extension.get("light_phase_identity"),
+                                           kind=extension.get("kind")):
             raise ValueError("Q3 extension matrix provenance drifted")
-        for cell, spec in zip(actual_extension, Q3_EXTENSION_ROWS):
+        for cell, spec in zip(actual_extension, extension_rows):
             transform = _extension_transform(spec, extension.get("light_phase_identity"))
             if (cell.get("experiment_id") != spec["experiment_id"] or cell.get("phase") != spec["phase"] or
                     cell.get("wavelet") != spec["wavelet"] or cell.get("rate_mbps") != spec["rate_mbps"] or
@@ -487,7 +633,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
     from . import nvenc_framebank as nvenc
     raw_plan = Path(plan_path).read_bytes(); plan = validate_plan(json.loads(raw_plan)); source = Path(source)
     preparation_workers = nvenc._q3b_preparation_workers(preparation_workers)
-    info = _require_cropped_source(source); guard = fb.WindowGuard(Path(window), supervised=supervised)
+    info = _require_plan_source(source, plan); guard = fb.WindowGuard(Path(window), supervised=supervised)
     if _source_contract(source, info) != plan["source"]: raise ValueError("source contract differs from frozen plan")
     required = {"encode", "decode", "psnr_hvs_m_h", "ffmpeg"}
     if set(tools) != required: raise ValueError("Pyro Q3 runner requires exactly encode/decode/psnr_hvs_m_h tools")
@@ -601,7 +747,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
 
 
 def sanitized_report(result: dict) -> dict:
-    keep = ("plan_index", "experiment_id", "phase", "profile", "wavelet", "rate_mbps", "fps", "eye_width", "eye_height", "stereo_width", "cap_bytes", "bits_per_pixel", "encoded_chroma", "bitstream", "native_encoder_telemetry", "codec_only", "codec_only_domain", "displayed", "crops", "codec_only_windows", "displayed_windows", "displayed_reused_from_codec_only", "crop_windows", "centre_hvs", "fence_metrics", "q3b_transform", "q3b_encoded_source", "rdo_viewing_density", "rdo_effective", "offline_only_above_wifi_cap", "error")
+    keep = ("plan_index", "experiment_id", "phase", "profile", "source_geometry", "wavelet", "rate_mbps", "fps", "eye_width", "eye_height", "stereo_width", "cap_bytes", "bits_per_pixel", "encoded_chroma", "bitstream", "native_encoder_telemetry", "codec_only", "codec_only_domain", "displayed", "crops", "codec_only_windows", "displayed_windows", "displayed_reused_from_codec_only", "crop_windows", "centre_hvs", "fence_metrics", "q3b_transform", "q3b_encoded_source", "rdo_viewing_density", "rdo_effective", "offline_only_above_wifi_cap", "error")
     return {"schema": SCHEMA, "kind": "pyro_q3_framebank_sanitized", "complete": result.get("complete") is True,
             "failure_reasons": list(result.get("failure_reasons", [])), "frozen_plan_sha256": result.get("frozen_plan_sha256"),
             "source_sha256": result.get("source_sha256_end"), "tool_provenance": result.get("tool_provenance_end"),
@@ -619,6 +765,16 @@ def main(argv=None):
     plan.add_argument("--vertical-pixels-per-degree", required=True, type=float)
     plan.add_argument("--horizontal-pixels-per-degree", type=float)
     plan.add_argument("--include-q3b-hooks", action="store_true")
+    overnight = sub.add_parser("overnight-static-plan", help="freeze six new static-crop RDO rows")
+    for name in ("source", "full-source", "projection-evidence", "crop-evidence", "crops", "out", "light-phase-identity"):
+        overnight.add_argument("--" + name, required=True)
+    overnight.add_argument("--vertical-pixels-per-degree", required=True, type=float)
+    overnight.add_argument("--horizontal-pixels-per-degree", type=float)
+    a2 = sub.add_parser("overnight-full-a2-plan", help="freeze static full-parent Haar/500/RDO24")
+    for name in ("source", "projection-evidence", "crop-evidence", "crops", "out"):
+        a2.add_argument("--" + name, required=True)
+    a2.add_argument("--vertical-pixels-per-degree", required=True, type=float)
+    a2.add_argument("--horizontal-pixels-per-degree", type=float)
     run = sub.add_parser("run", help="run a frozen Q3a plan under an owner-supervised lease")
     for name in ("plan", "source", "private-out", "report", "window", "encode", "decode", "psnr-hvs-m-h", "ffmpeg", "tools-metadata"):
         run.add_argument("--" + name, required=True)
@@ -641,6 +797,25 @@ def main(argv=None):
                             crops=crops, full_source=Path(args.full_source), include_q3b=args.include_q3b_hooks)
         Path(args.out).write_text(fb.report_json(frozen), encoding="utf-8")
         print("wrote frozen Q3 PyroWave plan with", len(frozen["cells"]), "cells")
+        return 0
+    if args.command == "overnight-static-plan":
+        crops = json.loads(Path(args.crops[1:]).read_text(encoding="utf-8") if args.crops.startswith("@") else args.crops)
+        phase_identity = json.loads(Path(args.light_phase_identity[1:]).read_text(encoding="utf-8")
+                                    if args.light_phase_identity.startswith("@") else args.light_phase_identity)
+        frozen = build_overnight_static_plan(Path(args.source), args.vertical_pixels_per_degree,
+            horizontal_pixels_per_degree=args.horizontal_pixels_per_degree,
+            projection_evidence=args.projection_evidence, crop_evidence=args.crop_evidence,
+            crops=crops, full_source=Path(args.full_source), light_phase_identity=phase_identity)
+        Path(args.out).write_text(fb.report_json(frozen), encoding="utf-8")
+        print("wrote frozen overnight static PyroWave plan with", len(frozen["cells"]), "cells")
+        return 0
+    if args.command == "overnight-full-a2-plan":
+        crops = json.loads(Path(args.crops[1:]).read_text(encoding="utf-8") if args.crops.startswith("@") else args.crops)
+        frozen = build_overnight_full_a2_plan(Path(args.source), args.vertical_pixels_per_degree,
+            horizontal_pixels_per_degree=args.horizontal_pixels_per_degree,
+            projection_evidence=args.projection_evidence, crop_evidence=args.crop_evidence, crops=crops)
+        Path(args.out).write_text(fb.report_json(frozen), encoding="utf-8")
+        print("wrote frozen overnight full a2 PyroWave plan")
         return 0
     result = run_plan(Path(args.plan), Path(args.source), Path(args.private_out),
                       {"encode": args.encode, "decode": args.decode, "psnr_hvs_m_h": args.psnr_hvs_m_h, "ffmpeg": args.ffmpeg}, Path(args.window),
