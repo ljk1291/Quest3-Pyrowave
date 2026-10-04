@@ -78,6 +78,16 @@ closed cleanly. This is one of ten Q3b rows, not a final ranking or promotion.
 Continue the remaining nine cells without repeating the completed encode; the
 softness-0.5 Light cell is active. See the status log for the exact report hash.
 
+A CPU-only attribution on the retained first Q3b output finds substantial
+transform loss before compression: on the same sharp-source fence mask,
+sharp→matching-blur PSNR is 32.067 dB and matching-blur→decoded reconstruction
+is 39.424 dB (total sharp→decoded is 30.832 dB; these are not additive).
+The fence is in the nominal centre, but this Light geometry has a horizontal
+half-sample phase, so the area filter still averages neighbouring pixels there
+at softness 0. This follows the current shader mapping rather than indicating
+a CPU/shader mismatch. Retain the frozen matrix; texel-centre alignment needs
+review before accepting Light, and no profile is promoted by these results.
+
 ## 1. Owner input (2026-10-03 21:44)
 
 - **Live decoder caps on Quest 3.** These come from the owner's experience; verify them on

@@ -185,6 +185,26 @@ Take the first unblocked item. Items marked ∥ are independent.
 
 <!-- Codex appends entries here: date, checkpoint, verified (links), remaining, blocked? -->
 
+- 2026-10-04, Light/softness-0 attribution (CPU-only, retained frames): the
+  frozen sharp-source edge mask over frames 10–89 is reproduced exactly
+  (259,812 selected pixels). Tight-fence PSNR is 32.066930 dB for sharp source
+  versus matching-blur reference, 39.424019 dB for matching-blur versus decoded
+  reconstruction, and 30.831871 dB for sharp versus reconstruction. These are
+  spatial errors on the same mask, not temporal percentiles; PSNR components
+  cannot be added. Substantial loss therefore exists before compression.
+  The fence is fully inside the aligned central band, with local squeeze 1.
+  For the 2624×2776 → 2464×2592 Light geometry, horizontal encoded pixel centres
+  map to source pixel boundaries, while vertical centres remain aligned. The
+  area box averages horizontal neighbours even at softness 0. See source at
+  `7437279`: [alignment and sampling](../tools/xrbench/foveation.py#L48) and
+  [native shader box sampling](../patches/wo8-foveation.patch#L276).
+  This is consistent with the current shader algebra, not evidence of a
+  CPU/shader or eye/crop mismatch. Audit texel-centre alignment before accepting
+  this Light profile; leave the frozen Q3b matrix unchanged for comparison.
+  Private diagnostic SHA256:
+  `33aa801d365753d08caa177f8a7e122d09bc54646a5d6307e7e30f2ee05ed4bb`.
+  No encode, decode, transform or GPU scorer was rerun for this attribution.
+
 - 2026-10-04 03:36 UTC, first Q3b result: Light / CDF 9/7 / 1000 Mbps,
   softness 0, 2464×2592 encoded per eye, reconstructed to 2624×2776 per eye.
   All 90 frames completed; both score windows, sharp/matching-blur references,
