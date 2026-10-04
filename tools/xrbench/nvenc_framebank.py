@@ -957,7 +957,8 @@ def _q3b_centre_rect(cell: dict, info: fb.Y4MInfo) -> dict:
         raise ValueError("Q3b WO-8 has no centre band")
     x0, x1 = int(good_x[0]), int(good_x[-1] + 1)
     y0, y1 = int(good_y[0]), int(good_y[-1] + 1)
-    x0 -= x0 % 2; y0 -= y0 % 2; x1 -= x1 % 2; y1 -= y1 % 2
+    # Start inward (ceil to even), never widen the zero-ramp centre band.
+    x0 = (x0 + 1) // 2 * 2; y0 = (y0 + 1) // 2 * 2; x1 -= x1 % 2; y1 -= y1 % 2
     if x1 - x0 < 4 or y1 - y0 < 4:
         raise ValueError("Q3b centre band is too small for C420 scoring")
     return {"eye":"left", "x":x0, "y":y0, "width":x1-x0, "height":y1-y0,
@@ -984,7 +985,12 @@ def _q3b_centre_scores(tools, reference, decoded, blur_reference, info, cell, di
     ci=_write_eye_rect(reference, info, rect, sharp); _write_eye_rect(decoded, info, rect, got); _write_eye_rect(blur_reference, info, rect, blur)
     sharp_scores=_score_pair_windows(tools, got, sharp, ci, directory/"sharp", ppd, guard, timeout)
     blur_scores=_score_pair_windows(tools, got, blur, ci, directory/"blur", ppd, guard, timeout)
-    delta={key: sharp_scores[key]["psnr_hvs_m_h"]["value"]-blur_scores[key]["psnr_hvs_m_h"]["value"] for key in ("1-90","10-89")}
+    delta={}
+    for key in ("1-90","10-89"):
+        a,b=sharp_scores[key]["psnr_hvs_m_h"]["value"],blur_scores[key]["psnr_hvs_m_h"]["value"]
+        delta[key]=a-b if math.isfinite(a) and math.isfinite(b) else None
+    if any(value is None for value in delta.values()):
+        raise ValueError("Q3b centre HVS delta is indeterminate")
     return {"rectangle":rect,"sharp_reference":sharp_scores,"matching_blur_reference":blur_scores,"hvs_delta_sharp_minus_blur_db":delta}
 
 
@@ -1132,10 +1138,22 @@ def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, 
         if matching_blur_reference is None:
             row["fence_metrics"] = fence_metrics.score_y4m(reference, decoded, fence_rect, guard)
         else:
-            mask, descriptor = _q3b_periphery_mask(cell, ref_info, fence_rect)
-            row["fence_metrics"] = fence_metrics.score_against_references(
-                reference, decoded, fence_rect, guard, matching_blur_reference=matching_blur_reference,
+            # Retain the tight frozen fence as the primary ranking metric. It
+            # can lie wholly in the central band, so it cannot stand in for a
+            # periphery result.
+            primary = fence_metrics.score_y4m(reference, decoded, fence_rect, guard)
+            if any(not window["valid"] for window in primary["windows"].values()):
+                raise ValueError("Q3b primary tight fence edge mask is empty or invalid")
+            band_rect = {"eye":"left", "x":0, "y":0, "width":ref_info.width//2, "height":ref_info.height}
+            mask, descriptor = _q3b_periphery_mask(cell, ref_info, band_rect)
+            descriptor["rectangle"] = band_rect
+            peripheral = fence_metrics.score_against_references(
+                reference, decoded, band_rect, guard, matching_blur_reference=matching_blur_reference,
                 region_mask=mask, region_descriptor=descriptor)
+            for result in peripheral.values():
+                if any(not window["valid"] for window in result["windows"].values()):
+                    raise ValueError("Q3b periphery edge mask is empty or invalid")
+            row["fence_metrics"] = {"primary_tight_fence":primary, "peripheral_band":peripheral}
     display_ref = directory / "source-display.y4m"; display_dec = directory / "decoded-display.y4m"
     is_crop = cell.get("source_geometry", "full_fov") == "crop"
     presentation_eye = ((ref_info.width // 2, ref_info.height) if cell.get("source_transform") is not None

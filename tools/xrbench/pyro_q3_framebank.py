@@ -64,7 +64,7 @@ def _module_hashes():
     root = Path(__file__).resolve().parent
     # The Q3 scorer is imported lazily so the adapter remains source-only until
     # a run starts, but its implementation is still part of a frozen plan.
-    return {name: _hash(root / name) for name in ("pyro_q3_framebank.py", "framebank.py", "nvenc_framebank.py", "fence_metrics.py", "pyrowave_wave.py")}
+    return {name: _hash(root / name) for name in ("pyro_q3_framebank.py", "framebank.py", "nvenc_framebank.py", "fence_metrics.py", "foveation.py", "pyrowave_wave.py")}
 
 
 def _require_cropped_source(source: Path) -> fb.Y4MInfo:
@@ -202,8 +202,10 @@ def parse_wave(path: Path, cell: dict) -> dict:
         if size <= 0 or cursor + size > len(data): raise ValueError("truncated PyroWave payload")
         sizes.append(size); cursor += size
     if cursor != len(data) or len(sizes) != 90: raise ValueError("PyroWave container frame count mismatch")
+    if any(size > cell["cap_bytes"] for size in sizes): raise ValueError("PyroWave frame payload exceeds frozen cap")
     return {"container_sha256": hashlib.sha256(data).hexdigest(), "container_bytes": len(data),
-            "payload_bytes": sizes, "frames": len(sizes), "header_bytes": len(expected_header)}
+            "payload_bytes": sizes, "frames": len(sizes), "header_bytes": len(expected_header),
+            "payload_bytes_total": sum(sizes), "actual_mbps_payload_f90": sum(sizes)*8*90/len(sizes)/1_000_000}
 
 
 def _native_records(path: Path, payloads: list[int]) -> dict:
@@ -275,7 +277,7 @@ def verify_split_bundles(tools: dict, codec_metadata: Path, scorer_metadata: Pat
 
 def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, window: Path, *, tools_metadata: Path,
              scorer_tools_metadata: Path | None = None, command_timeout_s: float = 900,
-             keep_artifacts: bool = False, supervised: bool = False, resume: bool = False) -> dict:
+             keep_artifacts: bool = False, supervised: bool = False, resume: bool = False, phase: str | None = None) -> dict:
     """Run only frozen Q3a rows; Q3b fails closed until a real WO-8 adapter exists."""
     raw_plan = Path(plan_path).read_bytes(); plan = validate_plan(json.loads(raw_plan)); source = Path(source)
     info = _require_cropped_source(source); guard = fb.WindowGuard(Path(window), supervised=supervised)
@@ -298,7 +300,10 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
         result["hvs_gpu_sanity"] = fb.hvs_gpu_sanity(tools["psnr_hvs_m_h"], out / "scorer-sanity",
                                                       plan["projection"]["vertical_pixels_per_degree"], guard, env, command_timeout_s)
         if not result["hvs_gpu_sanity"].get("passed"): raise RuntimeError("hvs_gpu_sanity_failed")
-        for index, cell in enumerate(plan["cells"]):
+        selected = [(index, cell) for index, cell in enumerate(plan["cells"]) if phase is None or cell["phase"] == phase]
+        if not selected: raise ValueError("requested phase has no cells")
+        result["requested_phase"] = phase; result["selected_plan_indices"] = [i for i,_ in selected]
+        for index, cell in selected:
             directory = out / f"cell-{index:02d}-{cell['wavelet']}-{cell['rate_mbps']}"; directory.mkdir()
             encoded, decoded = directory / "encoded.wave", directory / "decoded.y4m"; row = copy.deepcopy(cell)
             try:
@@ -340,7 +345,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
         result["source_sha256_end"] = _hash(source); result["tool_provenance_end"] = {k: _hash(v) for k, v in tools.items()}
         if result["source_sha256_end"] != result["source_sha256_start"]: result["failure_reasons"].append("source_changed_during_run")
         if result["tool_provenance_end"] != result["tool_provenance_start"]: result["failure_reasons"].append("tool_changed_during_run")
-        result["complete"] = not result["failure_reasons"] and len(result["cells"]) == len(plan["cells"])
+        result["complete"] = not result["failure_reasons"] and len(result["cells"]) == len(selected)
     finally:
         (out / "framebank-private.json").write_text(fb.report_json(result), encoding="utf-8")
     return result
