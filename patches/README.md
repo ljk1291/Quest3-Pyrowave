@@ -68,6 +68,8 @@ Two traps when regenerating, both of which have silently produced a patch that d
 | `pyrowave-galaxy-xr.patch` | `Themaister/pyrowave` | `d2997ac` | older subset: the standalone decode CLI on Galaxy XR, see below; superseded by the next row |
 | `pyrowave-cdf53-haar-experiments2-3.patch` | `Themaister/pyrowave` | `d2997ac` | **cumulative: the whole pyrowave clone** (14 files incl. the regenerated `shaders/slangmosh.hpp`): Galaxy XR fixes, CDF 5/3 and Haar, precision, the Experiment 3 decoder API; apply it alone |
 | `pyrowave-rdo-density.patch` | `Themaister/pyrowave` | `d2997ac` plus the two PyroWave overlays above | additive encoder-only WO-7 overlay: `PYROWAVE_RDO_PX_PER_DEG`, strict validation and a CPU parity test; apply after the cumulative research and Quest overlays |
+| `pyrowave-rdo-live-readback.patch` | `Themaister/pyrowave` | `d2997ac` plus all preceding PyroWave overlays | additive read-only C API for the initialized encoder's effective RDO density; it does not alter RDO arithmetic or bitstreams |
+| `alvr-pyrowave-rdo-live-readback.patch` | `alvr-org/ALVR` | `7eda092` plus all preceding ALVR overlays | queries the PyroWave C API immediately after encoder creation and writes an effective-density marker to `vrserver.txt` via `Warn()` |
 | `openxr-sdk-2b99fec-hello_xr.patch` | `KhronosGroup/OpenXR-SDK-Source` | `2b99fec` | the `hello_xr` distortion-grid / stereo decoder test app (9 files); the repo's `.gitattributes` makes checkouts CRLF, so compare ignoring line endings |
 | `alvr-20.14.1-galaxy-xr-client.stale-20260919.patch` | — | — | superseded snapshot, kept for reference only |
 

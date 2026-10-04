@@ -54,14 +54,30 @@ def test_fetch_script_reads_lock_and_applies_the_complete_alvr_stack_in_order():
 def test_fetch_script_applies_rdo_density_after_the_pyrowave_overlays():
     script = (REPO / "tools/ci/fetch_sources.sh").read_text()
     names = ("pyrowave-cdf53-haar-experiments2-3.patch", "quest3-pyrowave.patch",
-             "pyrowave-rdo-density.patch")
-    positions = [script.index(name) for name in names]
+             "pyrowave-rdo-density.patch", "pyrowave-rdo-live-readback.patch")
+    positions = [script.index(f'apply_patch "$dest/pyrowave" "$repo/patches/{name}"') for name in names]
     assert positions == sorted(positions)
     assert (REPO / "patches/pyrowave-rdo-density.patch").is_file()
     import hashlib
     expected = LOCK["patches"]["pyrowave_rdo_density"]
     assert expected["path"] == "patches/pyrowave-rdo-density.patch"
     assert expected["sha256"] == hashlib.sha256((REPO / expected["path"]).read_bytes()).hexdigest()
+
+
+def test_live_rdo_readback_patches_are_pinned_and_applied_after_their_stacks():
+    import hashlib
+    script = (REPO / "tools/ci/fetch_sources.sh").read_text()
+    for key, path in (
+        ("pyrowave_rdo_live_readback", "patches/pyrowave-rdo-live-readback.patch"),
+        ("alvr_pyrowave_rdo_live_readback", "patches/alvr-pyrowave-rdo-live-readback.patch"),
+    ):
+        expected = LOCK["patches"][key]
+        assert expected["path"] == path
+        assert expected["sha256"] == hashlib.sha256((REPO / path).read_bytes()).hexdigest()
+    assert (script.index('apply_patch "$dest/pyrowave" "$repo/patches/pyrowave-rdo-density.patch"')
+            < script.index('apply_patch "$dest/pyrowave" "$repo/patches/pyrowave-rdo-live-readback.patch"'))
+    assert (script.index('apply_patch "$dest/ALVR-20.13.0" "$repo/patches/wo8-light-centre-phase.patch"')
+            < script.index('apply_patch "$dest/ALVR-20.13.0" "$repo/patches/alvr-pyrowave-rdo-live-readback.patch"'))
 
 
 def test_light_phase_patch_is_pinned_and_verified_before_application():
