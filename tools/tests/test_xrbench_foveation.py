@@ -2,6 +2,7 @@ import sys
 import math
 from pathlib import Path
 import unittest
+from unittest import mock
 import numpy as np
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -49,6 +50,68 @@ class FoveationTests(unittest.TestCase):
         expected=f._area_box_reference(image,uv,footprint)
         actual=f._area_box(image,uv,footprint)
         self.assertTrue(np.allclose(actual,expected,rtol=0,atol=1e-10))
+
+    def test_forward_eye_sat_cache_is_bitwise_identical_across_profiles_and_tile_pads(self):
+        """The cache may remove allocation only; it must not change samples.
+
+        Small row tiles force different edge pads.  The uncached comparison
+        calls the same area-integral code with its cache deliberately removed,
+        so it covers the exact arithmetic used for all three profiles and each
+        softness-ramp value.
+        """
+        # This size keeps every profile/softness combination inside the
+        # declared footprint bound while retaining several forward tiles.
+        image=(np.arange(480*640,dtype=np.float64).reshape(480,640)%251)/250.
+        original=f._area_box
+        # Exercise two explicit edge pads in one frame-local cache. Forward
+        # tiles may happen to share a pad for a particular profile, but cache
+        # keys must never make an edge tile reuse the interior SAT geometry.
+        cache={}
+        for uv,footprint in ((np.array([[[.5,.5]]]),np.array([[[1.,1.]]])),
+                             (np.array([[[-.03,1.03]]]),np.array([[[6.9,6.9]]]))):
+            self.assertTrue(np.array_equal(original(image,uv,footprint),
+                                            original(image,uv,footprint,sat_cache=cache)))
+        self.assertGreater(len(cache),1)
+        # 640x480 intentionally exercises all profiles and each ramp level;
+        # h264fit at s=1 exceeds the production footprint bound at this tiny
+        # synthetic geometry, so its s=1 case stays covered by the existing
+        # Q3-size bound test rather than weakening that guard here.
+        cases=(("light",0.),("light",.5),("light",1.),
+               ("medium",0.),("medium",.5),("medium",1.),
+               ("h264fit",0.),("h264fit",.5))
+        for profile,softness in cases:
+            cfg=FoveationConfig(profile,softness,profile == "light" and softness == .5)
+            pads=[]
+            def observe(image, source_uv, footprint, *, sat_cache=None):
+                h,w=image.shape; cx=source_uv[...,0]*w; cy=source_uv[...,1]*h
+                fx=footprint[...,0]; fy=footprint[...,1]
+                left=cx-fx*.5; right=cx+fx*.5; top=cy-fy*.5; bottom=cy+fy*.5
+                pads.append(max(FILTER_RADIUS, int(math.ceil(max(0., -left.min(), right.max()-w,
+                                                                  -top.min(), bottom.max()-h)))+1))
+                return original(image,source_uv,footprint,sat_cache=sat_cache)
+            with mock.patch.object(f,"_area_box",side_effect=observe):
+                cached=forward_eye(image,cfg,tile_rows=64)
+            def uncached(image, source_uv, footprint, *, sat_cache=None):
+                return original(image,source_uv,footprint)
+            with mock.patch.object(f,"_area_box",side_effect=uncached):
+                baseline=forward_eye(image,cfg,tile_rows=64)
+            self.assertGreater(len(pads),1)
+            self.assertTrue(np.array_equal(cached,baseline), (profile,softness))
+
+    def test_forward_eye_reuses_summed_area_tables_for_same_pad(self):
+        image=(np.arange(480*640,dtype=np.float64).reshape(480,640)%251)/250.
+        original=f._area_box
+        cfg=FoveationConfig("medium",.5)
+        with mock.patch.object(f.np,"pad",wraps=np.pad) as cached_pad:
+            forward_eye(image,cfg,tile_rows=64)
+        def uncached(image, source_uv, footprint, *, sat_cache=None):
+            return original(image,source_uv,footprint)
+        with mock.patch.object(f.np,"pad",wraps=np.pad) as uncached_pad, \
+             mock.patch.object(f,"_area_box",side_effect=uncached):
+            forward_eye(image,cfg,tile_rows=64)
+        # Each fresh SAT uses two np.pad calls. The production path must reuse
+        # at least one same-pad table across the deliberately tiled frame.
+        self.assertLess(cached_pad.call_count, uncached_pad.call_count)
 
     def test_right_eye_mirrors_static_horizontal_shift(self):
         cfg=FoveationConfig('light',center_shift=(.22,-.11))
