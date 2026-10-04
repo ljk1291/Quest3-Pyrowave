@@ -14,8 +14,11 @@ the confirmed requested wavelet from both CLI logs, decoded-frame identities,
 and the shared Q3 score result with both 1–90 and 10–89 windows. It records no
 optical FPS or latency claim.
 
-Use `plan` with the reviewed projection and fixed-crop score definitions, then
-`run --supervised` only while an owner-attested `frame_bank_pc` lease is active.
+Use `plan` with the reviewed full Metro parent (`--full-source`) to freeze its
+original fixed-crop coordinates and HVS calibration, plus the native cropped
+source (`--source`) that the codec actually receives. The plan records both
+hashes and explicitly identifies the no-resampling crop derivation. Run only
+with `run --supervised` while an owner-attested `frame_bank_pc` lease is active.
 The runner performs the HVS GPU sanity gate before an encode. It stops on the
 first failed cell, writes private progress, and keeps interrupted artifacts.
 `--resume` accepts only a matching already-complete result; it never replayes a

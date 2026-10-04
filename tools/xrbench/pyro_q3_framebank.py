@@ -34,11 +34,26 @@ CROPPED_SOURCE_SHA256 = "4c833e175610488ffa05a8037e52c166424db8308a67a2bfed4ed48
 FENCE_RECTANGLES = {"full_fov": {"eye": "left", "x": 1740, "y": 1310, "width": 240, "height": 274},
                     "cropped": {"mapped": {"eye": "left", "x": 1462, "y": 1036, "width": 240, "height": 274},
                                 "source": {"eye": "left", "x": 1740, "y": 1310, "width": 240, "height": 274}}}
-CROP_GEOMETRY = {"kind": "per_eye_crop", "source_eye": [3072, 3232], "target_eye": [2624, 2776],
-                 "tangent_multipliers": [.8542, .85],
-                 "eyes": [{"eye": "left", "x": 278, "y": 274, "width": 2624, "height": 2776},
-                          {"eye": "right", "x": 170, "y": 274, "width": 2624, "height": 2776}],
-                 "resampling": "none"}
+CROP_GEOMETRY = {
+    "kind": "per_eye_crop", "source_eye": [3072, 3232], "target_eye": [2624, 2776],
+    "tangent_multipliers": [.8542, .85],
+    "eyes": [
+        {"eye": "left", "x": 278, "y": 274, "width": 2624, "height": 2776,
+         "ideal_offset": [278.310417777275, 274.82863217055296],
+         "alignment_error": [-.3104177772750063, -.8286321705529645],
+         "original_tangents": [-1.3763818740844727, .8390995860099792, -1.4281479120254517, .9656887650489807],
+         "scaled_tangents": [-1.1757053968429565, .7167588663697242, -1.2139257252216338, .8208354502916336],
+         "effective_tangents": [-1.1758923409118627, .7164980729188151, -1.225205074921988, .8308873185058041],
+         "scaled_span_pixels": [2624.1023999999998, 2747.2]},
+        {"eye": "right", "x": 170, "y": 274, "width": 2624, "height": 2776,
+         "ideal_offset": [169.689582222725, 274.82863217055296],
+         "alignment_error": [.3104177772750063, -.8286321705529645],
+         "original_tangents": [-.8390995860099792, 1.3763818740844727, -1.4281479120254517, .9656887650489807],
+         "scaled_tangents": [-.7167588663697242, 1.1757053968429565, -1.2139257252216338, .8208354502916336],
+         "effective_tangents": [-.716498072918815, 1.175892340911863, -1.225205074921988, .8308873185058041],
+         "scaled_span_pixels": [2624.1023999999998, 2747.2]}],
+    "resampling": "none; fixed extents centred on scaled tangent rectangle",
+    "alignment": "nearest even; ties-to-even"}
 
 
 def _hash(path):
@@ -65,7 +80,7 @@ def _source_contract(source: Path, info: fb.Y4MInfo) -> dict:
 
 
 def build_plan(source: Path, vertical_pixels_per_degree: float, *, projection_evidence: str,
-               crop_evidence: str, crops, horizontal_pixels_per_degree: float | None = None,
+               crop_evidence: str, crops, full_source: Path, horizontal_pixels_per_degree: float | None = None,
                fixture: bool = False, include_q3b: bool = False) -> dict:
     """Freeze Q3a's five cropped rows. Q3b remains non-runnable until WO-8."""
     source = Path(source); info = _require_cropped_source(source)
@@ -77,7 +92,11 @@ def build_plan(source: Path, vertical_pixels_per_degree: float, *, projection_ev
         raise ValueError("frozen Q3 crop score definitions are required")
     # Reuse the only calibrated scorer-plan builder, then select the exact
     # experiment rows rather than recreating its projection/crop math here.
-    base = fb.build_plan(source, vertical_pixels_per_degree,
+    full_source = Path(full_source)
+    full_info = fb.inspect_y4m(full_source)
+    if (full_info.width, full_info.height, full_info.frames, full_info.chroma, full_info.color_range) != (6144, 3232, 90, "420", "FULL"):
+        raise ValueError("Q3 full source must be the reviewed 6144x3232 C420 90-frame parent")
+    base = fb.build_plan(full_source, vertical_pixels_per_degree,
                          horizontal_pixels_per_degree=horizontal_pixels_per_degree,
                          projection_evidence=projection_evidence, crop_evidence=crop_evidence,
                          fixture=fixture, fps=90, wavelets=("haar", "53", "97"),
@@ -86,14 +105,14 @@ def build_plan(source: Path, vertical_pixels_per_degree: float, *, projection_ev
     selected = {(w, r) for w, r in Q3A_ROWS}
     pairs = [(i, c) for i, c in enumerate(base["cells"])
              if (c["wavelet"], c["rate_mbps"]) in selected]
-    cells = [dict(phase="q3a", source_geometry="crop", **c) for _, c in pairs]
+    cells = [dict(phase="q3a", source_geometry="crop", score_vertical_pixels_per_degree=float(vertical_pixels_per_degree), **c) for _, c in pairs]
     if include_q3b:
         cells += [dict(phase="q3b", profile=p, wavelet=w, rate_mbps=r, fps=90,
                        eye_width=2624, eye_height=2776, stereo_width=5248,
                        requires_wo8_reduced_encode=True)
                   for p, w, r in Q3B_ROWS]
     return {"schema": SCHEMA, "kind": "pyro_q3_framebank", "fixture_only": bool(fixture),
-            "source": _source_contract(source, info), "projection_evidence": projection_evidence.strip(),
+            "source": _source_contract(source, info), "source_derivation": {"parent_sha256": _hash(full_source), "parent_geometry": [full_info.width, full_info.height], "operation": "native_per_eye_crop_no_resampling"}, "projection_evidence": projection_evidence.strip(),
             "crop_evidence": crop_evidence.strip(), "crop_geometry": copy.deepcopy(CROP_GEOMETRY),
             "frozen_module_hashes": _module_hashes(), "cells": cells,
             "presentation_eye": base["presentation_eye"], "projection": base["projection"],
@@ -113,12 +132,17 @@ def validate_plan(plan: dict) -> dict:
     source = plan.get("source", {})
     if source.get("geometry") != [5248, 2776] or source.get("frames") != 90 or source.get("fps") != [90, 1] or source.get("chroma") != "420" or source.get("color_range") != "FULL":
         raise ValueError("Q3 source contract drifted")
+    derivation = plan.get("source_derivation", {})
+    if (derivation.get("parent_geometry") != [6144, 3232] or derivation.get("operation") != "native_per_eye_crop_no_resampling" or
+            not isinstance(derivation.get("parent_sha256"), str) or len(derivation["parent_sha256"]) != 64):
+        raise ValueError("Q3 cropped-source derivation drifted")
     if plan.get("frozen_module_hashes") != _module_hashes():
         raise ValueError("runner module hash drifted; freeze a new plan")
     actual_a = [c for c in plan.get("cells", []) if c.get("phase") == "q3a"]
     if [(c.get("wavelet"), c.get("rate_mbps")) for c in actual_a] != list(Q3A_ROWS) or any(
             c.get("eye_width") != 2624 or c.get("eye_height") != 2776 or c.get("stereo_width") != 5248 or
-            c.get("cap_bytes") != fb.cap_bytes(c["rate_mbps"], 90) or c.get("source_geometry") != "crop" for c in actual_a):
+            c.get("cap_bytes") != fb.cap_bytes(c["rate_mbps"], 90) or c.get("source_geometry") != "crop" or
+            c.get("score_vertical_pixels_per_degree") != plan.get("projection", {}).get("vertical_pixels_per_degree") for c in actual_a):
         raise ValueError("Q3a rows drifted")
     calibration = plan.get("hvs_calibration", {})
     if not isinstance(calibration, dict) or len(calibration.get("codec_cells", [])) != len(actual_a):
@@ -294,7 +318,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
     plan = sub.add_parser("plan", help="freeze the five Q3a cropped PyroWave rows")
-    for name in ("source", "projection-evidence", "crop-evidence", "crops", "out"):
+    for name in ("source", "full-source", "projection-evidence", "crop-evidence", "crops", "out"):
         plan.add_argument("--" + name, required=True)
     plan.add_argument("--vertical-pixels-per-degree", required=True, type=float)
     plan.add_argument("--horizontal-pixels-per-degree", type=float)
@@ -313,7 +337,7 @@ def main(argv=None):
         frozen = build_plan(Path(args.source), args.vertical_pixels_per_degree,
                             horizontal_pixels_per_degree=args.horizontal_pixels_per_degree,
                             projection_evidence=args.projection_evidence, crop_evidence=args.crop_evidence,
-                            crops=crops, include_q3b=args.include_q3b_hooks)
+                            crops=crops, full_source=Path(args.full_source), include_q3b=args.include_q3b_hooks)
         Path(args.out).write_text(fb.report_json(frozen), encoding="utf-8")
         print("wrote frozen Q3 PyroWave plan with", len(frozen["cells"]), "cells")
         return 0
