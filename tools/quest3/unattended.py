@@ -40,13 +40,15 @@ def is_comfy_backend_process(row):
         return False
     command = row.get('CommandLine')
     if not command:
-        # A Python process with unreadable arguments remains a conservative
-        # candidate; queue/compute checks must not infer that it is idle.
-        return True
+        # Short-lived CPU jobs and processes owned by another Windows account
+        # can have no readable arguments. That is not ComfyUI identity evidence.
+        # The independent per-PID GPU backend/activity check still stops an
+        # active Python compute context, including when its arguments are hidden.
+        return False
     try:
         args = [arg.strip('"') for arg in shlex.split(command, posix=False)][1:]
     except ValueError:
-        return True
+        return False
     for index, arg in enumerate(args):
         if arg == '-c':
             return False
