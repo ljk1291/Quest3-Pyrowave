@@ -166,6 +166,20 @@ Q3b is seven of ten complete (22 of 25 overall). Blur-only Light / 9/7 is
 running, followed by both NVENC H.264 cells. Combined publication, the verified
 stable pair and owner checklist remain outstanding.
 
+Measured follow-up, 2026-10-04 08:15 UTC: blur-only Light / PyroWave 9/7 /
+1000 / softness 0.5 completes with verified provenance, both windows and clean
+closure. It keeps the full cropped 2624×2776/eye encoded dimensions. Fence
+edge PSNR/temporal mean/p99 is 35.741924 / 3.293609 / 19 (10–89): close to
+unfoveated cropped 9/7's 35.753751 / 3.300473 / 19, with no p99 improvement.
+Whole-image HVS is 39.640497 dB all-90 / 39.383788 dB trimmed, below
+unfoveated 9/7 by 0.264488 / 0.270312 dB. It improves over reduced Light on
+the common fence, whole-image and fixed-crop metrics but proves no reduced
+geometry equivalence or decoder-workload reduction. Centre/peripheral domains
+differ and remain separate diagnostics. No profile or timing promotion.
+All eight PyroWave Q3b rows are complete (23 of 25 Q3 overall); the first of
+two NVENC H.264 rows is running. Finish both before combined publication,
+the verified stable pair and final owner checklist.
+
 ## 1. Owner input (2026-10-03 21:44)
 
 - **Live decoder caps on Quest 3.** These come from the owner's experience; verify them on

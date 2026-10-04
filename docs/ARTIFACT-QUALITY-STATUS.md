@@ -71,9 +71,10 @@ The reduced and matching-blur first-frame hashes match both retained attempts.
 The finite r5 controller is running Q3b with three preparation workers and fresh
 r3 Pyro attempt paths. Its three Light / 9/7 / 1000 Mbps softness cells (0, 0.5,
 1), Light / 5/3 / 1000 Mbps / softness 0.5, both Medium / 5/3 and 9/7 /
-1000 Mbps / softness 0.5 and H264Fit / 9/7 / 1000 Mbps / softness 0.5 are
-complete with clean lease closure; three Q3b cells remain. Blur-only Light /
-9/7 / 1000 Mbps / softness 0.5 is active; both NVENC H.264 cells follow.
+1000 Mbps / softness 0.5, H264Fit / 9/7 / 1000 Mbps / softness 0.5 and
+blur-only Light / 9/7 / 1000 Mbps / softness 0.5 are complete with clean lease
+closure. All eight PyroWave Q3b rows are retained; two NVENC H.264 cells remain.
+The H264Fit / single H.264 / 700 Mbps / P7 / softness 0.5 cell is active.
 Do not repeat completed cells. The first result is worse
 than cropped 9/7 without foveation on the primary fence: 30.832 versus 35.754 dB
 edge PSNR, temporal residual p99 32 versus 19 luma codes (both frames 10–89).
@@ -187,6 +188,42 @@ Take the first unblocked item. Items marked ∥ are independent.
 ## Log
 
 <!-- Codex appends entries here: date, checkpoint, verified (links), remaining, blocked? -->
+
+- 2026-10-04 08:15 UTC, blur-only Light / CDF 9/7 / 1000 Mbps / softness
+  0.5 completed. All 90 ordered decoded/Q3b identity records, both score
+  windows, source/corpus/projection/scorer provenance and clean lease closures
+  pass publisher validation. It retains 2624×2776 encoded pixels per eye;
+  it is a full-dimension quality diagnostic, not the reduced Light geometry.
+
+  | CDF 9/7 / 1000 Mbps profile | Encoded pixels / eye | Fence edge PSNR-Y, 10–89 | Temporal mean | Temporal p99 | Whole-image HVS, all-90 |
+  |---|---|---:|---:|---:|---:|
+  | Cropped, no foveation | 2624×2776 | 35.753751 dB | 3.300473 | 19 | 39.904984 dB |
+  | Reduced Light, softness 0.5 | 2464×2592 | 30.832637 dB | 5.327900 | 32 | 37.741237 dB |
+  | Blur-only Light, softness 0.5 | 2624×2776 | 35.741924 dB | 3.293609 | 19 | 39.640497 dB |
+
+  These fence and expanded whole-image comparisons have common score domains.
+  Blur-only gains 4.909286 dB fence PSNR and 1.899260 dB whole-image HVS
+  all-90 versus reduced Light, but versus unfoveated cropped 9/7 it changes
+  fence PSNR by −0.011828 dB and leaves temporal p99 at 19. Whole-image HVS
+  falls by 0.264488 dB all-90 / 0.270312 dB trimmed versus unfoveated 9/7.
+  Fixed-crop trimmed HVS changes versus reduced Light / unfoveated 9/7:
+  UI +1.184458 / +0.147972 dB, tunnel +1.359837 / +0.107470 dB, rail
+  +1.580445 / −0.030542 dB. This does not establish reduced Light equivalence,
+  a decoder-workload reduction, or a live timing/90-Hz result. No promotion.
+
+  Blur-only centre ROI (188,200,2248×2376) and peripheral mask (1,938,480
+  pixels, blur_only true) differ from reduced Light (264,280,2112×2218;
+  2,595,584 pixels). Treat these as separate diagnostics: blur-only centre
+  sharp/matching-blur HVS is 39.637470 / 39.641516 dB in 10–89; peripheral
+  sharp edge PSNR/temporal mean/p99 is 35.653516 / 2.923335 / 19, and
+  matching-blur is 39.678003 / 1.956875 / 12. Temporal metrics are file-order
+  luma residuals, not optical shimmer. Private controller report SHA256:
+  `db0b88e475656d594f6e40c34c16b169f3d3207437b7078542647d7e7d7c1c63`.
+  All eight PyroWave Q3b rows and 23 of 25 Q3 rows are complete. The existing
+  controller has started H264Fit / single H.264 / 700 / P7 / softness 0.5;
+  the dual H.264 blur-only row follows. Both retain finite quality leases.
+  Combined publication, verified stable pair and owner checklist remain.
+  No owner blocker or headset/settings/arm/installed-pair change.
 
 - 2026-10-04 07:38 UTC, H264Fit / PyroWave CDF 9/7 / 1000 Mbps / softness
   0.5 completed. H264Fit names the transform profile here; this is not an H.264
