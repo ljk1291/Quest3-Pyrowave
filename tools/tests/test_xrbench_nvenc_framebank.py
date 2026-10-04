@@ -463,6 +463,70 @@ class NvencFramebankTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "missing"):
                 nf.lease_telemetry(Path("private-window"), 10, 12)
 
+    def test_q3b_preparation_workers_keep_order_bound_work_and_close_outputs(self):
+        """Threaded preparation is bounded; parent writes stay byte-identical and ordered."""
+        import threading
+        import time
+        from xrbench.foveation import EncodedPlanes, FoveationConfig
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp); info=fb.Y4MInfo(4,4,90,1,"420","FULL",24,4)
+            frames=[]
+            for index in range(4):
+                frames.append([np.full((4,4),index,np.uint8),np.full((2,2),128,np.uint8),np.full((2,2),128,np.uint8)])
+            source=root/'source.y4m'; fb.write_y4m(source,info,frames)
+            geometry={"target_eye":[2,4]}; transform={"kind":"wo8_foveation","profile":"light","softness":0.,"blur_only":False}
+            active={"now":0,"peak":0}; lock=threading.Lock()
+            class Guard:
+                def __init__(self): self.calls=0
+                def status(self): self.calls+=1; return {}
+            def prepare(index,planes,digest,source_info,geo,config):
+                with lock:
+                    active["now"]+=1; active["peak"]=max(active["peak"],active["now"])
+                try:
+                    time.sleep(.02*(3-index))
+                    encoded=EncodedPlanes(tuple(plane.copy() for plane in planes),(2,4),(2,4),True,config)
+                    return index,digest,planes,encoded,tuple(plane.copy() for plane in planes)
+                finally:
+                    with lock: active["now"]-=1
+            def run(label,workers):
+                paths=[root/f'{label}-{name}.y4m' for name in ('encoded','sharp','blur')]; guard=Guard()
+                with (mock.patch.object(nf,'_q3b_config',return_value=FoveationConfig('light')),
+                      mock.patch.object(nf,'_prepare_q3b_frame',side_effect=prepare)):
+                    result=nf._stream_q3b_sources(source,info,geometry,transform,*paths,preparation_workers=workers,guard=guard)
+                return paths,result,guard
+            one_paths,one,one_guard=run('one',1); active['peak']=0
+            three_paths,three,three_guard=run('three',3)
+            self.assertEqual([path.read_bytes() for path in one_paths],[path.read_bytes() for path in three_paths])
+            self.assertEqual([item['source_frame'] for item in three[2]],list(range(4)))
+            self.assertEqual(three[3]['preparation_workers'],3)
+            self.assertLessEqual(active['peak'],3); self.assertGreaterEqual(active['peak'],2)
+            self.assertGreater(one_guard.calls,0); self.assertGreater(three_guard.calls,0)
+            with self.assertRaisesRegex(ValueError,'\[1, 3\]'):
+                nf._stream_q3b_sources(source,info,geometry,transform,root/'x',root/'y',root/'z',preparation_workers=4)
+            class StopAfterResult:
+                def __init__(self): self.calls=0
+                def status(self):
+                    self.calls+=1
+                    if self.calls == 3: raise PermissionError('stop after worker completion')
+                    return {}
+            stopped=[root/f'stopped-{name}.y4m' for name in ('encoded','sharp','blur')]
+            with (mock.patch.object(nf,'_q3b_config',return_value=FoveationConfig('light')),
+                  mock.patch.object(nf,'_prepare_q3b_frame',side_effect=prepare)):
+                with self.assertRaisesRegex(PermissionError,'stop after worker completion'):
+                    nf._stream_q3b_sources(source,info,geometry,transform,*stopped,preparation_workers=1,guard=StopAfterResult())
+            self.assertTrue(all(not path.exists() for path in stopped))
+            def fail(index,*args):
+                if index==1: raise RuntimeError('worker failure')
+                return prepare(index,*args)
+            failed=[root/f'failed-{name}.y4m' for name in ('encoded','sharp','blur')]
+            with (mock.patch.object(nf,'_q3b_config',return_value=FoveationConfig('light')),
+                  mock.patch.object(nf,'_prepare_q3b_frame',side_effect=fail)):
+                with self.assertRaisesRegex(RuntimeError,'worker failure'):
+                    nf._stream_q3b_sources(source,info,geometry,transform,*failed,preparation_workers=2,guard=Guard())
+            # Windows refuses this append while an output handle remains open.
+            for path in failed:
+                with path.open('ab') as stream: stream.write(b'')
+
     def test_runner_marks_final_lease_health_failure_incomplete(self):
         with tempfile.TemporaryDirectory() as root:
             root = Path(root); source = self.source(root); crop = {"name":"center","eye":"left","x":0,"y":0,"w":1,"h":1}

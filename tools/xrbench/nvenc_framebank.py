@@ -19,6 +19,7 @@ import math
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -864,56 +865,95 @@ def _q3b_config(transform: dict):
         raise ValueError("Q3b WO-8 transform is unavailable or invalid") from exc
 
 
+def _q3b_preparation_workers(value: int) -> int:
+    if type(value) is not int or not 1 <= value <= 3:
+        raise ValueError("Q3b preparation workers must be an integer in [1, 3]")
+    return value
+
+
+def _prepare_q3b_frame(index, planes, digest, source_info, geometry, config):
+    """CPU-only per-frame work; output writes stay ordered in the parent."""
+    from . import fence_metrics
+    from .foveation import encode_planes, reconstruct_planes
+    cropped = (planes if (source_info.width, source_info.height) ==
+               (geometry["target_eye"][0] * 2, geometry["target_eye"][1])
+               else fence_metrics.crop_frame(planes, geometry))
+    encoded = encode_planes(cropped, config)
+    # blur_reference(cropped, config) is exactly these two operations. Reuse
+    # the just-created reduced planes so the forward filter runs once only.
+    blur = reconstruct_planes(encoded.planes, encoded)
+    return index, digest, cropped, encoded, blur
+
+
 def _stream_q3b_sources(source: Path, source_info: fb.Y4MInfo, geometry: dict, transform: dict,
-                        encoded_path: Path, sharp_path: Path, blur_path: Path):
+                        encoded_path: Path, sharp_path: Path, blur_path: Path, *,
+                        preparation_workers: int = 1, guard=None):
     """Encode reduced WO-8 planes, while retaining full crop score references.
 
     The encoded path is the *only* input to the codec.  The sharp and matching
     blur paths remain expanded cropped space for post-decode quality scoring.
     """
-    try:
-        from . import fence_metrics
-        from .foveation import encode_planes, blur_reference
-    except ImportError as exc:
-        raise ValueError("Q3b source modules are unavailable") from exc
     config = _q3b_config(transform)
+    preparation_workers = _q3b_preparation_workers(preparation_workers)
     expanded = tuple(geometry["target_eye"])
     first = None
     identities = []
-    for index, planes, digest in fb.iter_y4m(source, source_info):
-        cropped = (planes if (source_info.width, source_info.height) ==
-                   (geometry["target_eye"][0] * 2, geometry["target_eye"][1])
-                   else fence_metrics.crop_frame(planes, geometry))
-        encoded = encode_planes(cropped, config)
-        if encoded.expanded_eye != expanded or encoded.chroma420 is not True:
-            raise ValueError("Q3b WO-8 expanded geometry/chroma drifted")
-        if first is None:
-            first = encoded
-            small = encoded.encoded_eye
-            encoded_info = fb.Y4MInfo(small[0] * 2, small[1], source_info.fps_num, source_info.fps_den,
-                source_info.chroma, source_info.color_range,
-                fb._frame_bytes(small[0] * 2, small[1], source_info.chroma), source_info.frames)
-            score_info = fb.Y4MInfo(expanded[0] * 2, expanded[1], source_info.fps_num, source_info.fps_den,
-                source_info.chroma, source_info.color_range,
-                fb._frame_bytes(expanded[0] * 2, expanded[1], source_info.chroma), source_info.frames)
-            encoded_out = fb._open_writer(encoded_path, encoded_info)
-            sharp_out = fb._open_writer(sharp_path, score_info)
-            blur_out = fb._open_writer(blur_path, score_info)
-        elif encoded.encoded_eye != first.encoded_eye:
-            raise ValueError("Q3b WO-8 encoded geometry changed by frame")
-        encoded_hash = fb._write_frame(encoded_out, encoded_info, encoded.planes)
-        sharp_hash = fb._write_frame(sharp_out, score_info, cropped)
-        blur_hash = fb._write_frame(blur_out, score_info, blur_reference(cropped, config))
-        identities.append({"source_frame": index, "source_sha256": digest,
-                           "encoded_reference_sha256": encoded_hash,
-                           "sharp_reference_sha256": sharp_hash, "blur_reference_sha256": blur_hash})
+    iterator = iter(fb.iter_y4m(source, source_info)); pending = {}
+    encoded_out = sharp_out = blur_out = None
+    def submit(executor):
+        if guard is not None: guard.status()
+        try: index, planes, digest = next(iterator)
+        except StopIteration: return False
+        pending[index] = executor.submit(_prepare_q3b_frame, index, planes, digest, source_info, geometry, config)
+        return True
+    try:
+        with ThreadPoolExecutor(max_workers=preparation_workers, thread_name_prefix="q3b-prepare") as executor:
+            try:
+                for _ in range(preparation_workers):
+                    if not submit(executor): break
+                next_index = 0
+                while pending:
+                    if guard is not None: guard.status()
+                    future = pending.pop(next_index)
+                    index, digest, cropped, encoded, blur = future.result()
+                    # A preparation worker can run for many seconds. Recheck the
+                    # owner guard after completion and before it has any durable
+                    # output effect or we queue another source frame.
+                    if guard is not None: guard.status()
+                    if encoded.expanded_eye != expanded or encoded.chroma420 is not True:
+                        raise ValueError("Q3b WO-8 expanded geometry/chroma drifted")
+                    if first is None:
+                        first = encoded; small = encoded.encoded_eye
+                        encoded_info = fb.Y4MInfo(small[0] * 2, small[1], source_info.fps_num, source_info.fps_den,
+                            source_info.chroma, source_info.color_range, fb._frame_bytes(small[0] * 2, small[1], source_info.chroma), source_info.frames)
+                        score_info = fb.Y4MInfo(expanded[0] * 2, expanded[1], source_info.fps_num, source_info.fps_den,
+                            source_info.chroma, source_info.color_range, fb._frame_bytes(expanded[0] * 2, expanded[1], source_info.chroma), source_info.frames)
+                        encoded_out = fb._open_writer(encoded_path, encoded_info); sharp_out = fb._open_writer(sharp_path, score_info); blur_out = fb._open_writer(blur_path, score_info)
+                    elif encoded.encoded_eye != first.encoded_eye:
+                        raise ValueError("Q3b WO-8 encoded geometry changed by frame")
+                    encoded_hash = fb._write_frame(encoded_out, encoded_info, encoded.planes)
+                    sharp_hash = fb._write_frame(sharp_out, score_info, cropped)
+                    blur_hash = fb._write_frame(blur_out, score_info, blur)
+                    identities.append({"source_frame": index, "source_sha256": digest, "encoded_reference_sha256": encoded_hash,
+                                       "sharp_reference_sha256": sharp_hash, "blur_reference_sha256": blur_hash})
+                    next_index += 1; submit(executor)
+            except BaseException:
+                # Running NumPy work cannot be preempted, but cancel queued
+                # futures before executor shutdown. It only waits for the
+                # bounded set that was already executing.
+                for future in pending.values():
+                    future.cancel()
+                raise
+    finally:
+        for stream in (encoded_out, sharp_out, blur_out):
+            if stream is not None: stream.close()
     if first is None:
         raise ValueError("Q3b source has no frames")
-    encoded_out.close(); sharp_out.close(); blur_out.close()
     return encoded_info, score_info, identities, {"transform": copy.deepcopy(transform),
         "expanded_eye": list(first.expanded_eye), "encoded_eye": list(first.encoded_eye),
         "encoded_stereo": [first.encoded_eye[0] * 2, first.encoded_eye[1]],
-        "encoded_chroma": "420"}
+        "encoded_chroma": "420", "preparation_workers": preparation_workers,
+        "preparation_execution": "bounded_cpu_threads_ordered_output"}
 
 
 def _reconstruct_q3b_decoded(decoded_small: Path, encoded_info: fb.Y4MInfo, score_path: Path,
@@ -1264,12 +1304,13 @@ def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, 
 
 def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, window: Path, *,
              command_timeout_s: float = 900, keep_artifacts: bool = False, supervised: bool = True,
-             tools_metadata: Path | None = None) -> dict:
+             tools_metadata: Path | None = None, preparation_workers: int = 1) -> dict:
     """Run a frozen proxy matrix through an owner-supervised quality lease."""
     raw = Path(plan_path).read_bytes(); plan = validate_plan(json.loads(raw))
     source = Path(source); private_out = fb._private_path(private_out)
     if not supervised:
         raise ValueError("NVENC frame bank requires explicit owner-supervised lease")
+    preparation_workers = _q3b_preparation_workers(preparation_workers)
     if private_out.exists():
         raise FileExistsError("private output must be fresh")
     needed = {name: _tool(tools.get(name)) for name in ("ffmpeg", "ffprobe", "psnr_hvs_m_h")}
@@ -1297,7 +1338,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
               "q3_revision": plan.get("q3_revision"), "source_adapter": plan.get("source_adapter"),
               "fence_rectangles": plan.get("fence_rectangles"), "score_windows": plan.get("score_windows"),
               "proxy": plan["proxy"], "source_y4m_header": source_header,
-              "tools_build_provenance": build_provenance, "cells": []}
+              "tools_build_provenance": build_provenance, "q3b_preparation_workers": preparation_workers, "cells": []}
     scoring_tools = {"ffmpeg": needed["ffmpeg"], "psnr_hvs_m_h": needed["psnr_hvs_m_h"]}
     try:
         result["hvs_gpu_sanity"] = fb.hvs_gpu_sanity(needed["psnr_hvs_m_h"], private_out / "scorer-sanity",
@@ -1318,7 +1359,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                 score_blur = directory / "score-blur-reference.y4m"
                 ref_info, score_ref_info, identities, q3b_provenance = _stream_q3b_sources(
                     source, source_info, plan["source_adapter"]["geometry"], q3b_transform,
-                    ref, score_ref, score_blur)
+                    ref, score_ref, score_blur, preparation_workers=preparation_workers, guard=guard)
                 row["q3b_transform"] = q3b_provenance
             row["identity_count"] = len(identities)
             if [x["source_sha256"] for x in identities] != [x["source_sha256"] for x in plan["source"]["frame_identity"]]:
@@ -1491,6 +1532,7 @@ def sanitized_report(result: dict) -> dict:
             "source_sha256": result.get("source_sha256_end"), "source_y4m_header": result.get("source_y4m_header"), "tool_provenance": result.get("tool_provenance_end"), "tools_build_provenance": result.get("tools_build_provenance"),
             "hvs_gpu_sanity": result.get("hvs_gpu_sanity"), "projection": result.get("projection"), "crop_definitions": result.get("crop_definitions"), "q3_revision": result.get("q3_revision"), "source_adapter": result.get("source_adapter"), "fence_rectangles": result.get("fence_rectangles"), "score_windows": result.get("score_windows"), "proxy": result.get("proxy"),
             "lease_final_health": result.get("lease_final_health"), "lease_telemetry": result.get("lease_telemetry"),
+            "q3b_preparation_workers": result.get("q3b_preparation_workers"),
             "cells": [cell_public(row) for row in result.get("cells", [])],
             "optical_latency_ms": None, "display_fps": None}
 
@@ -1517,6 +1559,7 @@ def main(argv=None):
     r.add_argument("--command-timeout-s", type=float, default=900)
     r.add_argument("--keep-artifacts", action="store_true")
     r.add_argument("--supervised", action="store_true", help="required owner-supervised PC-only lease")
+    r.add_argument("--q3b-preparation-workers", type=int, default=1, choices=(1, 2, 3))
     args = parser.parse_args(argv)
     if args.command == "plan":
         if args.revised_q3a:
@@ -1542,7 +1585,7 @@ def main(argv=None):
                       {"ffmpeg": args.ffmpeg, "ffprobe": args.ffprobe, "psnr_hvs_m_h": args.psnr_hvs_m_h},
                       Path(args.window), command_timeout_s=args.command_timeout_s,
                       keep_artifacts=args.keep_artifacts, supervised=args.supervised,
-                      tools_metadata=Path(args.tools_metadata))
+                      tools_metadata=Path(args.tools_metadata), preparation_workers=args.q3b_preparation_workers)
     Path(args.report).write_text(fb.report_json(sanitized_report(result)), encoding="utf-8")
     print("wrote sanitized NVENC report: complete=" + str(result["complete"]))
     return 0 if result["complete"] else 2

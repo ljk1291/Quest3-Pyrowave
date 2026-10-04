@@ -156,11 +156,12 @@ class PyroQ3FramebankTests(unittest.TestCase):
             report = Path(root) / "report.json"
             args = ["run", "--plan", "p", "--source", "s", "--private-out", "o", "--report", str(report),
                     "--window", "w", "--encode", "e", "--decode", "d", "--psnr-hvs-m-h", "h",
-                    "--ffmpeg", "f", "--tools-metadata", "m", "--phase", "q3b", "--cell-index", "5"]
+                    "--ffmpeg", "f", "--tools-metadata", "m", "--phase", "q3b", "--cell-index", "5", "--q3b-preparation-workers", "3"]
             with mock.patch.object(q3, "run_plan", return_value={"complete": True}) as run:
                 self.assertEqual(q3.main(args), 0)
             self.assertEqual(run.call_args.kwargs["phase"], "q3b")
             self.assertEqual(run.call_args.kwargs["cell_indices"], [5])
+            self.assertEqual(run.call_args.kwargs["preparation_workers"], 3)
             self.assertTrue(report.is_file())
 
     def test_q3b_never_substitutes_shared_scorer_or_blur_only_path(self):
@@ -204,3 +205,6 @@ class PyroQ3FramebankTests(unittest.TestCase):
                 self.assertTrue(prep.called); self.assertTrue(expand.called); self.assertTrue(score.called, result)
                 self.assertEqual(score.call_args.args[1], 5)
                 self.assertEqual(result['cells'][0]['q3b_encoded_source']['frames'],90)
+                self.assertEqual(prep.call_args.kwargs['preparation_workers'], 1)
+                self.assertIsNotNone(prep.call_args.kwargs['guard'])
+                self.assertEqual(result['q3b_preparation_workers'],1)
