@@ -163,6 +163,18 @@ class SupervisedTests(unittest.TestCase):
             with self.subTest(evidence=evidence,duration=duration),self.assertRaises(ValueError):
                 with s.session(self.path,evidence=evidence,duration_s=duration): pass
 
+    def test_windowguard_accepts_away_only_with_explicit_pc_authorization(self):
+        self.state['authorization'].update(owner_present=False,owner_authorized_while_away=True);self.write()
+        data=self.status()
+        response=mock.Mock(returncode=0,stdout=json.dumps(data))
+        with mock.patch.object(fb.subprocess,'run',return_value=response):
+            self.assertTrue(fb.WindowGuard(self.path,clock=lambda:100,supervised=True).status()['lease']['active'])
+        for field,value in [('owner_authorized_while_away',False),('owner_present',None),('allow',['frame_bank_pc','chart'])]:
+            bad=copy.deepcopy(data);bad['authorization'][field]=value
+            response.stdout=json.dumps(bad)
+            with self.subTest(field=field),mock.patch.object(fb.subprocess,'run',return_value=response):
+                with self.assertRaises(PermissionError):fb.WindowGuard(self.path,clock=lambda:100,supervised=True).status()
+
     def test_cli_start_requires_current_attestation_and_uses_finite_session(self):
         with self.assertRaises(SystemExit): s.main(['start','--window',str(self.path)])
         with mock.patch.object(s,'session') as session, mock.patch.object(s,'status_payload',side_effect=[

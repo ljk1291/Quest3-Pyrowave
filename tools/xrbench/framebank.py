@@ -303,7 +303,9 @@ class WindowGuard:
         required_guards=('restorer','monitor')
         if self.supervised:
             auth=data.get('authorization',{})
-            authority_ok=(auth.get('kind')=='owner_supervised_pc' and auth.get('owner_present') is True and isinstance(auth.get('evidence'),str) and bool(auth['evidence'].strip()) and auth.get('allow')==['frame_bank_pc'])
+            presence_authorized=(auth.get('owner_present') is True or
+                (auth.get('owner_present') is False and auth.get('owner_authorized_while_away') is True))
+            authority_ok=(auth.get('kind')=='owner_supervised_pc' and presence_authorized and isinstance(auth.get('evidence'),str) and bool(auth['evidence'].strip()) and auth.get('allow')==['frame_bank_pc'])
             required_guards=('monitor',)
         if not isinstance(deadline,(int,float)) or not math.isfinite(deadline) or deadline<=self.clock() or not authority_ok or any(guards.get(x,{}).get(k) is not True for x in required_guards for k in ("ready","alive")) or cancel.get("stop_requested") or cancel.get("paused") or cancel.get("competing_gpu") or not cancel.get("monitor_fresh"):
             raise PermissionError("WO-0 lease health check failed")
