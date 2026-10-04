@@ -428,8 +428,18 @@ def validate_plan(plan: dict) -> dict:
         if score_ppd is not None and (cell.get("source_geometry") != "crop" or
                                       not isinstance(score_ppd, (int, float)) or not math.isfinite(score_ppd) or score_ppd <= 0):
             raise ValueError("cropped score PPD is invalid")
+        transform = cell.get("source_transform")
+        if transform is not None:
+            if plan.get("q3_revision") != "2026-10-04-q3b":
+                raise ValueError("WO-8 transform is only valid for Q3b")
+            try:
+                if transform != foveation_transform_descriptor(profile=transform.get("profile"),
+                    softness=transform.get("softness"), blur_only=transform.get("blur_only")):
+                    raise ValueError
+            except (AttributeError, ValueError, TypeError) as exc:
+                raise ValueError("Q3b cell transform drifted") from exc
         copied = dict(cell)
-        copied.pop("codec", None); copied.pop("nvenc_profile", None)
+        copied.pop("codec", None); copied.pop("nvenc_profile", None); copied.pop("source_transform", None)
         copied["wavelet"] = "haar"  # only to invoke the shared manifest validator
         cells.append(copied)
     normalized["cells"] = cells
@@ -1049,7 +1059,8 @@ def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, 
                 region_mask=mask, region_descriptor=descriptor)
     display_ref = directory / "source-display.y4m"; display_dec = directory / "decoded-display.y4m"
     is_crop = cell.get("source_geometry", "full_fov") == "crop"
-    presentation_eye = (cell["eye_width"], cell["eye_height"]) if is_crop else plan["presentation_eye"]
+    presentation_eye = ((ref_info.width // 2, ref_info.height) if cell.get("source_transform") is not None
+                        else (cell["eye_width"], cell["eye_height"])) if is_crop else plan["presentation_eye"]
     # Crop rows score reconstructed cropped space against their cropped
     # reference. Full-FOV rows retain the established source-vs-decoded path.
     fb._write_display(reference if is_crop else source, ref_info if is_crop else source_info,
