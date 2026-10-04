@@ -8,6 +8,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from xrbench import framebank as fb
+from xrbench import nvenc_framebank as nvenc
 from xrbench import pyro_q3_framebank as q3
 from xrbench import pyrowave_wave as wave
 
@@ -81,6 +82,11 @@ class PyroQ3FramebankTests(unittest.TestCase):
         self.assertEqual([(cell["eye_width"], cell["eye_height"]) for cell in plan["cells"]],
                          [(2624, 2776)] * len(q3.Q3A_ROWS))
         self.assertTrue(all(cell["score_vertical_pixels_per_degree"] == 23.5 for cell in plan["cells"]))
+        mapped, excluded = nvenc._crop_context_for_cell(plan, plan["cells"][0])
+        self.assertEqual(excluded, {})
+        self.assertEqual(mapped[0]["resolved_pixels"],
+                         {"eye_x": 1258, "stereo_x": 1258, "y": 534,
+                          "width": 768, "height": 1616, "chroma_aligned": True})
         # The fake frame-bank hash only models unavailable Y4M I/O; validate
         # the generated manifest with the runner's real source hashes.
         plan["frozen_module_hashes"] = q3._module_hashes()
