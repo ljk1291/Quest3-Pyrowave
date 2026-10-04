@@ -47,6 +47,32 @@ class SupervisedTests(unittest.TestCase):
             with self.subTest(field=field):
                 old=copy.deepcopy(self.state);self.state['authorization'][field]=value;self.write()
                 self.assertFalse(self.status()['lease']['active']);self.state=old
+    def test_explicit_away_authorization_is_pc_only_and_records_absence(self):
+        self.state['authorization'].update(owner_present=False,owner_authorized_while_away=True)
+        self.write()
+        status=self.status()
+        self.assertTrue(status['lease']['active'])
+        self.assertIs(status['authorization']['owner_present'],False)
+        self.assertTrue(status['authorization']['owner_authorized_while_away'])
+        self.assertFalse(s.status_payload(self.path,host=self.host,now=100,require_allow='chart')['lease']['active'])
+        self.state['authorization']['allow']=['frame_bank_pc','chart'];self.write()
+        self.assertFalse(self.status()['lease']['active'])
+    def test_away_authorization_keeps_every_lease_stop(self):
+        self.state['authorization'].update(owner_present=False,owner_authorized_while_away=True)
+        for key,value in [('deadline_epoch_s',100),('closed',True)]:
+            old=copy.deepcopy(self.state);self.state[key]=value;self.write()
+            self.assertFalse(self.status()['lease']['active']);self.state=old
+        self.state['monitor']['conflicts']=['free_vram_below_margin'];self.write()
+        self.assertFalse(self.status()['lease']['active'])
+        self.state['monitor']['conflicts']=[];self.write();(self.path/'stop').touch()
+        self.assertFalse(self.status()['lease']['active'])
+    def test_away_flag_must_be_boolean_and_session_requires_explicit_authorization(self):
+        self.state['authorization'].update(owner_present=False,owner_authorized_while_away='yes');self.write()
+        self.assertFalse(self.status()['lease']['active'])
+        for kwargs in [dict(owner_present=False),dict(owner_present='no'),
+                       dict(owner_present=False,owner_authorized_while_away='yes')]:
+            with self.subTest(kwargs=kwargs),self.assertRaises(ValueError):
+                with s.session(self.path,evidence='current owner message',duration_s=60,**kwargs):pass
     def test_stale_competing_and_replaced_monitor(self):
         for key,value in [('sample_epoch_s',39),('sample_epoch_s',101),('ready',False),('conflicts',['comfy_queue_active_or_unknown']),('started_epoch_s',5)]:
             with self.subTest(key=key):
@@ -147,6 +173,14 @@ class SupervisedTests(unittest.TestCase):
             session.assert_called_once_with(str(self.path),evidence='Owner: run Q1 now',duration_s=60,
                                             measurement_mode='quality')
 
+    def test_cli_away_authorization_records_absence_without_broadening_scope(self):
+        with mock.patch.object(s,'session') as session, mock.patch.object(s,'status_payload',return_value={
+                'lease':{'active':False}}):
+            session.return_value.__enter__.return_value=self.path
+            self.assertEqual(s.main(['start','--window',str(self.path),'--owner-attested','Owner: offline while away',
+                                    '--owner-authorized-while-away','--duration-s','60']),0)
+            session.assert_called_once_with(str(self.path),evidence='Owner: offline while away',duration_s=60,
+                measurement_mode='quality',owner_present=False,owner_authorized_while_away=True)
     def sample(self,pct=80,name='firefox.exe'):
         return {'gpu_engine_activity':{'known':True,'active_pids':{'9':{'max_percent':pct,'engine_types':['3D']}}},
                 'nvidia_compute_apps':['9, '+name+', N/A'],'comfy_processes':[],
