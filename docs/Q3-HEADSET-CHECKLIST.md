@@ -63,7 +63,9 @@ actually held by the initialized encoder. Do not substitute it for native proof.
 The offline frame-bank encoder calls `Encoder` directly, so its retained native
 RDO logs and quality scores are unaffected. The earlier live-log requirement
 was a planned gate, not a gate already demonstrated on 80a1635. A narrowly scoped
-native getter and ALVR log bridge are being prepared separately; using them
+native getter and ALVR log bridge are prepared separately on local
+`codex/wo7-live-readback`; their source checks and standalone CPU parity test
+pass, while native export/build/runtime gates remain open. Using them
 requires a newly built, verified matching pair and an owner decision about the
 explicit 80a1635 pin. Until that decision, retain 80a1635 and mark these live
 RDO-proof gates blocked. No alternate pair is installed automatically.
@@ -96,10 +98,16 @@ the active multipliers before treating a runtime crop cell as valid.
    raw dashboard session document, `python -m tools.quest3.control experiment-properties
    --adb <ADB>`, current SteamVR/OpenXR registration, relevant ALVR config files,
    and read-only Wi-Fi state. Pin the Quest serial used for every ADB command.
-   The raw session and experiment-property documents are evidence and per-key
-   restoration inputs, not importable whole-session restore files. The only
-   automatic raw restore helper is `control resolution --restore`, and it
-   restores exactly the two recorded resolution settings.
+  The raw session and experiment-property documents are evidence and per-key
+  restoration inputs, not importable whole-session restore files. The only
+  automatic raw restore helper is `control resolution --restore`, and it
+  restores exactly the two recorded resolution settings.
+   The current `control experiment-properties` and `bench capture` CLIs lack a
+   `--serial` argument. Run them only in the owned child process with
+   `ANDROID_SERIAL` set to the verified Quest serial in that child's environment;
+   retain the launch contract. Use explicit `adb -s <QUEST_SERIAL>` for direct
+   commands. Do not change the user/system environment or rely on default-device
+   selection; the network CLI already requires `--serial`.
 3. Require the Q4 Android receiver binary from the verified pair at
    `/data/local/tmp/q3pw/tcpframerecv-android`; do not substitute an unverified
    local binary. Before Q4, record the read-only PC link/driver evidence:

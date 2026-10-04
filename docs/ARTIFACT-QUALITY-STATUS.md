@@ -14,18 +14,23 @@ blocker; **owner confirmation to begin has not been received**. The APK/server
 checksums, stable certificate and archive members were reverified. The new server
 is staged separately; the d1c3 artifacts and server remain intact for rollback.
 No ADB, GPU query, install, VR launch, network test, settings/registration or
-arm-file operation has occurred during preparation. The private per-key guard
-has eight passing CPU tests; its live adapter and fresh state snapshots remain
-gated on the owner beginning the session.
+arm-file operation has occurred during preparation. Private per-key guard/adapter
+and controller entry points have 32 passing CPU tests, including restart role
+reuse, dashboard availability during restoration and retained-handle completion.
+Fresh state snapshots and live worker/device readbacks remain open gates before
+invocation.
 
 **Native RDO readback on 80a1635 is blocked.** The release PyroWave C API sets
 `NullLogger` before encoder initialization and suppresses the WO-7 density log.
 There is no initialized-density getter or ALVR log bridge in this pair. Thus
 a/a2/d cannot meet the requested native proof by reading the launch environment.
 The offline direct-Encoder logs remain valid; no Q3 score is retracted. A minimal
-read-only getter/log bridge is being prepared on a separate branch for review,
+read-only getter/log bridge is prepared on local `codex/wo7-live-readback` for review,
 with no deployment or automatic substitution for the pinned pair. See the
 [checklist correction](Q3-HEADSET-CHECKLIST.md#preparation-finding-native-rdo-proof-is-blocked-on-80a1635).
+Its source/lock/wiring checks pass, including the expanded 141-test CPU command;
+the standalone C++ default/report-parity test also compiles and passes. Native
+DLL export, full matching build and live log activation remain unverified.
 
 a2 is identical to a except RDO 24 px/deg (12 cycles/deg), and follows it
 immediately. Q4 retains the 600/800/1000/1200-Mbps stationary sequence and moving
