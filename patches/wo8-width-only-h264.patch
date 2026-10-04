@@ -13,7 +13,7 @@ diff --git a/alvr/session/src/settings.rs b/alvr/session/src/settings.rs
       Medium,
       #[schema(strings(display_name = "H.264 fit (0.5 / 2x)"))]
       H264Fit,
-+    #[schema(strings(display_name = "H.264 width-only (0.5 / 2x X; identity Y)"))]
++    #[schema(strings(display_name = "H.264 width-only (23/41 / 2x X; identity Y)"))]
 +    H264WidthOnly,
       #[schema(strings(display_name = "Custom"))]
       Custom,
@@ -31,7 +31,7 @@ diff --git a/alvr/server_core/src/connection.rs b/alvr/server_core/src/connectio
                   FoveationProfile::Light => (0.8, 1.5, (0., 0.)),
                   FoveationProfile::Medium => (0.6, 2.0, (0., 0.)),
                   FoveationProfile::H264Fit => (0.5, 2.0, (0., 0.)),
-+                FoveationProfile::H264WidthOnly => (0.5, 2.0, (0., 0.)),
++                FoveationProfile::H264WidthOnly => (23.0 / 41.0, 2.0, (0., 0.)),
                   FoveationProfile::Custom => (config.center_size_x, config.edge_ratio_x,
                       (config.center_shift_x, config.center_shift_y)),
               };
@@ -193,7 +193,7 @@ diff --git a/alvr/graphics/src/stream.rs b/alvr/graphics/src/stream.rs
 +        alvr_session::FoveationProfile::H264WidthOnly
 +    );
 +    if identity_y {
-+        config.center_size_x = 0.5;
++        config.center_size_x = 23.0 / 41.0;
 +        config.edge_ratio_x = 2.0;
 +        // Placeholder values are only used by the inactive Y algebra.
 +        config.center_size_y = 0.5;

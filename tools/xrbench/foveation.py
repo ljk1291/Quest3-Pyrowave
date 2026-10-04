@@ -17,7 +17,10 @@ PROFILE_CONSTANTS = {
     "h264fit": (0.5, 2.0),
     # H.264's 4096-wide SBS limit needs horizontal reduction.  This opt-in
     # profile preserves the vertically padded source raster exactly.
-    "h264width": (0.5, 2.0),
+    # 23/41 at 2624 pixels with a 2x edge ratio gives precisely 2048
+    # allocated output pixels: the least horizontal reduction meeting a
+    # 4096-wide stereo H.264 limit.
+    "h264width": (23.0 / 41.0, 2.0),
 }
 # The unrounded ratio-2 derivative peaks at 2r-1 = 3 source pixels/output
 # pixel.  Allocation is rounded to 32 pixels, which raises the actual Q3

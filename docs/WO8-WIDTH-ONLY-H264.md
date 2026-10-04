@@ -1,9 +1,10 @@
 # WO-8 width-only H.264 candidate
 
 This is an opt-in offline quality candidate. It encodes a 2624 by 2776 crop
-as 1984 by 2784 per eye: the final eight rows are replicated allocation
+as 2048 by 2784 per eye. Its 23/41 centre fraction and 2x horizontal edge
+ratio are the least aligned reduction that reaches exactly 4096 SBS. The final eight rows are replicated allocation
 padding and are removed after reconstruction. They are not vertical
-resampling. The resulting 3968-pixel SBS width fits the H.264 4096-pixel
+resampling. The resulting 4096-pixel SBS width meets the H.264
 limit.
 
 The existing layered source already transports independent axis parameters:
@@ -25,7 +26,7 @@ The existing layered source already transports independent axis parameters:
 `patches/wo8-width-only-h264.patch`, layered after
 `patches/wo8-foveation.patch` and the pinned receiver foveation source,
 adds an opt-in `H264WidthOnly` profile. Its
-Rust transport writes X as 0.5 / 2x and Y as the explicit 1.0 / 1.0 identity
+Rust transport writes X as 23/41 / 2x and Y as the explicit 1.0 / 1.0 identity
 sentinel. In `FFR.cpp`, `verticalIdentity` branches before the zero-height
 band alignment and shift divisions, preserves full target-eye height, and
 writes a constant-buffer flag. The forward HLSL shader receives that flag,

@@ -190,7 +190,7 @@ class FoveationTests(unittest.TestCase):
         self.assertEqual(encoded_size(2624,2776,FoveationConfig('h264fit')),(1984,2112))
     def test_width_only_h264_pads_vertical_allocation_without_vertical_resampling(self):
         cfg=FoveationConfig('h264width',.5)
-        self.assertEqual(encoded_size(2624,2784,cfg),(1984,2784))
+        self.assertEqual(encoded_size(2624,2784,cfg),(2048,2784))
         y=np.arange(240*640,dtype=np.uint8).reshape(240,640)
         planes=[y,np.full((120,320),128,np.uint8),np.full((120,320),128,np.uint8)]
         encoded=encode_planes(planes,cfg)
@@ -202,6 +202,8 @@ class FoveationTests(unittest.TestCase):
     def test_width_only_h264_has_identity_y_and_invertible_x(self):
         cfg=FoveationConfig('h264width',.5)
         size=(2624,2784); packed=encoded_size(*size,cfg)
+        self.assertEqual(cfg.center_fraction, 23.0 / 41.0)
+        self.assertEqual(packed[0] * 2, 4096)
         uv=np.array([[[.03,.14],[.31,.72],[.5,.5],[.91,.87]]])
         forward=forward_map_uv(uv,size,packed,cfg)
         self.assertLess(float(np.max(np.abs(forward[...,1]-uv[...,1]))),1e-12)

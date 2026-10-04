@@ -340,7 +340,7 @@ class NvencFramebankTests(unittest.TestCase):
             plan=nf.build_width_only_h264_plan(Path("source.y4m"),23.5,projection_evidence="p",crop_evidence="c",
                 crop_geometry=geometry,fence_rectangle={"eye":"left","x":1740,"y":1310,"width":240,"height":274},crops=[])
         row=plan["cells"][0]
-        self.assertEqual((row["eye_width"],row["eye_height"],row["stereo_width"]),(1984,2784,3968))
+        self.assertEqual((row["eye_width"],row["eye_height"],row["stereo_width"]),(2048,2784,4096))
         self.assertEqual(row["vertical_allocation_padding_rows"],8)
         self.assertFalse(row["vertical_resampling"])
 

@@ -447,7 +447,8 @@ def build_width_only_h264_plan(source: Path, vertical_pixels_per_degree: float, 
     The source crop stays 2624x2776. Eight bottom-edge rows are replicated
     solely to reach a 2784-pixel allocation boundary; the inverse drops those
     rows before scoring. Vertical resampling is therefore not part of this
-    candidate. The encoded SBS raster is 3968x2784, below H.264's 4096 width.
+    candidate. The encoded SBS raster is exactly 4096x2784: 2048 pixels per
+    eye is the least aligned width that meets the H.264 limit.
     """
     base = build_revised_q3a_plan(source, vertical_pixels_per_degree, **kwargs)
     crop = next(row for row in base["cells"] if row["label"] == "h264-dual-p7-400")
@@ -455,7 +456,7 @@ def build_width_only_h264_plan(source: Path, vertical_pixels_per_degree: float, 
     transform = foveation_transform_descriptor(profile="h264width", softness=.5, blur_only=False)
     source_eye = (2624, 2776); expanded_eye = (2624, 2784)
     width, height = encoded_size(*expanded_eye, FoveationConfig("h264width", .5, False))
-    if width * 2 > 4096 or height != expanded_eye[1]:
+    if width * 2 != 4096 or height != expanded_eye[1]:
         raise ValueError("width-only H264 geometry does not meet its allocation contract")
     encoded_base = dict(crop, eye_width=width, eye_height=height, stereo_width=width * 2,
                         cap_bytes=fb.cap_bytes(700, fb.FPS), bits_per_pixel=fb.bpp(fb.cap_bytes(700, fb.FPS), width, height))
