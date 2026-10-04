@@ -69,9 +69,9 @@ It merged as `7302a25` after 55 focused tests, independent review and
 [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37172014888).
 The reduced and matching-blur first-frame hashes match both retained attempts.
 The finite r5 controller is running Q3b with three preparation workers and fresh
-r3 Pyro attempt paths. Its Light / 9/7 / 1000 Mbps cells at softness 0 and 0.5
-are complete with clean lease closure; eight Q3b cells remain. The diagnostic
-softness-1 Light cell is active. Do not repeat completed cells. The first result is worse
+r3 Pyro attempt paths. Its three Light / 9/7 / 1000 Mbps softness cells (0, 0.5,
+1) are complete with clean lease closure; seven Q3b cells remain. Light / 5/3 /
+1000 Mbps / softness 0.5 is active. Do not repeat completed cells. The first result is worse
 than cropped 9/7 without foveation on the primary fence: 30.832 versus 35.754 dB
 edge PSNR, temporal residual p99 32 versus 19 luma codes (both frames 10–89).
 No image filter, runtime decoder or baseline default changed during execution.
@@ -184,6 +184,35 @@ Take the first unblocked item. Items marked ∥ are independent.
 ## Log
 
 <!-- Codex appends entries here: date, checkpoint, verified (links), remaining, blocked? -->
+
+- 2026-10-04 05:01 UTC, three-way Light softness comparison completed: all three
+  CDF 9/7 / 1000 Mbps rows contain 90 ordered decoded identities and 90 ordered
+  source/transform/reconstruction identities, both score windows and matching
+  source/corpus/projection/scorer provenance. All leases closed with zero jobs
+  and no cleanup errors. Encoded geometry is 2464×2592/eye; expanded score space
+  is 2624×2776/eye. These are offline quality results, not live timing evidence.
+
+  | Light softness | Fence edge PSNR-Y, 10–89 | Fence temporal p99 | Peripheral sharp edge PSNR-Y | Sharp temporal p99 | Peripheral matching-blur edge PSNR-Y | Blur temporal p99 | Centre sharp HVS change vs softness 0, 10–89 |
+  |---|---:|---:|---:|---:|---:|---:|---:|
+  | 0 | 30.831871 dB | 32 | 33.522726 dB | 24 | 40.998956 dB | 10 | 0 dB |
+  | 0.5 | 30.832637 dB | 32 | 32.620879 dB | 26 | 41.495943 dB | 10 | +0.009158 dB |
+  | 1 | 30.833070 dB | 32 | 31.916966 dB | 29 | 42.056622 dB | 9 | +0.015855 dB |
+
+  Peripheral columns also use frames 10–89; temporal values are luma residual
+  codes, not optical shimmer. Softness 1 has fence temporal mean 5.326945;
+  peripheral means are 4.754562 against sharp and 1.561958 against matching blur.
+  Centre sharp HVS is 38.861595 dB across all 90 and 38.596231 dB in 10–89:
+  cross-cell changes versus softness 0 are +0.015391 / +0.015855 dB respectively.
+  Its same-output sharp-minus-matching-blur centre differences are separately
+  −3.841910 / −3.870023 dB. Increasing softness does not resolve the fence loss;
+  improved matching-blur scores accompany worse peripheral sharp-reference
+  scores. Preserve the documented texel-centre alignment investigation. No promotion.
+  Softness-1 private controller report SHA256:
+  `71a935af63cb64d1b43da97a35237432f100b1709154cca15290cbf7e4811bfb`.
+  Eighteen of 25 Q3 rows are complete. The existing controller has continued to
+  Light / CDF 5/3 / 1000 Mbps / softness 0.5; seven Q3b cells, combined publication,
+  verified stable pair and final owner checklist remain. No owner blocker or
+  headset/settings/installed-pair change.
 
 - 2026-10-04, second Q3b result: Light / CDF 9/7 / 1000 Mbps / softness 0.5
   completed all 90 frames at the same geometry as softness 0. Both score windows,

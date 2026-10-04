@@ -82,6 +82,18 @@ These are two of ten Q3b rows, not a final ranking or promotion. Continue the
 remaining eight cells without repeating completed encodes; the diagnostic
 softness-1 Light cell is active. See the status log for exact report hashes.
 
+Subsequent checkpoint, 2026-10-04 05:01 UTC: the diagnostic softness-1 row is
+also complete, bringing Q3b to three of ten and Q3 overall to 18 of 25. Its
+fence edge PSNR is 30.833070 dB / temporal p99 32 (10–89), essentially unchanged
+from softness 0. Peripheral sharp-reference edge PSNR falls to 31.916966 dB
+with p99 29, while matching-blur edge PSNR rises to 42.056622 dB with p99 9.
+Centre sharp HVS changes by +0.015855 dB in 10–89 (+0.015391 dB all-90) versus
+softness 0. These cross-cell deltas differ from the same-output sharp-minus-blur
+centre scores. All three rows pass identity, provenance, both-window and clean
+lease checks. The existing controller is running Light / 5/3 / 1000 Mbps /
+softness 0.5 next; seven Q3b cells remain. Do not promote softness or alter the
+frozen matrix based on a better score against an already blurred reference.
+
 A CPU-only attribution on the retained first Q3b output finds substantial
 transform loss before compression: on the same sharp-source fence mask,
 sharp→matching-blur PSNR is 32.067 dB and matching-blur→decoded reconstruction
