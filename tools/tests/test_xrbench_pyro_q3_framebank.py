@@ -24,10 +24,10 @@ class PyroQ3FramebankTests(unittest.TestCase):
                       eye_height=2776, stereo_width=5248, cap_bytes=fb.cap_bytes(r, 90),
                       bits_per_pixel=fb.bpp(fb.cap_bytes(r, 90), 2624, 2776)) for w, r in q3.Q3A_ROWS]
         if include_q3b:
-            cells += [dict(phase="q3b", profile=p, wavelet=w, rate_mbps=r, fps=90,
-                           eye_width=2624, eye_height=2776, stereo_width=5248,
-                           source_geometry="crop", source_transform=q3._q3b_transform(p),
-                           requires_wo8_reduced_encode=True) for p, w, r in q3.Q3B_ROWS]
+            from xrbench.foveation import FoveationConfig, encoded_size
+            for p,w,r in q3.Q3B_ROWS:
+                t=q3._q3b_transform(p); ew,eh=encoded_size(2624,2776,FoveationConfig(t['profile'],t['softness'],t['blur_only'])); cap=fb.cap_bytes(r,90)
+                cells.append(dict(phase='q3b',profile=p,wavelet=w,rate_mbps=r,fps=90,eye_width=ew,eye_height=eh,stereo_width=ew*2,cap_bytes=cap,bits_per_pixel=fb.bpp(cap,ew,eh),score_vertical_pixels_per_degree=23.5,source_geometry='crop',source_transform=t,requires_wo8_reduced_encode=True))
         return {"schema": 1, "kind": "pyro_q3_framebank", "fixture_only": True,
                 "source": self.source_contract(), "projection_evidence": "p", "crop_evidence": "c",
                 "source_derivation": {"parent_sha256": "b" * 64, "parent_geometry": [6144, 3232], "operation": "native_per_eye_crop_no_resampling"},

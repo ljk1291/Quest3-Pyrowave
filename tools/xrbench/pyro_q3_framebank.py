@@ -186,6 +186,11 @@ def validate_plan(plan: dict) -> dict:
     for cell in actual_b:
         if not cell.get("requires_wo8_reduced_encode") or cell.get("source_transform") != _q3b_transform(cell["profile"]):
             raise ValueError("Q3b row lacks reduced-encode requirement")
+        from .foveation import FoveationConfig, encoded_size
+        ew, eh = encoded_size(2624,2776,FoveationConfig(cell["source_transform"]["profile"],cell["source_transform"]["softness"],cell["source_transform"]["blur_only"]))
+        cap=fb.cap_bytes(cell["rate_mbps"],90)
+        if (cell.get("eye_width"),cell.get("eye_height"),cell.get("stereo_width")) != (ew,eh,ew*2) or cell.get("cap_bytes") != cap or cell.get("bits_per_pixel") != fb.bpp(cap,ew,eh) or cell.get("score_vertical_pixels_per_degree") != plan["projection"]["vertical_pixels_per_degree"]:
+            raise ValueError("Q3b reduced geometry/cap/scoring contract drifted")
     return plan
 
 
@@ -333,15 +338,20 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                     score_decoded = directory / "score-reconstructed-decoded.y4m"
                     nvenc._reconstruct_q3b_decoded(decoded, decoded_info, score_decoded, score_info, cell["source_transform"])
                     score_decoded_info = fb._assert_same_frames(score_ref, score_decoded, score_info)
-                row["decoded_frame_identity"] = [{"frame": i, "source_sha256": src["source_sha256"], "decoded_sha256": got} for (i, _, got), src in zip(fb.iter_y4m(decoded, decoded_info), plan["source"]["frame_identity"])]
+                row["decoded_frame_identity"] = [{"frame": i, "source_sha256": src["source_sha256"], "decoded_small_sha256": got} for (i, _, got), src in zip(fb.iter_y4m(decoded, decoded_info), plan["source"]["frame_identity"])]
                 if len(row["decoded_frame_identity"]) != 90: raise ValueError("decoded_identity_or_geometry_mismatch")
+                if cell["phase"] == "q3b":
+                    rebuilt = [digest for _, _, digest in fb.iter_y4m(score_decoded, score_decoded_info)]
+                    if len(identities) != 90 or len(rebuilt) != 90: raise ValueError("q3b_transformed_identity_mismatch")
+                    row["q3b_frame_identity"] = [{**identities[i], "decoded_small_sha256": row["decoded_frame_identity"][i]["decoded_small_sha256"], "reconstructed_sha256": rebuilt[i]} for i in range(90)]
                 row.update(_same_frame_scores(plan, index, cell, tools, guard, directory, source, info, score_decoded, score_decoded_info, command_timeout_s, keep_artifacts, reference=score_ref, reference_info=score_info, matching_blur_reference=score_blur))
             except (PermissionError, TimeoutError, ValueError, RuntimeError) as exc:
                 row["error"] = str(exc); result["failure_reasons"].append(row["error"])
             result["cells"].append(row); (out / "framebank-progress.json").write_text(fb.report_json(result), encoding="utf-8")
             if row.get("error"): break
             if not keep_artifacts:
-                encoded.unlink(missing_ok=True); decoded.unlink(missing_ok=True)
+                # Keep the compressed elementary stream for decoder-only audit.
+                decoded.unlink(missing_ok=True)
         result["source_sha256_end"] = _hash(source); result["tool_provenance_end"] = {k: _hash(v) for k, v in tools.items()}
         if result["source_sha256_end"] != result["source_sha256_start"]: result["failure_reasons"].append("source_changed_during_run")
         if result["tool_provenance_end"] != result["tool_provenance_start"]: result["failure_reasons"].append("tool_changed_during_run")
@@ -376,6 +386,7 @@ def main(argv=None):
     run.add_argument("--scorer-tools-metadata", help="separate verified bundle for the HVS scorer")
     run.add_argument("--command-timeout-s", type=float, default=900)
     run.add_argument("--keep-artifacts", action="store_true")
+    run.add_argument("--phase", choices=("q3a", "q3b"))
     run.add_argument("--supervised", action="store_true", help="require owner-attested frame_bank_pc lease")
     run.add_argument("--resume", action="store_true", help="inspect matching completed output only")
     args = parser.parse_args(argv)
@@ -393,7 +404,7 @@ def main(argv=None):
                       tools_metadata=Path(args.tools_metadata),
                       scorer_tools_metadata=Path(args.scorer_tools_metadata) if args.scorer_tools_metadata else None,
                       command_timeout_s=args.command_timeout_s, keep_artifacts=args.keep_artifacts,
-                      supervised=args.supervised, resume=args.resume)
+                      supervised=args.supervised, resume=args.resume, phase=args.phase)
     report = sanitized_report(result); Path(args.report).write_text(fb.report_json(report), encoding="utf-8")
     print("wrote sanitized report: complete=" + str(report["complete"]))
     return 0 if report["complete"] else 2
