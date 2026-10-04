@@ -107,11 +107,36 @@ def locked_state_mutation(func):
 
 def json_read(path): return json.loads(Path(path).read_text(encoding='utf-8'))
 def arm_digest(arm): return hashlib.sha256(json.dumps(arm,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+_ATOMIC_REPLACE_DELAYS_S = (.02, .05, .1, .2)
+_WINDOWS_TRANSIENT_REPLACE_ERRORS = {5, 32}  # access denied; sharing violation
+
+def _replace_with_retry(temp, path, *, sleep=time.sleep):
+    """Bounded retry for a Windows reader briefly holding the destination.
+
+    The old complete file remains authoritative until the single atomic replace
+    succeeds.  A non-transient error or the finite retry budget still fails
+    closed; callers retain their normal stop/cleanup handling.
+    """
+    for attempt, delay in enumerate((*_ATOMIC_REPLACE_DELAYS_S, None)):
+        try:
+            os.replace(temp, path)
+            return
+        except PermissionError as exc:
+            if os.name != 'nt' or getattr(exc, 'winerror', None) not in _WINDOWS_TRANSIENT_REPLACE_ERRORS or delay is None:
+                raise
+            sleep(delay)
+
 def atomic_write(path, value):
     path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile('w',encoding='utf-8',dir=path.parent,prefix=path.name+'.',suffix='.tmp',delete=False) as stream:
-        stream.write(json.dumps(value, indent=2, sort_keys=True)); temp=Path(stream.name)
-    temp.replace(path)
+    temp = None
+    try:
+        with tempfile.NamedTemporaryFile('w',encoding='utf-8',dir=path.parent,prefix=path.name+'.',suffix='.tmp',delete=False) as stream:
+            stream.write(json.dumps(value, indent=2, sort_keys=True)); stream.flush(); os.fsync(stream.fileno()); temp=Path(stream.name)
+        _replace_with_retry(temp, path)
+        temp = None
+    finally:
+        if temp is not None:
+            temp.unlink(missing_ok=True)
 
 def local_dt(value, zone):
     dt = datetime.fromisoformat(value)
