@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "kind": "q3b_resume_preflight_blocked",
+  "sample_utc": "2026-10-04T08:37:05.424471+00:00",
+  "harness_commit": "a4f5fe18c99235888a7eef55edf8dfc3e3791dcb",
+  "controller_sha256": "461239906a04f0b4d63c5b9808d21316182d9d62de2008add3af1e0fa0890421",
+  "full_plan_sha256": "2b8bae6efa3065655aaa8d5dd77956bc917c1ff2783c2f4baae9d9a28188e865",
+  "private_state_sha256": "333f2f0786b51b0043752b2ee19370371c26a2c696d1e6652595a2d7e4d7ea5d",
+  "private_final_sha256": "437132e46bc5dd6d40467ba214d5c562cdbaeb464329ef199c68636aba3948f3",
+  "measurement_mode": "quality",
+  "comfy_queue": {
+    "known": true,
+    "running": 1,
+    "pending": 0
+  },
+  "gpu_telemetry": {
+    "device_error": null,
+    "free_vram_mib": 599.0,
+    "overall_load_percent": 99.0,
+    "total_vram_mib": 16303.0
+  },
+  "free_vram_margin_mib": 2048,
+  "stop_reasons": [
+    "free_vram_below_margin",
+    "comfy_queue_active_or_unknown",
+    "compute_backend_active_or_unknown"
+  ],
+  "overall_utilization_is_not_independent_stop_reason": true,
+  "codec_job_started": false,
+  "lease_cleanup": {
+    "closed": true,
+    "owned_jobs_remaining": 0,
+    "cleanup_errors": []
+  },
+  "source_unchanged": true,
+  "protected_python_unchanged": true,
+  "retained_complete_cells": {
+    "q3a_nvenc": 10,
+    "q3a_pyro": 5,
+    "q3b_pyro": 8,
+    "total": 23
+  },
+  "remaining_cells": [
+    "H264Fit / single H.264 / 700 Mbps / P7 / softness 0.5",
+    "blur-only Light / dual H.264 / 700 Mbps total / P7 / softness 0.5"
+  ],
+  "owner_action_required": "Finish or pause ComfyUI work and release GPU memory; confirm idle before a fresh guarded attempt.",
+  "headset_test": false,
+  "settings_changed": false,
+  "installed_pair_changed": false,
+  "optical_fps": null,
+  "timing_ranking_qualified": false
+}

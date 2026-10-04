@@ -43,6 +43,20 @@ uses left offset (278,274), right (170,274), 2624×2776/eye and unchanged densit
 
 ### Source and Q3 checkpoint (2026-10-04)
 
+**Latest execution state, 08:37 UTC:** 23/25 Q3 cells are complete (all 15 Q3a
+and all eight Pyro Q3b). The two NVENC Q3b cells are stopped pending owner action.
+The initial H.264 attempt stopped during CPU preparation when ComfyUI started
+with an unavailable queue endpoint. After two known-idle checks, a fresh guarded
+attempt found one active ComfyUI job and 599 MiB free VRAM, below the retained
+2048 MiB margin. It closed cleanly before any codec job began. Preserve all
+completed results and both stopped attempts; resume only H264Fit/single-H.264
+and blur-only-Light/dual-H.264 after the owner clears compute work and GPU memory.
+[Sanitized preflight evidence](../results/q3b-resume-blocked-2026-10-04.json).
+This stop supersedes the running-process descriptions in the chronological
+checkpoints below. No guard relaxation, source change, settings change or headset
+work is needed. Combined publication and the final verified signed pair remain
+dependent on those two results; do not build or install a replacement prematurely.
+
 WO-10, WO-8 and WO-13 are merged; WO-12 remains an audit and WO-11 a design.
 WO-8's resolved source `e61621d` passed full Android/Windows CI and merged as
 `55bb65b`. All runtime features remain opt-in/default-off. Q3b adapter PR #36 and

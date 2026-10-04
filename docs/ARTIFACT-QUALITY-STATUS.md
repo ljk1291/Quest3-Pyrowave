@@ -68,13 +68,20 @@ and adds explicitly selected CPU preparation workers (default one, maximum three
 It merged as `7302a25` after 55 focused tests, independent review and
 [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37172014888).
 The reduced and matching-blur first-frame hashes match both retained attempts.
-The finite r5 controller is running Q3b with three preparation workers and fresh
+The finite r5 controller ran Q3b with three preparation workers and fresh
 r3 Pyro attempt paths. Its three Light / 9/7 / 1000 Mbps softness cells (0, 0.5,
 1), Light / 5/3 / 1000 Mbps / softness 0.5, both Medium / 5/3 and 9/7 /
 1000 Mbps / softness 0.5, H264Fit / 9/7 / 1000 Mbps / softness 0.5 and
 blur-only Light / 9/7 / 1000 Mbps / softness 0.5 are complete with clean lease
 closure. All eight PyroWave Q3b rows are retained; two NVENC H.264 cells remain.
-The H264Fit / single H.264 / 700 Mbps / P7 / softness 0.5 cell is active.
+**Current stop, 08:37 UTC:** H264Fit / single H.264 / 700 Mbps / P7 / softness 0.5
+is unfinished. After an earlier ComfyUI-startup/unknown-queue stop, two read-only
+checks showed an empty queue. The new guarded attempt then found a fresh active
+ComfyUI job and only 599 MiB free VRAM, below the retained 2048 MiB margin.
+It stopped before any codec job began and closed with zero owned jobs/errors.
+Both NVENC rows remain; all 23 completed Q3 cells are preserved. The owner has
+been asked to finish/pause compute work and free GPU memory before resumption.
+[Sanitized stop evidence](../results/q3b-resume-blocked-2026-10-04.json).
 Do not repeat completed cells. The first result is worse
 than cropped 9/7 without foveation on the primary fence: 30.832 versus 35.754 dB
 edge PSNR, temporal residual p99 32 versus 19 luma codes (both frames 10–89).
@@ -186,6 +193,27 @@ Take the first unblocked item. Items marked ∥ are independent.
      checkpoint-only records.
 
 ## Log
+
+- 2026-10-04 08:37 UTC, Q3b NVENC resume safety stop: the earlier first H.264
+  attempt stopped during CPU preparation at 63/90 frames when a newly started
+  ComfyUI process had an unavailable queue endpoint. No encoded bitstream was
+  produced; its lease closed with zero jobs/errors. Two subsequent read-only
+  queue checks showed known idle (0 running, 0 pending), so the original finite
+  owner-supervised authorization was used for a fresh attempt. Its preflight
+  instead observed **known active ComfyUI (1 running, 0 pending)** and **599 MiB
+  free VRAM**, below the 2048 MiB margin. This is a compute/VRAM safety stop,
+  not an inference from overall GPU utilization or desktop/browser activity.
+  No codec job began; the lease closed with zero owned jobs and no cleanup errors.
+  Source, protected modules, controller and frozen plan identities are retained;
+  partial failed attempts remain private and excluded from scores.
+  [Sanitized evidence](../results/q3b-resume-blocked-2026-10-04.json).
+  All 15 Q3a and eight Pyro Q3b cells remain complete; their eight-row Q3b
+  publication preflight also passed provenance, both-window and privacy checks.
+  Only H264Fit/single-H.264 and blur-only-Light/dual-H.264 remain. Owner action
+  is required to idle ComfyUI and release GPU memory before a new guarded attempt.
+  Combined 25-row publication, final stable-signed pair and final headset checklist
+  remain outstanding. No headset, VR apps, settings, network, arm-file or installed
+  pair changes occurred. No profile or 90-Hz result is promoted.
 
 <!-- Codex appends entries here: date, checkpoint, verified (links), remaining, blocked? -->
 
