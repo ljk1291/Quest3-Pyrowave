@@ -307,6 +307,27 @@ class NvencFramebankTests(unittest.TestCase):
         with mock.patch.object(fb, "validate_plan"):
             self.assertIs(nf.validate_plan(plan), plan)
 
+    def test_extension_nvenc_plan_keeps_only_h264fit_and_adds_av1_p1_aq(self):
+        geometry={"kind":"per_eye_crop","source_eye":[3072,3232],"target_eye":[2624,2776],
+                  "eyes":[{"eye":"left","x":278,"y":274,"width":2624,"height":2776},
+                          {"eye":"right","x":170,"y":274,"width":2624,"height":2776}]}
+        base_cell={"fps":90,"eye_width":2624,"eye_height":2776,"stereo_width":5248,
+                   "encoded_chroma":"420","cap_bytes":fb.cap_bytes(200),"bits_per_pixel":1.0}
+        base={"cells":[base_cell],"hvs_calibration":{"codec_cells":[{}],"crops":[]}}
+        fence={"eye":"left","x":1740,"y":1310,"width":240,"height":274}
+        with mock.patch.object(nf,"_require_jpeg_full_y4m"), mock.patch.object(fb,"build_plan",return_value=base), \
+             mock.patch.object(fb,"validate_plan"):
+            plan=nf.build_q3_extension_nvenc_plan(Path("source.y4m"),23.5,projection_evidence="p",crop_evidence="c",
+                crop_geometry=geometry,fence_rectangle=fence,crops=[])
+        self.assertEqual(plan["q3_revision"],"2026-10-04-q3-extension")
+        self.assertEqual([c["label"] for c in plan["cells"]],["h264-h264fit-s05-700","av1-main10-p1-aq-200"])
+        self.assertEqual(plan["cells"][0]["nvenc_profile"]["preset"],"p7")
+        self.assertEqual(plan["cells"][1]["nvenc_profile"]["preset"],"p1")
+        self.assertTrue(plan["cells"][1]["nvenc_profile"]["spatial_aq"])
+        self.assertNotIn("per_stream_mbps",plan["cells"][0])
+        self.assertEqual(plan["extension_matrix"]["historical_q3b_dropped"],["h264-dual-blur-light-s05-700"])
+        self.assertEqual(nf.profile("av1",200,preset="p1",spatial_aq=True)["preset"],"p1")
+
     def test_q3b_bands_use_exact_wo8_source_space_ramp(self):
         cell={"source_transform":nf.foveation_transform_descriptor(profile="light",softness=.5,blur_only=False)}
         info=fb.Y4MInfo(5248,2776,90,1,"420","FULL",5248*2776*3//2,90)

@@ -42,7 +42,9 @@ _CODEC_DEFAULTS = {
 _LAYOUTS = ("stereo_sbs", "dual_eye")
 
 
-def foveation_transform_descriptor(*, profile: str, softness: float, blur_only: bool) -> dict:
+def foveation_transform_descriptor(*, profile: str, softness: float, blur_only: bool,
+                                    implementation_revision: str | None = None,
+                                    implementation_source_sha256: str | None = None) -> dict:
     """Frozen Q3b source-transform descriptor; WO-8 owns its implementation."""
     if profile not in ("light", "medium", "h264fit"):
         raise ValueError("unknown foveation profile")
@@ -50,8 +52,18 @@ def foveation_transform_descriptor(*, profile: str, softness: float, blur_only: 
         raise ValueError("foveation softness must be in [0, 1]")
     if not isinstance(blur_only, bool):
         raise ValueError("foveation blur_only must be boolean")
-    return {"kind": "wo8_foveation", "profile": profile, "softness": float(softness),
+    if (implementation_revision is None) != (implementation_source_sha256 is None):
+        raise ValueError("foveation implementation revision and hash must be paired")
+    result={"kind": "wo8_foveation", "profile": profile, "softness": float(softness),
             "blur_only": blur_only}
+    if implementation_revision is not None:
+        if (not isinstance(implementation_revision,str) or not implementation_revision or
+                not isinstance(implementation_source_sha256,str) or len(implementation_source_sha256) != 64 or
+                any(ch not in "0123456789abcdef" for ch in implementation_source_sha256)):
+            raise ValueError("foveation implementation identity is invalid")
+        result.update(implementation_revision=implementation_revision,
+                      implementation_source_sha256=implementation_source_sha256)
+    return result
 
 
 def revised_q3a_cells() -> tuple[dict, ...]:
@@ -124,12 +136,12 @@ def profile(codec: str, rate_mbps: int, fps: int = fb.FPS, *, preset: str = "p4"
     """
     if codec not in CODECS:
         raise ValueError("codec must be h264, hevc or av1")
-    if preset not in ("p4", "p7"):
-        raise ValueError("NVENC preset must be p4 or p7")
+    if preset not in ("p1", "p4", "p7"):
+        raise ValueError("NVENC preset must be p1, p4 or p7")
     if not isinstance(spatial_aq, bool) or layout not in _LAYOUTS:
         raise ValueError("invalid AQ or stream layout")
-    if spatial_aq and codec != "h264":
-        raise ValueError("only the requested H.264 AQ cell enables spatial AQ")
+    if spatial_aq and codec not in ("h264", "av1"):
+        raise ValueError("spatial AQ is only pinned for H.264 or AV1 extension cells")
     vbv = _vbv_bits(rate_mbps, fps)
     defaults = _CODEC_DEFAULTS[codec]
     args = [
@@ -396,6 +408,39 @@ def build_revised_q3b_nvenc_plan(source: Path, vertical_pixels_per_degree: float
     return base
 
 
+def build_q3_extension_nvenc_plan(source: Path, vertical_pixels_per_degree: float, **kwargs) -> dict:
+    """Freeze the two owner-selected Q3 extension NVENC comparisons.
+
+    This is a plan-only helper.  It preserves prior Q3b evidence by naming the
+    dropped blur-only dual stream instead of rewriting that historical plan.
+    """
+    base = build_revised_q3a_plan(source, vertical_pixels_per_degree, **kwargs)
+    crop = next(row for row in base["cells"] if row["label"] == "h264-dual-p7-400")
+    from .foveation import FoveationConfig, encoded_size
+    transform = foveation_transform_descriptor(profile="h264fit", softness=.5, blur_only=False)
+    width, height = encoded_size(2624, 2776, FoveationConfig("h264fit", .5, False))
+    h264_base = dict(crop, eye_width=width, eye_height=height, stereo_width=width * 2,
+                     cap_bytes=fb.cap_bytes(700, fb.FPS),
+                     bits_per_pixel=fb.bpp(fb.cap_bytes(700, fb.FPS), width, height))
+    h264 = _revised_cell(h264_base, codec="h264", rate_mbps=700, preset="p7", layout="stereo_sbs",
+                         spatial_aq=False, label="h264-h264fit-s05-700", source_geometry="crop")
+    h264.update(experiment_id="q3b_control_nvenc_h264fit_p7_700", source_transform=transform,
+                score_vertical_pixels_per_degree=float(vertical_pixels_per_degree))
+    av1 = _revised_cell(crop, codec="av1", rate_mbps=200, preset="p1", layout="stereo_sbs",
+                        spatial_aq=True, label="av1-main10-p1-aq-200", source_geometry="crop")
+    av1.update(experiment_id="q3a_control_nvenc_av1_main10_p1_aq_200",
+               score_vertical_pixels_per_degree=float(vertical_pixels_per_degree))
+    base.update(cells=[h264, av1], q3_revision="2026-10-04-q3-extension",
+                extension_matrix={"runner":"nvenc", "historical_q3b_dropped":["h264-dual-blur-light-s05-700"],
+                                  "quality_windows_one_based":[[1,90],[10,89]], "fence_and_hvs_required":True})
+    full_height = kwargs.get("full_eye", fb.DISPLAY_EYE)[1]
+    base["hvs_calibration"]["codec_cells"] = [fb.hvs_calibration_for_vertical_ppd(
+        vertical_pixels_per_degree * cell["eye_height"] / full_height, cell["eye_height"])
+        for cell in base["cells"]]
+    validate_plan(base)
+    return base
+
+
 def _validate_source_adapter(plan: dict) -> None:
     adapter = plan.get("source_adapter")
     if adapter is None:  # schema-1 compatibility only
@@ -415,7 +460,9 @@ def _validate_source_adapter(plan: dict) -> None:
         try:
             if transform != foveation_transform_descriptor(profile=transform.get("profile"),
                                                             softness=transform.get("softness"),
-                                                            blur_only=transform.get("blur_only")):
+                                                            blur_only=transform.get("blur_only"),
+                                                            implementation_revision=transform.get("implementation_revision"),
+                                                            implementation_source_sha256=transform.get("implementation_source_sha256")):
                 raise ValueError
         except (AttributeError, ValueError, TypeError) as exc:
             raise ValueError("NVENC foveation transform drifted") from exc
@@ -431,7 +478,7 @@ def validate_plan(plan: dict) -> dict:
     if not isinstance(plan, dict) or plan.get("schema") not in (1, SCHEMA) or plan.get("kind") != "nvenc_frame_bank":
         raise ValueError("not an NVENC frame-bank manifest")
     _validate_source_adapter(plan)
-    if plan.get("q3_revision") in ("2026-10-04-q3a", "2026-10-04-q3b"):
+    if plan.get("q3_revision") in ("2026-10-04-q3a", "2026-10-04-q3b", "2026-10-04-q3-extension"):
         fences = plan.get("fence_rectangles")
         if not isinstance(fences, dict) or set(fences) != {"full_fov", "cropped"}:
             raise ValueError("revised Q3 fence rectangles are missing")
@@ -468,11 +515,13 @@ def validate_plan(plan: dict) -> dict:
             raise ValueError("cropped score PPD is invalid")
         transform = cell.get("source_transform")
         if transform is not None:
-            if plan.get("q3_revision") != "2026-10-04-q3b":
-                raise ValueError("WO-8 transform is only valid for Q3b")
+            if plan.get("q3_revision") not in ("2026-10-04-q3b", "2026-10-04-q3-extension"):
+                raise ValueError("WO-8 transform is only valid for Q3b or the Q3 extension")
             try:
                 if transform != foveation_transform_descriptor(profile=transform.get("profile"),
-                    softness=transform.get("softness"), blur_only=transform.get("blur_only")):
+                    softness=transform.get("softness"), blur_only=transform.get("blur_only"),
+                    implementation_revision=transform.get("implementation_revision"),
+                    implementation_source_sha256=transform.get("implementation_source_sha256")):
                     raise ValueError
             except (AttributeError, ValueError, TypeError) as exc:
                 raise ValueError("Q3b cell transform drifted") from exc
@@ -1506,7 +1555,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
 
 
 def sanitized_report(result: dict) -> dict:
-    keep = ("label", "codec", "rate_mbps", "fps", "eye_width", "eye_height", "encoded_chroma", "cap_bytes", "bits_per_pixel", "source_geometry", "nvenc_profile", "streams", "bitstream", "encode_process_completion_diagnostic", "decode_process_completion_diagnostic", "score_conversion_process_completion_diagnostic", "decoded_raw_wrapper", "codec_only", "codec_only_windows", "displayed", "displayed_windows", "displayed_reused_from_codec_only", "fence_metrics", "crops", "crop_windows", "error")
+    keep = ("experiment_id", "label", "codec", "rate_mbps", "fps", "eye_width", "eye_height", "encoded_chroma", "cap_bytes", "bits_per_pixel", "source_geometry", "nvenc_profile", "streams", "bitstream", "encode_process_completion_diagnostic", "decode_process_completion_diagnostic", "score_conversion_process_completion_diagnostic", "decoded_raw_wrapper", "codec_only", "codec_only_windows", "displayed", "displayed_windows", "displayed_reused_from_codec_only", "fence_metrics", "crops", "crop_windows", "error")
     def native_public(record):
         if not isinstance(record, dict):
             return None

@@ -14,6 +14,9 @@ from xrbench import pyrowave_wave as wave
 
 
 class PyroQ3FramebankTests(unittest.TestCase):
+    LIGHT_ID = {"implementation_revision":"wo8-light-centre-phase-v1",
+                "implementation_source_sha256":"bce593ce710537c30580b3b892865949ae66b81c47fd9ffd87441a6c6b78bdf5"}
+
     def source_contract(self):
         return {"sha256": "a" * 64, "geometry": [5248, 2776], "frames": 90,
                 "fps": [90, 1], "chroma": "420", "color_range": "FULL",
@@ -62,6 +65,46 @@ class PyroQ3FramebankTests(unittest.TestCase):
                 plan["cells"][-1][key] = value
             with self.assertRaisesRegex(ValueError, "Q3b reduced geometry/cap/scoring contract drifted"):
                 q3.validate_plan(plan)
+
+    def test_extension_plan_freezes_rdo_density_foveation_and_offline_rates(self):
+        base=self.plan()
+        with mock.patch.object(q3, "build_plan", return_value=base):
+            plan=q3.build_extension_plan(Path("cropped.y4m"),23.5,projection_evidence="p",crop_evidence="c",
+                                         crops=[],full_source=Path("parent.y4m"),fixture=True,
+                                         light_phase_identity=self.LIGHT_ID)
+        self.assertIs(q3.validate_plan(plan),plan)
+        self.assertEqual(len(plan["cells"]),7)
+        self.assertEqual([cell["label"] for cell in plan["cells"]],[row["label"] for row in q3.Q3_EXTENSION_ROWS])
+        self.assertEqual(plan["cells"][0]["rdo_viewing_density"]["environment"],{"PYROWAVE_RDO_PX_PER_DEG":"24"})
+        self.assertEqual(plan["cells"][1]["rdo_viewing_density"]["effective_ppd"],36.0)
+        self.assertIsNone(plan["cells"][3]["rdo_viewing_density"]["environment"])
+        self.assertTrue(all(c.get("offline_only_above_wifi_cap") for c in plan["cells"][-3:]))
+        self.assertEqual(plan["cells"][2]["source_transform"],q3._q3b_transform("medium-s05"))
+        self.assertEqual(plan["cells"][3]["source_transform"]["implementation_revision"],self.LIGHT_ID["implementation_revision"])
+        self.assertEqual(q3._select_cells(plan,"q3a",[0,6])[1][0],6)
+        plan["cells"][0]["rdo_viewing_density"]["pixels_per_degree"]=25
+        with self.assertRaisesRegex(ValueError,"RDO provenance"):
+            q3.validate_plan(plan)
+
+    def test_extension_refuses_corrected_light_until_its_wo8_source_is_active(self):
+        base=self.plan()
+        with mock.patch.object(q3,"build_plan",return_value=base), \
+             mock.patch.object(q3,"_hash",return_value="0"*64):
+            with self.assertRaisesRegex(ValueError,"corrected-Light source hash"):
+                q3.build_extension_plan(Path("cropped.y4m"),23.5,projection_evidence="p",crop_evidence="c",
+                                        crops=[],full_source=Path("parent.y4m"),fixture=False,
+                                        light_phase_identity=self.LIGHT_ID)
+
+    def test_extension_rdo_native_log_requires_effective_requested_value(self):
+        requested=q3._rdo_descriptor(24)
+        proof=q3._rdo_effective_from_native_log(
+            "PyroWave RDO viewing density: requested 24, effective 24.0 px/deg, Nyquist 12.0 cycles/deg",requested)
+        self.assertEqual(proof["effective_ppd"],24.0)
+        default=q3._rdo_descriptor(None)
+        self.assertTrue(q3._rdo_effective_from_native_log(
+            "PyroWave RDO viewing density: requested (legacy 96 DPI @ 1m), effective 65.2799988 px/deg, Nyquist 32.6399994 cycles/deg (legacy-equivalent)",default)["legacy_equivalent"])
+        with self.assertRaisesRegex(ValueError,"differs|missing"):
+            q3._rdo_effective_from_native_log("PyroWave RDO viewing density: requested 36, effective 36 px/deg, Nyquist 18 cycles/deg",requested)
 
     def test_q3b_selection_uses_original_plan_indices_and_rejects_bad_scope(self):
         plan = self.plan(True)
@@ -183,7 +226,9 @@ class PyroQ3FramebankTests(unittest.TestCase):
                     eye_width=2464 if profile=='light-s0' else 2624,eye_height=2592 if profile=='light-s0' else 2776,
                     stereo_width=4928 if profile=='light-s0' else 5248,source_geometry='crop',
                     source_transform=q3._q3b_transform(profile),requires_wo8_reduced_encode=True,
-                    cap_bytes=fb.cap_bytes(1000,90),bits_per_pixel=1,score_vertical_pixels_per_degree=23.5)
+                    cap_bytes=fb.cap_bytes(1000,90),bits_per_pixel=1,score_vertical_pixels_per_degree=23.5,
+                    experiment_id="extension-mocked-"+profile,
+                    rdo_viewing_density=q3._rdo_descriptor(None if profile=='light-s0' else 24))
                 plan={'schema':1,'kind':'pyro_q3_framebank','source':self.source_contract(),
                       'cells':[{'phase':'q3a'} for _ in range(5)]+[cell],
                       'projection':{'vertical_pixels_per_degree':23.5},'crop_geometry':q3.CROP_GEOMETRY,
@@ -192,10 +237,14 @@ class PyroQ3FramebankTests(unittest.TestCase):
                 plan['source']['frame_identity']=[{'source_sha256':'a'} for _ in range(90)]
                 (root/'plan.json').write_text(json.dumps(plan)); (root/'meta.json').write_text('{}')
                 class Guard:
+                    envs=[]
                     def status(self): return {}
                     def run(self, argv, **kwargs):
                         target=Path(argv[-1]) if 'decode.exe' in str(argv[0]) else next((Path(v) for v in argv if str(v).endswith('.wave')),Path(argv[-1]))
                         target.write_bytes(b'x')
+                        if 'encode.exe' in str(argv[0]):
+                            Guard.envs.append(dict(kwargs['env']))
+                            return 0, 'CDF 9/7\nPyroWave RDO viewing density: requested ' + cell['rdo_viewing_density']['requested_log'] + ', effective ' + str(cell['rdo_viewing_density']['effective_ppd']) + ' px/deg, Nyquist ' + str(cell['rdo_viewing_density']['cpd_nyquist']) + ' cycles/deg' + (' (legacy-equivalent)' if cell['rdo_viewing_density']['legacy_equivalent'] else ''), ''
                         return 0,'CDF 9/7',''
                 encoded_info=fb.Y4MInfo(cell['stereo_width'],cell['eye_height'],90,1,'420','FULL',1,90)
                 score_info=info; ids=[{'source_frame':i,'source_sha256':'a','encoded_reference_sha256':'b'} for i in range(90)]
@@ -208,3 +257,6 @@ class PyroQ3FramebankTests(unittest.TestCase):
                 self.assertEqual(prep.call_args.kwargs['preparation_workers'], 1)
                 self.assertIsNotNone(prep.call_args.kwargs['guard'])
                 self.assertEqual(result['q3b_preparation_workers'],1)
+                self.assertEqual(result['cells'][0]['rdo_effective']['effective_ppd'],cell['rdo_viewing_density']['effective_ppd'])
+                expected_env=cell['rdo_viewing_density']['environment'] or {}
+                self.assertEqual({key:value for key,value in Guard.envs[0].items() if key == 'PYROWAVE_RDO_PX_PER_DEG'},expected_env)
