@@ -34,7 +34,7 @@ CROPPED_SOURCE_SHA256 = "4c833e175610488ffa05a8037e52c166424db8308a67a2bfed4ed48
 FENCE_RECTANGLES = {"full_fov": {"eye": "left", "x": 1740, "y": 1310, "width": 240, "height": 274},
                     "cropped": {"mapped": {"eye": "left", "x": 1462, "y": 1036, "width": 240, "height": 274},
                                 "source": {"eye": "left", "x": 1740, "y": 1310, "width": 240, "height": 274}}}
-CROP_GEOMETRY = {"source_eye": [3072, 3232], "target_eye": [2624, 2776],
+CROP_GEOMETRY = {"kind": "per_eye_crop", "source_eye": [3072, 3232], "target_eye": [2624, 2776],
                  "tangent_multipliers": [.8542, .85],
                  "eyes": [{"eye": "left", "x": 278, "y": 274, "width": 2624, "height": 2776},
                           {"eye": "right", "x": 170, "y": 274, "width": 2624, "height": 2776}],
@@ -86,7 +86,7 @@ def build_plan(source: Path, vertical_pixels_per_degree: float, *, projection_ev
     selected = {(w, r) for w, r in Q3A_ROWS}
     pairs = [(i, c) for i, c in enumerate(base["cells"])
              if (c["wavelet"], c["rate_mbps"]) in selected]
-    cells = [dict(phase="q3a", **c) for _, c in pairs]
+    cells = [dict(phase="q3a", source_geometry="crop", **c) for _, c in pairs]
     if include_q3b:
         cells += [dict(phase="q3b", profile=p, wavelet=w, rate_mbps=r, fps=90,
                        eye_width=2624, eye_height=2776, stereo_width=5248,
@@ -99,6 +99,8 @@ def build_plan(source: Path, vertical_pixels_per_degree: float, *, projection_ev
             "presentation_eye": base["presentation_eye"], "projection": base["projection"],
             "crops": base["crops"], "hvs_calibration": {**base["hvs_calibration"],
                 "codec_cells": [base["hvs_calibration"]["codec_cells"][i] for i, _ in pairs]},
+            "source_adapter": {"kind": "per_eye_crop", "geometry": copy.deepcopy(CROP_GEOMETRY),
+                               "future_transform": None},
             "fence_rectangles": {**copy.deepcopy(FENCE_RECTANGLES), "cropped": {**copy.deepcopy(FENCE_RECTANGLES["cropped"]), "geometry": copy.deepcopy(CROP_GEOMETRY)}},
             "quality_contract": {"score_windows_one_based": [[1, 90], [10, 89]], "fence_metric": True,
                                  "per_frame_identity": True, "timing_requires_native_per_frame_record": True,
@@ -116,13 +118,16 @@ def validate_plan(plan: dict) -> dict:
     actual_a = [c for c in plan.get("cells", []) if c.get("phase") == "q3a"]
     if [(c.get("wavelet"), c.get("rate_mbps")) for c in actual_a] != list(Q3A_ROWS) or any(
             c.get("eye_width") != 2624 or c.get("eye_height") != 2776 or c.get("stereo_width") != 5248 or
-            c.get("cap_bytes") != fb.cap_bytes(c["rate_mbps"], 90) for c in actual_a):
+            c.get("cap_bytes") != fb.cap_bytes(c["rate_mbps"], 90) or c.get("source_geometry") != "crop" for c in actual_a):
         raise ValueError("Q3a rows drifted")
     calibration = plan.get("hvs_calibration", {})
     if not isinstance(calibration, dict) or len(calibration.get("codec_cells", [])) != len(actual_a):
         raise ValueError("Q3 calibrated scoring contract drifted")
     if plan.get("fence_rectangles", {}).get("cropped", {}).get("mapped") != FENCE_RECTANGLES["cropped"]["mapped"]:
         raise ValueError("Q3 cropped fence rectangle drifted")
+    adapter = plan.get("source_adapter", {})
+    if adapter.get("kind") != "per_eye_crop" or adapter.get("geometry") != CROP_GEOMETRY:
+        raise ValueError("Q3 source adapter geometry drifted")
     actual_b = [c for c in plan.get("cells", []) if c.get("phase") == "q3b"]
     if actual_b and [(c.get("profile"), c.get("wavelet"), c.get("rate_mbps")) for c in actual_b] != list(Q3B_ROWS):
         raise ValueError("Q3b rows drifted")

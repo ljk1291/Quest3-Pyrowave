@@ -19,7 +19,7 @@ class PyroQ3FramebankTests(unittest.TestCase):
                 "frame_identity": []}
 
     def plan(self, include_q3b=False):
-        cells = [dict(phase="q3a", wavelet=w, rate_mbps=r, fps=90, eye_width=2624,
+        cells = [dict(phase="q3a", source_geometry="crop", wavelet=w, rate_mbps=r, fps=90, eye_width=2624,
                       eye_height=2776, stereo_width=5248, cap_bytes=fb.cap_bytes(r, 90),
                       bits_per_pixel=fb.bpp(fb.cap_bytes(r, 90), 2624, 2776)) for w, r in q3.Q3A_ROWS]
         if include_q3b:
@@ -29,6 +29,7 @@ class PyroQ3FramebankTests(unittest.TestCase):
         return {"schema": 1, "kind": "pyro_q3_framebank", "fixture_only": True,
                 "source": self.source_contract(), "projection_evidence": "p", "crop_evidence": "c",
                 "crop_geometry": q3.CROP_GEOMETRY, "fence_rectangles": {**q3.FENCE_RECTANGLES, "cropped": {**q3.FENCE_RECTANGLES["cropped"], "geometry": q3.CROP_GEOMETRY}},
+                "source_adapter": {"kind": "per_eye_crop", "geometry": q3.CROP_GEOMETRY, "future_transform": None},
                 "frozen_module_hashes": q3._module_hashes(), "cells": cells,
                 "hvs_calibration": {"codec_cells": [{} for _ in q3.Q3A_ROWS]},
                 "quality_contract": {"score_windows_one_based": [[1, 90], [10, 89]], "fence_metric": True,
