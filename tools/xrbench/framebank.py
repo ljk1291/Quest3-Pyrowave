@@ -370,13 +370,60 @@ def codec_environment(base, wavelet):
     return env,{'set':effective,'other_pyrowave_variables':'unset',
                 'decode_path':'compute requested; PC image-quality only'}
 
-def verify_tools_build(tools, metadata_path):
-    """Bind the codec/scorer binaries to the packaged commit and pinned inputs."""
+def _lock_sha256(path: Path) -> str:
+    return hashlib.sha256(Path(path).read_bytes().replace(b'\r\n', b'\n')).hexdigest()
+
+
+def _load_lock(path: Path) -> tuple[str, dict]:
+    path = Path(path)
+    try:
+        data = json.loads(path.read_text(encoding='utf-8-sig'))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError('source-lock snapshot is unreadable') from exc
+    if not isinstance(data, dict):
+        raise ValueError('source-lock snapshot is malformed')
+    return _lock_sha256(path), data
+
+
+def _lock_leaves(value, prefix=''):
+    """Return canonical leaf paths so a compatibility exception cannot hide a sibling."""
+    if isinstance(value, dict):
+        rows = []
+        for key in sorted(value):
+            if not isinstance(key, str) or not key:
+                raise ValueError('source-lock object key is malformed')
+            rows.extend(_lock_leaves(value[key], f'{prefix}.{key}' if prefix else key))
+        return rows
+    if isinstance(value, list):
+        return [(prefix, value)]
+    return [(prefix, value)]
+
+
+def _lock_change_rows(old: dict, new: dict) -> list[dict]:
+    old_leaves, new_leaves = dict(_lock_leaves(old)), dict(_lock_leaves(new))
+    sentinel = object()
+    return [{'path': path, 'old': old_leaves.get(path), 'new': new_leaves.get(path)}
+            for path in sorted(set(old_leaves) | set(new_leaves))
+            if old_leaves.get(path, sentinel) != new_leaves.get(path, sentinel)]
+
+
+# These are the only overlay leaves that may differ for the one qualified
+# historical scorer.  The Light patch also changes live presentation code, but
+# neither reviewed overlay changes the HVS scorer source, shader, or imports.
+_HISTORICAL_HVS_ALLOWED_LOCK_ROLES = {
+    'patches.pyrowave_rdo_density.path': 'codec_encoder_only',
+    'patches.pyrowave_rdo_density.sha256': 'codec_encoder_only',
+    'patches.wo8_light_centre_phase.path': 'presentation_foveation_only',
+    'patches.wo8_light_centre_phase.sha256': 'presentation_foveation_only',
+}
+
+
+def _verify_tools_build_against_lock(tools, metadata_path, *, lock_hash: str, lock_data: dict):
+    """Shared strict package verifier with an explicitly supplied immutable lock."""
     from . import hvs_scorer
     path=Path(metadata_path); meta=json.loads(path.read_text(encoding='utf-8-sig'))
     bundle=path.parent; build=json.loads((bundle/'BUILD-METADATA.json').read_text(encoding='utf-8-sig'))
     root=Path(__file__).resolve().parents[2]
-    lock_hash=hashlib.sha256((root/'sources.lock.json').read_bytes().replace(b'\r\n',b'\n')).hexdigest()
     fork=json.loads((root/'fork.json').read_text(encoding='utf-8'))
     source_manifest=bundle/'HVS-SCORER-SOURCE.json'
     source_record=json.loads(source_manifest.read_text(encoding='utf-8-sig'))
@@ -418,7 +465,7 @@ def verify_tools_build(tools, metadata_path):
             or build.get('sources_lock_sha256')!=lock_hash
             or build.get('protocol_version')!=fork['protocol_version']
             or build.get('client_package_id')!=fork['client_package_id']
-            or build.get('dependency_revisions')!=json.loads((root/'sources.lock.json').read_text(encoding='utf-8'))
+            or build.get('dependency_revisions')!=lock_data
             or not build.get('shader_hashes')):
         raise ValueError('offline tool build identity incomplete or mismatched')
     for role,field in (('encode','encode_sha256'),('decode','decode_sha256'),('psnr_hvs_m_h','scorer_sha256')):
@@ -431,6 +478,90 @@ def verify_tools_build(tools, metadata_path):
             'protocol_version':build['protocol_version'],'client_package_id':build['client_package_id'],
             'scorer_source':source_record,'imports_manifest_sha256':sha256_file(imports_path),
             'scorer_shader_sha256':sha256_file(shader)}
+
+
+def verify_tools_build(tools, metadata_path):
+    """Bind a codec/scorer package to this checkout's current pinned inputs."""
+    root=Path(__file__).resolve().parents[2]
+    lock_hash, lock_data = _load_lock(root/'sources.lock.json')
+    return _verify_tools_build_against_lock(tools, metadata_path, lock_hash=lock_hash, lock_data=lock_data)
+
+
+def verify_historical_hvs_scorer(tools, metadata_path, compatibility_path):
+    """Verify the one retained qualified HVS package under a pinned lock exception.
+
+    This is scorer-only: a current codec package must still use
+    :func:`verify_tools_build`.  The descriptor binds one exact retained scorer
+    executable and permits only its listed structural lock changes.
+    """
+    root = Path(__file__).resolve().parents[2]
+    try:
+        descriptor_path = Path(compatibility_path)
+        descriptor = json.loads(descriptor_path.read_text(encoding='utf-8-sig'))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError('historical HVS compatibility descriptor is unreadable') from exc
+    if not isinstance(descriptor, dict) or descriptor.get('schema') != 1 or descriptor.get('kind') != 'framebank_historical_hvs_scorer_compatibility':
+        raise ValueError('historical HVS compatibility descriptor is malformed')
+    snapshot_name = descriptor.get('historical_lock_snapshot')
+    if not isinstance(snapshot_name, str) or not snapshot_name.startswith('tools/xrbench/historical_locks/'):
+        raise ValueError('historical HVS lock snapshot path is invalid')
+    snapshot_root = (root/'tools/xrbench/historical_locks').resolve()
+    snapshot = (root / snapshot_name).resolve()
+    if snapshot_root not in snapshot.parents:
+        raise ValueError('historical HVS lock snapshot path escapes the tracked snapshot directory')
+    historical_hash, historical_lock = _load_lock(snapshot)
+    if historical_hash != descriptor.get('historical_lock_sha256'):
+        raise ValueError('historical HVS lock snapshot hash differs from descriptor')
+    qualified = descriptor.get('qualified_scorer_bundle')
+    if not isinstance(qualified, dict):
+        raise ValueError('historical HVS qualified scorer identity is missing')
+    required = ('tools_metadata_sha256', 'package_metadata_sha256', 'scorer_sha256',
+                'source_manifest_sha256', 'scorer_shader_sha256', 'imports_manifest_sha256',
+                'source_psnr_cpp_sha256')
+    if any(not isinstance(qualified.get(key), str) or not re.fullmatch(r'[0-9a-f]{64}', qualified[key]) for key in required):
+        raise ValueError('historical HVS qualified scorer identity is malformed')
+    path = Path(metadata_path); bundle = path.parent
+    files = {
+        'tools_metadata_sha256': path,
+        'package_metadata_sha256': bundle/'BUILD-METADATA.json',
+        'scorer_sha256': _tool_path(tools.get('psnr_hvs_m_h')),
+        'source_manifest_sha256': bundle/'HVS-SCORER-SOURCE.json',
+        'scorer_shader_sha256': bundle/'psnr_hvs_m.comp',
+        'imports_manifest_sha256': bundle/'FRAMEBANK-IMPORTS.json',
+    }
+    if any(value is None or not Path(value).is_file() for value in files.values()):
+        raise ValueError('historical HVS qualified scorer file is missing')
+    for key, value in files.items():
+        if sha256_file(value) != qualified[key]:
+            raise ValueError('historical HVS qualified scorer identity differs: ' + key)
+    meta = json.loads(path.read_text(encoding='utf-8-sig'))
+    if meta.get('source_psnr_cpp_sha256') != qualified['source_psnr_cpp_sha256']:
+        raise ValueError('historical HVS qualified scorer source differs')
+    current_hash, current_lock = _load_lock(root/'sources.lock.json')
+    expected_changes = descriptor.get('allowed_current_lock_changes')
+    if not isinstance(expected_changes, list) or not expected_changes:
+        raise ValueError('historical HVS allowed lock changes are missing')
+    expected_rows = []
+    for row in expected_changes:
+        if (not isinstance(row, dict) or set(row) != {'path', 'old', 'new', 'role'}
+                or not isinstance(row['path'], str) or not row['path']
+                or row['role'] != _HISTORICAL_HVS_ALLOWED_LOCK_ROLES.get(row['path'])):
+            raise ValueError('historical HVS allowed lock change is malformed')
+        expected_rows.append({'path': row['path'], 'old': row['old'], 'new': row['new']})
+    if len({row['path'] for row in expected_rows}) != len(expected_rows):
+        raise ValueError('historical HVS allowed lock changes repeat a path')
+    if {row['path'] for row in expected_rows} != set(_HISTORICAL_HVS_ALLOWED_LOCK_ROLES):
+        raise ValueError('historical HVS allowed lock changes are not the reviewed scorer exception')
+    actual_rows = _lock_change_rows(historical_lock, current_lock)
+    if actual_rows != sorted(expected_rows, key=lambda row: row['path']):
+        raise ValueError('historical HVS lock changes exceed the explicit scorer compatibility proof')
+    verified = _verify_tools_build_against_lock(tools, path, lock_hash=historical_hash, lock_data=historical_lock)
+    return {**verified,
+            'historical_scorer_mode': True,
+            'historical_sources_lock_sha256': historical_hash,
+            'current_sources_lock_sha256': current_hash,
+            'compatibility_descriptor_sha256': sha256_file(descriptor_path),
+            'allowed_current_lock_changes': expected_changes}
 
 def parse_hvs_m_h(text,pixels_per_degree:float,image_height:int)->dict:
     expected=hvs_calibration_for_vertical_ppd(pixels_per_degree,image_height)

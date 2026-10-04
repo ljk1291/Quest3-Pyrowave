@@ -1353,7 +1353,8 @@ def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, 
 
 def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, window: Path, *,
              command_timeout_s: float = 900, keep_artifacts: bool = False, supervised: bool = True,
-             tools_metadata: Path | None = None, preparation_workers: int = 1) -> dict:
+             tools_metadata: Path | None = None, preparation_workers: int = 1,
+             scorer_compatibility: Path | None = None) -> dict:
     """Run a frozen proxy matrix through an owner-supervised quality lease."""
     raw = Path(plan_path).read_bytes(); plan = validate_plan(json.loads(raw))
     source = Path(source); private_out = fb._private_path(private_out)
@@ -1369,7 +1370,9 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
     bundle = metadata.resolve().parent
     build_tools = {"encode": bundle / "pyrowave-encode.exe", "decode": bundle / "pyrowave-decode.exe",
                    "psnr_hvs_m_h": bundle / "pyrowave-psnr-hvs-m.exe"}
-    build_provenance = fb.verify_tools_build(build_tools, metadata)
+    verify_build = (lambda: fb.verify_historical_hvs_scorer(build_tools, metadata, scorer_compatibility)
+                    if scorer_compatibility is not None else fb.verify_tools_build(build_tools, metadata))
+    build_provenance = verify_build()
     if fb.sha256_file(needed["psnr_hvs_m_h"]) != fb.sha256_file(build_tools["psnr_hvs_m_h"]):
         raise ValueError("selected HVS scorer differs from qualified frame-bank bundle")
     guard = fb.WindowGuard(window, supervised=True); guard.status(); run_start_epoch_s = time.time()
@@ -1533,7 +1536,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
     if result["source_sha256_end"] != result["source_sha256_start"]: result["failure_reasons"].append("source_changed_during_run")
     if result["tool_provenance_end"] != result["tool_provenance_start"]: result["failure_reasons"].append("tool_changed_during_run")
     try:
-        if fb.verify_tools_build(build_tools, metadata) != build_provenance:
+        if verify_build() != build_provenance:
             result["failure_reasons"].append("tool_build_provenance_changed_during_run")
     except (OSError, ValueError, KeyError):
         result["failure_reasons"].append("tool_build_provenance_changed_during_run")
@@ -1609,6 +1612,7 @@ def main(argv=None):
     r.add_argument("--keep-artifacts", action="store_true")
     r.add_argument("--supervised", action="store_true", help="required owner-supervised PC-only lease")
     r.add_argument("--q3b-preparation-workers", type=int, default=1, choices=(1, 2, 3))
+    r.add_argument("--scorer-compatibility", help="tracked historical-HVS compatibility descriptor; scorer-only")
     args = parser.parse_args(argv)
     if args.command == "plan":
         if args.revised_q3a:
@@ -1634,7 +1638,8 @@ def main(argv=None):
                       {"ffmpeg": args.ffmpeg, "ffprobe": args.ffprobe, "psnr_hvs_m_h": args.psnr_hvs_m_h},
                       Path(args.window), command_timeout_s=args.command_timeout_s,
                       keep_artifacts=args.keep_artifacts, supervised=args.supervised,
-                      tools_metadata=Path(args.tools_metadata), preparation_workers=args.q3b_preparation_workers)
+                      tools_metadata=Path(args.tools_metadata), preparation_workers=args.q3b_preparation_workers,
+                      scorer_compatibility=Path(args.scorer_compatibility) if args.scorer_compatibility else None)
     Path(args.report).write_text(fb.report_json(sanitized_report(result)), encoding="utf-8")
     print("wrote sanitized NVENC report: complete=" + str(result["complete"]))
     return 0 if result["complete"] else 2

@@ -199,12 +199,13 @@ class PyroQ3FramebankTests(unittest.TestCase):
             report = Path(root) / "report.json"
             args = ["run", "--plan", "p", "--source", "s", "--private-out", "o", "--report", str(report),
                     "--window", "w", "--encode", "e", "--decode", "d", "--psnr-hvs-m-h", "h",
-                    "--ffmpeg", "f", "--tools-metadata", "m", "--phase", "q3b", "--cell-index", "5", "--q3b-preparation-workers", "3"]
+                    "--ffmpeg", "f", "--tools-metadata", "m", "--scorer-compatibility", "compat", "--phase", "q3b", "--cell-index", "5", "--q3b-preparation-workers", "3"]
             with mock.patch.object(q3, "run_plan", return_value={"complete": True}) as run:
                 self.assertEqual(q3.main(args), 0)
             self.assertEqual(run.call_args.kwargs["phase"], "q3b")
             self.assertEqual(run.call_args.kwargs["cell_indices"], [5])
             self.assertEqual(run.call_args.kwargs["preparation_workers"], 3)
+            self.assertEqual(run.call_args.kwargs["scorer_compatibility"], Path("compat"))
             self.assertTrue(report.is_file())
 
     def test_q3b_never_substitutes_shared_scorer_or_blur_only_path(self):
@@ -212,6 +213,31 @@ class PyroQ3FramebankTests(unittest.TestCase):
             # The adapter itself must only delegate to an actual shared scorer.
             self.assertTrue(callable(getattr(__import__("xrbench.nvenc_framebank", fromlist=["x"]), "_same_frame_scores")))
         self.assertEqual(len(q3.Q3B_ROWS), 8)
+
+    def test_split_bundle_historical_scorer_keeps_both_lock_identities(self):
+        """A current codec can use only the named historical scorer proof."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            tools = {'encode': root/'pyrowave-encode.exe', 'decode': root/'pyrowave-decode.exe',
+                     'psnr_hvs_m_h': root/'pyrowave-psnr-hvs-m.exe', 'ffmpeg': root/'ffmpeg.exe'}
+            for path in tools.values(): path.write_bytes(path.name.encode())
+            codec_meta, scorer_meta, descriptor = root/'codec.json', root/'scorer.json', root/'compat.json'
+            codec_meta.write_text('{}'); scorer_meta.write_text('{}'); descriptor.write_text('{}')
+            codec = {'sources_lock_sha256': 'c'*64, 'scorer_source': {'same': True}, 'scorer_shader_sha256': 's'*64}
+            scorer = {'sources_lock_sha256': 'h'*64, 'current_sources_lock_sha256': 'c'*64,
+                      'historical_scorer_mode': True, 'scorer_source': {'same': True}, 'scorer_shader_sha256': 's'*64}
+            with mock.patch.object(fb, 'verify_tools_build', return_value=codec) as current, \
+                 mock.patch.object(fb, 'verify_historical_hvs_scorer', return_value=scorer) as historical:
+                result = q3.verify_split_bundles(tools, codec_meta, scorer_meta, descriptor)
+            current.assert_called_once(); historical.assert_called_once()
+            self.assertTrue(result['historical_scorer_mode'])
+            self.assertEqual(result['codec_sources_lock_sha256'], 'c'*64)
+            self.assertEqual(result['scorer_sources_lock_sha256'], 'h'*64)
+            scorer['current_sources_lock_sha256'] = 'x'*64
+            with mock.patch.object(fb, 'verify_tools_build', return_value=codec), \
+                 mock.patch.object(fb, 'verify_historical_hvs_scorer', return_value=scorer):
+                with self.assertRaisesRegex(ValueError, 'current lock'):
+                    q3.verify_split_bundles(tools, codec_meta, scorer_meta, descriptor)
 
     def test_q3b_orchestration_uses_reduced_codec_input_then_expanded_shared_scores(self):
         """Exercise both squeezed and blur-only cells without a codec/GPU."""

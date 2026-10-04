@@ -418,6 +418,82 @@ class FrameBankTests(unittest.TestCase):
             build['dependency_revisions']['pyrowave']['commit']='0'*40; build_path.write_text(json.dumps(build))
             with self.assertRaisesRegex(ValueError,'identity'): fb.verify_tools_build(tools,path)
 
+    def test_historical_hvs_scorer_is_an_explicit_immutable_lock_exception(self):
+        """Only the named qualified scorer may bridge the two pinned lock records."""
+        from xrbench import hvs_scorer as hs
+        root = Path(fb.__file__).resolve().parents[2]
+        snapshot = root / 'tools/xrbench/historical_locks/sources.lock.b4a61b3ae0bdff818de18c8f97a1a2a1ba80ace7bf636de48093d22ad5aba23b.json'
+        historical_hash, historical_lock = fb._load_lock(snapshot)
+        current_hash, _ = fb._load_lock(root / 'sources.lock.json')
+        self.assertNotEqual(historical_hash, current_hash)
+        with self.tmp() as t:
+            folder = Path(t); tools = {}
+            for name, filename in (('encode', 'pyrowave-encode.exe'), ('decode', 'pyrowave-decode.exe'),
+                                   ('psnr_hvs_m_h', 'pyrowave-psnr-hvs-m.exe')):
+                tools[name] = folder / filename; tools[name].write_bytes(name.encode())
+            source = folder / 'HVS-SCORER-SOURCE.json'; source.write_text(json.dumps(hs.manifest()))
+            shader = folder / 'psnr_hvs_m.comp'
+            shutil.copyfile(Path(__file__).parent / 'fixtures/pyrowave-d2997ac-psnr_hvs_m.comp', shader)
+            imports = folder / 'FRAMEBANK-IMPORTS.json'
+            imports.write_text(json.dumps({'schema': 1, 'kind': 'framebank_windows_imports',
+                'tools': {p.name: [{'name': 'kernel32.dll', 'provider': 'windows_system'}] for p in tools.values()}}))
+            fork = json.loads((root / 'fork.json').read_text())
+            build = {'repository_commit': 'b' * 40, 'sources_lock_sha256': historical_hash,
+                     'dependency_revisions': historical_lock, 'shader_hashes': {'test': 'b' * 64},
+                     'protocol_version': fork['protocol_version'], 'client_package_id': fork['client_package_id'],
+                     'artifact_sha256': {path.name: fb.sha256_file(path) for path in tools.values()}}
+            build['artifact_sha256'].update({p.name: fb.sha256_file(p) for p in (shader, imports)})
+            build_path = folder / 'BUILD-METADATA.json'; build_path.write_text(json.dumps(build))
+            meta = {'schema': 1, 'kind': 'pyrowave_framebank_tools_build', 'source_lock_sha256': historical_hash,
+                    'source_psnr_cpp_sha256': hs.PATCHED_PSNR_SHA256,
+                    'source_manifest_sha256': fb.sha256_file(source), 'imports_manifest_sha256': fb.sha256_file(imports),
+                    'tools': {field: fb.sha256_file(tools[name]) for name, field in
+                              (('encode', 'encode_sha256'), ('decode', 'decode_sha256'), ('psnr_hvs_m_h', 'scorer_sha256'))}}
+            meta_path = folder / 'FRAMEBANK-TOOLS-BUILD-METADATA.json'; meta_path.write_text(json.dumps(meta))
+            descriptor = {'schema': 1, 'kind': 'framebank_historical_hvs_scorer_compatibility',
+                          'historical_lock_snapshot': str(snapshot.relative_to(root)).replace('\\', '/'),
+                          'historical_lock_sha256': historical_hash,
+                          'qualified_scorer_bundle': {
+                              'tools_metadata_sha256': fb.sha256_file(meta_path),
+                              'package_metadata_sha256': fb.sha256_file(build_path),
+                              'scorer_sha256': fb.sha256_file(tools['psnr_hvs_m_h']),
+                              'source_manifest_sha256': fb.sha256_file(source),
+                              'scorer_shader_sha256': fb.sha256_file(shader),
+                              'imports_manifest_sha256': fb.sha256_file(imports),
+                              'source_psnr_cpp_sha256': hs.PATCHED_PSNR_SHA256},
+                          'allowed_current_lock_changes': [
+                              {'path': 'patches.pyrowave_rdo_density.path', 'old': None,
+                               'new': 'patches/pyrowave-rdo-density.patch', 'role': 'codec_encoder_only'},
+                              {'path': 'patches.pyrowave_rdo_density.sha256', 'old': None,
+                               'new': '1641a9456dd9d9e5811a110016cfe673587e7de56d9a76d709a3ea7599f3a4cc', 'role': 'codec_encoder_only'},
+                              {'path': 'patches.wo8_light_centre_phase.path', 'old': None,
+                               'new': 'patches/wo8-light-centre-phase.patch', 'role': 'presentation_foveation_only'},
+                              {'path': 'patches.wo8_light_centre_phase.sha256', 'old': None,
+                               'new': '4f4ce22430f810c78195d749425f35f77ffdb1a14c844b927dff485c3c91e7f3', 'role': 'presentation_foveation_only'}]}
+            descriptor_path = folder / 'compatibility.json'; descriptor_path.write_text(json.dumps(descriptor))
+            with self.assertRaisesRegex(ValueError, 'source provenance'):
+                fb.verify_tools_build(tools, meta_path)
+            record = fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)
+            self.assertTrue(record['historical_scorer_mode'])
+            self.assertEqual(record['historical_sources_lock_sha256'], historical_hash)
+            self.assertEqual(record['current_sources_lock_sha256'], current_hash)
+            tampered = dict(descriptor); tampered['historical_lock_sha256'] = '0' * 64
+            descriptor_path.write_text(json.dumps(tampered))
+            with self.assertRaisesRegex(ValueError, 'snapshot hash'):
+                fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)
+            tampered = json.loads(json.dumps(descriptor)); tampered['allowed_current_lock_changes'][0]['new'] = 'changed.patch'
+            descriptor_path.write_text(json.dumps(tampered))
+            with self.assertRaisesRegex(ValueError, 'lock changes exceed'):
+                fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)
+            tampered = json.loads(json.dumps(descriptor)); tampered['allowed_current_lock_changes'].append(
+                {'path': 'granite.commit', 'old': 'old', 'new': 'new', 'role': 'codec_encoder_only'})
+            descriptor_path.write_text(json.dumps(tampered))
+            with self.assertRaisesRegex(ValueError, 'allowed lock change is malformed'):
+                fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)
+            descriptor_path.write_text(json.dumps(descriptor)); tools['psnr_hvs_m_h'].write_bytes(b'changed scorer')
+            with self.assertRaisesRegex(ValueError, 'qualified scorer identity differs'):
+                fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)
+
     def test_hvs_transport_requires_the_exact_scored_frame_count(self):
         class Guard:
             def run(self,*args,**kwargs):

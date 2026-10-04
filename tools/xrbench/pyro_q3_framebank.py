@@ -412,7 +412,8 @@ def _result_base(raw_plan: bytes, source: Path, tools: dict, tool_build: dict | 
             "complete": False, "failure_reasons": []}
 
 
-def verify_split_bundles(tools: dict, codec_metadata: Path, scorer_metadata: Path | None = None) -> dict:
+def verify_split_bundles(tools: dict, codec_metadata: Path, scorer_metadata: Path | None = None,
+                         scorer_compatibility: Path | None = None) -> dict:
     """Verify codec and scorer bundles separately before mixing their binaries.
 
     A telemetry rebuild may replace encode/decode while comparisons deliberately
@@ -430,15 +431,26 @@ def verify_split_bundles(tools: dict, codec_metadata: Path, scorer_metadata: Pat
     scorer_bundle = scorer_metadata.parent
     scorer_tools = {"encode": scorer_bundle / "pyrowave-encode.exe", "decode": scorer_bundle / "pyrowave-decode.exe",
                     "psnr_hvs_m_h": scorer_bundle / "pyrowave-psnr-hvs-m.exe"}
-    scorer = fb.verify_tools_build(scorer_tools, scorer_metadata)
+    if scorer_compatibility is None:
+        scorer = fb.verify_tools_build(scorer_tools, scorer_metadata)
+    else:
+        scorer = fb.verify_historical_hvs_scorer(scorer_tools, scorer_metadata, scorer_compatibility)
     if _hash(tools["psnr_hvs_m_h"]) != _hash(scorer_tools["psnr_hvs_m_h"]):
         raise ValueError("HVS scorer differs from scorer bundle metadata")
-    for key in ("scorer_source", "scorer_shader_sha256", "sources_lock_sha256"):
+    for key in ("scorer_source", "scorer_shader_sha256"):
         if codec.get(key) != scorer.get(key):
             raise ValueError("codec/scorer bundles do not prove the same HVS implementation")
+    if scorer.get('historical_scorer_mode'):
+        if codec.get('sources_lock_sha256') != scorer.get('current_sources_lock_sha256'):
+            raise ValueError('codec bundle does not use the current lock required by historical scorer proof')
+    elif codec.get('sources_lock_sha256') != scorer.get('sources_lock_sha256'):
+        raise ValueError("codec/scorer bundles do not prove the same source-lock record")
     return {"codec_bundle": codec, "scorer_bundle": scorer,
             "separate_scorer_bundle": scorer_metadata != codec_metadata,
-            "hvs_implementation_unchanged": True}
+            "hvs_implementation_unchanged": True,
+            "historical_scorer_mode": scorer.get('historical_scorer_mode') is True,
+            "codec_sources_lock_sha256": codec.get('sources_lock_sha256'),
+            "scorer_sources_lock_sha256": scorer.get('sources_lock_sha256')}
 
 
 def _select_cells(plan: dict, phase: str | None, cell_indices: list[int] | tuple[int, ...] | None) -> list[tuple[int, dict]]:
@@ -469,7 +481,8 @@ def _select_cells(plan: dict, phase: str | None, cell_indices: list[int] | tuple
 def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, window: Path, *, tools_metadata: Path,
              scorer_tools_metadata: Path | None = None, command_timeout_s: float = 900,
              keep_artifacts: bool = False, supervised: bool = False, resume: bool = False, phase: str | None = None,
-             cell_indices: list[int] | tuple[int, ...] | None = None, preparation_workers: int = 1) -> dict:
+             cell_indices: list[int] | tuple[int, ...] | None = None, preparation_workers: int = 1,
+             scorer_compatibility: Path | None = None) -> dict:
     """Run only frozen Q3a rows; Q3b fails closed until a real WO-8 adapter exists."""
     from . import nvenc_framebank as nvenc
     raw_plan = Path(plan_path).read_bytes(); plan = validate_plan(json.loads(raw_plan)); source = Path(source)
@@ -478,7 +491,8 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
     if _source_contract(source, info) != plan["source"]: raise ValueError("source contract differs from frozen plan")
     required = {"encode", "decode", "psnr_hvs_m_h", "ffmpeg"}
     if set(tools) != required: raise ValueError("Pyro Q3 runner requires exactly encode/decode/psnr_hvs_m_h tools")
-    fb.required_tools(tools); guard.status(); build = verify_split_bundles(tools, Path(tools_metadata), scorer_tools_metadata)
+    fb.required_tools(tools); guard.status(); build = verify_split_bundles(
+        tools, Path(tools_metadata), scorer_tools_metadata, scorer_compatibility)
     selected = _select_cells(plan, phase, cell_indices)
     requested_indices = [index for index, _ in selected]
     out = Path(private_out)
@@ -609,6 +623,7 @@ def main(argv=None):
     for name in ("plan", "source", "private-out", "report", "window", "encode", "decode", "psnr-hvs-m-h", "ffmpeg", "tools-metadata"):
         run.add_argument("--" + name, required=True)
     run.add_argument("--scorer-tools-metadata", help="separate verified bundle for the HVS scorer")
+    run.add_argument("--scorer-compatibility", help="tracked historical-HVS compatibility descriptor; scorer-only")
     run.add_argument("--command-timeout-s", type=float, default=900)
     run.add_argument("--keep-artifacts", action="store_true")
     run.add_argument("--phase", choices=("q3a", "q3b"))
@@ -631,6 +646,7 @@ def main(argv=None):
                       {"encode": args.encode, "decode": args.decode, "psnr_hvs_m_h": args.psnr_hvs_m_h, "ffmpeg": args.ffmpeg}, Path(args.window),
                       tools_metadata=Path(args.tools_metadata),
                       scorer_tools_metadata=Path(args.scorer_tools_metadata) if args.scorer_tools_metadata else None,
+                      scorer_compatibility=Path(args.scorer_compatibility) if args.scorer_compatibility else None,
                       command_timeout_s=args.command_timeout_s, keep_artifacts=args.keep_artifacts,
                       supervised=args.supervised, resume=args.resume, phase=args.phase,
                       cell_indices=args.cell_indices, preparation_workers=args.q3b_preparation_workers)
