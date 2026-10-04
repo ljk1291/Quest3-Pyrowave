@@ -241,6 +241,15 @@ class NvencFramebankTests(unittest.TestCase):
         self.assertEqual(h264["mbps"], 700)
         self.assertEqual(h264["layout"], "dual_eye")
 
+    def test_revised_q3b_matrix_has_two_nvenc_and_eight_pyrowave_cells(self):
+        cells = nf.revised_q3b_cells()
+        self.assertEqual(len(cells), 10)
+        self.assertEqual(sum(c["runner"] == "nvenc" for c in cells), 2)
+        self.assertEqual(sum(c["runner"] == "pyrowave" for c in cells), 8)
+        nvenc = [c for c in cells if c["runner"] == "nvenc"]
+        self.assertTrue(all(c["mbps_total"] == 700 for c in nvenc))
+        self.assertEqual(nvenc[1]["layout"], "dual_eye")
+
     def test_revised_q3a_plan_freezes_dual_eye_and_mapped_fence(self):
         geometry = {"kind": "per_eye_crop", "source_eye": [3072, 3232], "target_eye": [2624, 2776], "eyes": [
             {"eye": "left", "x": 278, "y": 274, "width": 2624, "height": 2776},
@@ -258,6 +267,19 @@ class NvencFramebankTests(unittest.TestCase):
         dual = next(c for c in plan["cells"] if c["label"] == "h264-dual-p7-700")
         self.assertEqual(dual["per_stream_mbps"], 350)
         self.assertEqual(dual["nvenc_profile"]["preset"], "p7")
+
+    def test_revised_q3a_accepts_public_geometry_wrapper_without_kind(self):
+        public = json.loads((Path(__file__).resolve().parents[2] /
+                             "results/q3-crop-geometry-2026-10-04.json").read_text(encoding="utf-8"))
+        self.assertNotIn("kind", public["geometry"])
+        base_cell = {"fps": 90, "eye_width": 2624, "eye_height": 2776, "stereo_width": 5248,
+                     "encoded_chroma": "420", "cap_bytes": fb.cap_bytes(200), "bits_per_pixel": 1.0}
+        base = {"cells": [base_cell], "hvs_calibration": {"codec_cells": [{}], "crops": []}}
+        with mock.patch.object(nf, "_require_jpeg_full_y4m"), mock.patch.object(fb, "build_plan", return_value=base):
+            plan = nf.build_revised_q3a_plan(Path("source.y4m"), 23.5, projection_evidence="p",
+                crop_evidence="c", crop_geometry=public, fence_rectangle=None, crops=[])
+        self.assertEqual(plan["source_adapter"]["geometry"]["kind"], "per_eye_crop")
+        self.assertEqual(plan["source_adapter"]["geometry"]["eyes"][0]["x"], 278)
 
     def test_mocked_runner_wraps_raw_planes_and_keeps_observed_metadata(self):
         with tempfile.TemporaryDirectory() as root:
