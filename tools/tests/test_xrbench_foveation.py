@@ -159,6 +159,17 @@ class FoveationTests(unittest.TestCase):
         y=np.full((240,640),128,np.uint8); cb=np.zeros((120,320),np.uint8); cb[:,160:]=255; cr=np.full((120,320),128,np.uint8)
         out=transform_planes([y,cb,cr],FoveationConfig('light',softness=.5))
         self.assertEqual(out[1].shape,(120,320)); self.assertTrue(np.isfinite(out[1]).all())
+    def test_reconstructing_existing_encoded_planes_matches_blur_reference_bitwise(self):
+        """A Q3b source frame may reuse its reduced planes for the blur reference."""
+        y=np.arange(240*640,dtype=np.uint8).reshape(240,640)
+        planes=[y,np.full((120,320),101,np.uint8),np.full((120,320),153,np.uint8)]
+        for cfg in (FoveationConfig('light',0), FoveationConfig('medium',.5),
+                    FoveationConfig('h264fit',.5), FoveationConfig('light',.5,True)):
+            encoded=encode_planes(planes,cfg)
+            reused=reconstruct_planes(encoded.planes,encoded)
+            baseline=blur_reference(planes,cfg)
+            self.assertTrue(all(np.array_equal(a,b) for a,b in zip(reused,baseline)),cfg)
+
     def test_encode_then_reconstruct_keeps_small_codec_representation(self):
         y=np.full((240,640),100,np.uint8); planes=[y,np.full((120,320),128,np.uint8),np.full((120,320),128,np.uint8)]
         encoded=encode_planes(planes,FoveationConfig('medium',softness=.5))

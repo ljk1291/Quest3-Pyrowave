@@ -322,9 +322,11 @@ def _select_cells(plan: dict, phase: str | None, cell_indices: list[int] | tuple
 def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, window: Path, *, tools_metadata: Path,
              scorer_tools_metadata: Path | None = None, command_timeout_s: float = 900,
              keep_artifacts: bool = False, supervised: bool = False, resume: bool = False, phase: str | None = None,
-             cell_indices: list[int] | tuple[int, ...] | None = None) -> dict:
+             cell_indices: list[int] | tuple[int, ...] | None = None, preparation_workers: int = 1) -> dict:
     """Run only frozen Q3a rows; Q3b fails closed until a real WO-8 adapter exists."""
+    from . import nvenc_framebank as nvenc
     raw_plan = Path(plan_path).read_bytes(); plan = validate_plan(json.loads(raw_plan)); source = Path(source)
+    preparation_workers = nvenc._q3b_preparation_workers(preparation_workers)
     info = _require_cropped_source(source); guard = fb.WindowGuard(Path(window), supervised=supervised)
     if _source_contract(source, info) != plan["source"]: raise ValueError("source contract differs from frozen plan")
     required = {"encode", "decode", "psnr_hvs_m_h", "ffmpeg"}
@@ -361,6 +363,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
             return result
     else:
         out.mkdir(parents=True); result = _result_base(raw_plan, source, tools, build)
+    result["q3b_preparation_workers"] = preparation_workers
     try:
         env, _ = fb.codec_environment(os.environ, "haar")
         result["hvs_gpu_sanity"] = fb.hvs_gpu_sanity(tools["psnr_hvs_m_h"], out / "scorer-sanity",
@@ -378,11 +381,11 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                 encode_source, encode_info = source, info
                 score_ref, score_blur, score_info = source, None, info
                 if cell["phase"] == "q3b":
-                    from . import nvenc_framebank as nvenc
                     encode_source = directory / "reduced-encoded-source.y4m"
                     score_ref, score_blur = directory / "score-sharp-reference.y4m", directory / "score-blur-reference.y4m"
                     encode_info, score_info, identities, transform = nvenc._stream_q3b_sources(
-                        source, info, plan["crop_geometry"], cell["source_transform"], encode_source, score_ref, score_blur)
+                        source, info, plan["crop_geometry"], cell["source_transform"], encode_source, score_ref, score_blur,
+                        preparation_workers=preparation_workers, guard=guard)
                     row["q3b_encoded_source"] = _q3b_encoded_source_provenance(encode_source, identities)
                     row["q3b_transform"] = transform
                 timing = directory / "pyrowave-encode-timing.jsonl"
@@ -431,7 +434,7 @@ def sanitized_report(result: dict) -> dict:
             "failure_reasons": list(result.get("failure_reasons", [])), "frozen_plan_sha256": result.get("frozen_plan_sha256"),
             "source_sha256": result.get("source_sha256_end"), "tool_provenance": result.get("tool_provenance_end"),
             "tools_build_provenance": result.get("tools_build_provenance"), "module_hashes": result.get("module_hashes"),
-            "hvs_gpu_sanity": result.get("hvs_gpu_sanity"), "source": result.get("source_sha256_start"), "requested_phase": result.get("requested_phase"), "requested_cell_indices": result.get("requested_cell_indices"), "selected_plan_indices": result.get("selected_plan_indices"), "run_scopes": result.get("run_scopes"), "cells": [{k: r.get(k) for k in keep} for r in result.get("cells", [])],
+            "hvs_gpu_sanity": result.get("hvs_gpu_sanity"), "source": result.get("source_sha256_start"), "q3b_preparation_workers": result.get("q3b_preparation_workers"), "requested_phase": result.get("requested_phase"), "requested_cell_indices": result.get("requested_cell_indices"), "selected_plan_indices": result.get("selected_plan_indices"), "run_scopes": result.get("run_scopes"), "cells": [{k: r.get(k) for k in keep} for r in result.get("cells", [])],
             "optical_latency_ms": None, "display_fps": None}
 
 
@@ -455,6 +458,7 @@ def main(argv=None):
                      help="original frozen-plan index; repeat to select a finite subset")
     run.add_argument("--supervised", action="store_true", help="require owner-attested frame_bank_pc lease")
     run.add_argument("--resume", action="store_true", help="inspect matching completed output only")
+    run.add_argument("--q3b-preparation-workers", type=int, default=1, choices=(1, 2, 3))
     args = parser.parse_args(argv)
     if args.command == "plan":
         crops = json.loads(Path(args.crops[1:]).read_text(encoding="utf-8") if args.crops.startswith("@") else args.crops)
@@ -471,7 +475,7 @@ def main(argv=None):
                       scorer_tools_metadata=Path(args.scorer_tools_metadata) if args.scorer_tools_metadata else None,
                       command_timeout_s=args.command_timeout_s, keep_artifacts=args.keep_artifacts,
                       supervised=args.supervised, resume=args.resume, phase=args.phase,
-                      cell_indices=args.cell_indices)
+                      cell_indices=args.cell_indices, preparation_workers=args.q3b_preparation_workers)
     report = sanitized_report(result); Path(args.report).write_text(fb.report_json(report), encoding="utf-8")
     print("wrote sanitized report: complete=" + str(report["complete"]))
     return 0 if report["complete"] else 2
