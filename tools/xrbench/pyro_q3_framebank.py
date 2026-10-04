@@ -120,17 +120,26 @@ def build_plan(source: Path, vertical_pixels_per_degree: float, *, projection_ev
              if (c["wavelet"], c["rate_mbps"]) in selected]
     cells = [dict(phase="q3a", source_geometry="crop", score_vertical_pixels_per_degree=float(vertical_pixels_per_degree), **c) for _, c in pairs]
     if include_q3b:
-        cells += [dict(phase="q3b", profile=p, source_geometry="crop", source_transform=_q3b_transform(p), wavelet=w, rate_mbps=r, fps=90,
-                       eye_width=2624, eye_height=2776, stereo_width=5248,
-                       requires_wo8_reduced_encode=True)
-                  for p, w, r in Q3B_ROWS]
+        from .foveation import FoveationConfig, encoded_size
+        for p, w, r in Q3B_ROWS:
+            transform = _q3b_transform(p); ew, eh = encoded_size(2624, 2776,
+                FoveationConfig(transform["profile"], transform["softness"], transform["blur_only"]))
+            cells.append(dict(phase="q3b", profile=p, source_geometry="crop", source_transform=transform,
+                              wavelet=w, rate_mbps=r, fps=90, eye_width=ew, eye_height=eh,
+                              stereo_width=ew*2, cap_bytes=fb.cap_bytes(r,90),
+                              bits_per_pixel=fb.bpp(fb.cap_bytes(r,90),ew,eh),
+                              score_vertical_pixels_per_degree=float(vertical_pixels_per_degree),
+                              requires_wo8_reduced_encode=True))
+    calibration_cells = [base["hvs_calibration"]["codec_cells"][i] for i, _ in pairs]
+    if include_q3b:
+        calibration_cells.extend(fb.hvs_calibration_for_vertical_ppd(vertical_pixels_per_degree, 2776)
+                                 for _ in Q3B_ROWS)
     return {"schema": SCHEMA, "kind": "pyro_q3_framebank", "fixture_only": bool(fixture),
             "source": _source_contract(source, info), "source_derivation": {"parent_sha256": _hash(full_source), "parent_geometry": [full_info.width, full_info.height], "operation": "native_per_eye_crop_no_resampling"}, "projection_evidence": projection_evidence.strip(),
             "crop_evidence": crop_evidence.strip(), "crop_geometry": copy.deepcopy(CROP_GEOMETRY),
             "frozen_module_hashes": _module_hashes(), "cells": cells,
             "presentation_eye": base["presentation_eye"], "projection": base["projection"],
-            "crops": base["crops"], "hvs_calibration": {**base["hvs_calibration"],
-                "codec_cells": [base["hvs_calibration"]["codec_cells"][i] for i, _ in pairs]},
+            "crops": base["crops"], "hvs_calibration": {**base["hvs_calibration"], "codec_cells": calibration_cells},
             "source_adapter": {"kind": "per_eye_crop", "geometry": copy.deepcopy(CROP_GEOMETRY),
                                "future_transform": None},
             "fence_rectangles": {**copy.deepcopy(FENCE_RECTANGLES), "cropped": {**copy.deepcopy(FENCE_RECTANGLES["cropped"]), "geometry": copy.deepcopy(CROP_GEOMETRY)}},
@@ -157,15 +166,15 @@ def validate_plan(plan: dict) -> dict:
             c.get("cap_bytes") != fb.cap_bytes(c["rate_mbps"], 90) or c.get("source_geometry") != "crop" or
             c.get("score_vertical_pixels_per_degree") != plan.get("projection", {}).get("vertical_pixels_per_degree") for c in actual_a):
         raise ValueError("Q3a rows drifted")
-    calibration = plan.get("hvs_calibration", {})
-    if not isinstance(calibration, dict) or len(calibration.get("codec_cells", [])) != len(actual_a):
-        raise ValueError("Q3 calibrated scoring contract drifted")
     if plan.get("fence_rectangles", {}).get("cropped", {}).get("mapped") != FENCE_RECTANGLES["cropped"]["mapped"]:
         raise ValueError("Q3 cropped fence rectangle drifted")
     adapter = plan.get("source_adapter", {})
     if adapter.get("kind") != "per_eye_crop" or adapter.get("geometry") != CROP_GEOMETRY:
         raise ValueError("Q3 source adapter geometry drifted")
     actual_b = [c for c in plan.get("cells", []) if c.get("phase") == "q3b"]
+    calibration = plan.get("hvs_calibration", {})
+    if not isinstance(calibration, dict) or len(calibration.get("codec_cells", [])) != len(actual_a) + len(actual_b):
+        raise ValueError("Q3 calibrated scoring contract drifted")
     if actual_b and [(c.get("profile"), c.get("wavelet"), c.get("rate_mbps")) for c in actual_b] != list(Q3B_ROWS):
         raise ValueError("Q3b rows drifted")
     for cell in actual_b:
@@ -211,13 +220,14 @@ def _native_records(path: Path, payloads: list[int]) -> dict:
     return {"qualified": True, "frames": rows, "semantics": {"submit_to_observed_fence_ms": "completion latency, not GPU execution"}}
 
 
-def _same_frame_scores(plan, index, cell, tools, guard, directory, source, source_info, decoded, decoded_info, timeout, keep_artifacts):
+def _same_frame_scores(plan, index, cell, tools, guard, directory, source, source_info, decoded, decoded_info, timeout, keep_artifacts, *, reference=None, reference_info=None, matching_blur_reference=None):
     """Use Q3's shared scorer after its revision is merged; never silently downgrade it."""
     from . import nvenc_framebank as nvenc
     scorer = getattr(nvenc, "_same_frame_scores", None)
     if scorer is None: raise RuntimeError("shared_q3_scorer_unavailable")
+    reference = source if reference is None else reference; reference_info = source_info if reference_info is None else reference_info
     return scorer(plan, index, cell, tools, guard, directory, source, source_info, decoded, decoded_info,
-                  source, source_info, timeout, keep_artifacts)
+                  reference, reference_info, timeout, keep_artifacts, matching_blur_reference=matching_blur_reference)
 
 
 def _result_base(raw_plan: bytes, source: Path, tools: dict, tool_build: dict | None) -> dict:
@@ -283,13 +293,21 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                                                       plan["projection"]["vertical_pixels_per_degree"], guard, env, command_timeout_s)
         if not result["hvs_gpu_sanity"].get("passed"): raise RuntimeError("hvs_gpu_sanity_failed")
         for index, cell in enumerate(plan["cells"]):
-            if cell["phase"] == "q3b": raise RuntimeError("q3b_reduced_encode_adapter_unavailable")
             directory = out / f"cell-{index:02d}-{cell['wavelet']}-{cell['rate_mbps']}"; directory.mkdir()
             encoded, decoded = directory / "encoded.wave", directory / "decoded.y4m"; row = copy.deepcopy(cell)
             try:
                 env, row["codec_environment"] = fb.codec_environment(os.environ, cell["wavelet"])
+                encode_source, encode_info = source, info
+                score_ref, score_blur, score_info = source, None, info
+                if cell["phase"] == "q3b":
+                    from . import nvenc_framebank as nvenc
+                    encode_source = directory / "reduced-encoded-source.y4m"
+                    score_ref, score_blur = directory / "score-sharp-reference.y4m", directory / "score-blur-reference.y4m"
+                    encode_info, score_info, identities, transform = nvenc._stream_q3b_sources(
+                        source, info, plan["crop_geometry"], cell["source_transform"], encode_source, score_ref, score_blur)
+                    row["q3b_transform"] = transform
                 timing = directory / "pyrowave-encode-timing.jsonl"
-                start = time.time(); code, stdout, stderr = guard.run([str(tools["encode"]), str(source), str(encoded), str(cell["cap_bytes"]), "--timing-jsonl", str(timing)], cwd=directory, env=env, timeout_s=command_timeout_s); end = time.time()
+                start = time.time(); code, stdout, stderr = guard.run([str(tools["encode"]), str(encode_source), str(encoded), str(cell["cap_bytes"]), "--timing-jsonl", str(timing)], cwd=directory, env=env, timeout_s=command_timeout_s); end = time.time()
                 if code or not encoded.is_file(): raise RuntimeError("encode_failed")
                 if WAVELET_LABEL[cell["wavelet"]] not in stdout + stderr and not plan["fixture_only"]: raise RuntimeError("encoder_wavelet_not_confirmed")
                 row["encode_wall_interval_s"] = [start, end]; row["bitstream"] = parse_wave(encoded, cell)
@@ -298,10 +316,15 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                 code, stdout, stderr = guard.run([str(tools["decode"]), str(encoded), str(decoded)], cwd=directory, env=env, timeout_s=command_timeout_s)
                 if code or not decoded.is_file(): raise RuntimeError("decode_failed")
                 if WAVELET_LABEL[cell["wavelet"]] not in stdout + stderr and not plan["fixture_only"]: raise RuntimeError("decoder_wavelet_not_confirmed")
-                row["decoded_y4m_header"] = fb.canonicalize_decoded_header(decoded); decoded_info = fb._assert_same_frames(source, decoded, info)
+                row["decoded_y4m_header"] = fb.canonicalize_decoded_header(decoded); decoded_info = fb._assert_same_frames(encode_source, decoded, encode_info)
+                score_decoded, score_decoded_info = decoded, decoded_info
+                if cell["phase"] == "q3b":
+                    score_decoded = directory / "score-reconstructed-decoded.y4m"
+                    nvenc._reconstruct_q3b_decoded(decoded, decoded_info, score_decoded, score_info, cell["source_transform"])
+                    score_decoded_info = fb._assert_same_frames(score_ref, score_decoded, score_info)
                 row["decoded_frame_identity"] = [{"frame": i, "source_sha256": src["source_sha256"], "decoded_sha256": got} for (i, _, got), src in zip(fb.iter_y4m(decoded, decoded_info), plan["source"]["frame_identity"])]
                 if len(row["decoded_frame_identity"]) != 90: raise ValueError("decoded_identity_or_geometry_mismatch")
-                row.update(_same_frame_scores(plan, index, cell, tools, guard, directory, source, info, decoded, decoded_info, command_timeout_s, keep_artifacts))
+                row.update(_same_frame_scores(plan, index, cell, tools, guard, directory, source, info, score_decoded, score_decoded_info, command_timeout_s, keep_artifacts, reference=score_ref, reference_info=score_info, matching_blur_reference=score_blur))
             except (PermissionError, TimeoutError, ValueError, RuntimeError) as exc:
                 row["error"] = str(exc); result["failure_reasons"].append(row["error"])
             result["cells"].append(row); (out / "framebank-progress.json").write_text(fb.report_json(result), encoding="utf-8")

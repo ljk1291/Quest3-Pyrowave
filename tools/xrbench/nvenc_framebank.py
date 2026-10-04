@@ -872,7 +872,9 @@ def _stream_q3b_sources(source: Path, source_info: fb.Y4MInfo, geometry: dict, t
     first = None
     identities = []
     for index, planes, digest in fb.iter_y4m(source, source_info):
-        cropped = fence_metrics.crop_frame(planes, geometry)
+        cropped = (planes if (source_info.width, source_info.height) ==
+                   (geometry["target_eye"][0] * 2, geometry["target_eye"][1])
+                   else fence_metrics.crop_frame(planes, geometry))
         encoded = encode_planes(cropped, config)
         if encoded.expanded_eye != expanded or encoded.chroma420 is not True:
             raise ValueError("Q3b WO-8 expanded geometry/chroma drifted")

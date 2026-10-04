@@ -34,7 +34,7 @@ class PyroQ3FramebankTests(unittest.TestCase):
                 "crop_geometry": q3.CROP_GEOMETRY, "fence_rectangles": {**q3.FENCE_RECTANGLES, "cropped": {**q3.FENCE_RECTANGLES["cropped"], "geometry": q3.CROP_GEOMETRY}},
                 "source_adapter": {"kind": "per_eye_crop", "geometry": q3.CROP_GEOMETRY, "future_transform": None},
                 "frozen_module_hashes": q3._module_hashes(), "cells": cells,
-                "hvs_calibration": {"codec_cells": [{} for _ in q3.Q3A_ROWS]},
+                "hvs_calibration": {"codec_cells": [{} for _ in cells]},
                 "quality_contract": {"score_windows_one_based": [[1, 90], [10, 89]], "fence_metric": True,
                                      "per_frame_identity": True, "timing_requires_native_per_frame_record": True,
                                      "q3b_requires_reduced_encode_then_expanded_score": True}}
