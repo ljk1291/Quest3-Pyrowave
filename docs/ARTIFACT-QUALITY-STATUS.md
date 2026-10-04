@@ -36,6 +36,13 @@ Read with Get-NetAdapter; no network changes. Negotiated link speed is not goodp
 
 ## Queue (current owner goal)
 
+**Owner-dependent stop, 2026-10-04:** Q3a's fresh preflight found ComfyUI running
+one job and only **603 MiB free VRAM**, below the **2048 MiB** safety margin.
+No Q3a lease or encode was started. Per the current owner goal, source and GPU
+work are stopped for the owner to finish/pause ComfyUI, free VRAM and confirm.
+Keep the ten-cell frozen plan and completed evidence; resume with a fresh preflight.
+[Sanitized preflight](../results/q3a-preflight-blocked-2026-10-04.json).
+
 1. Fence metrics and three-cell backfill are complete: [ranked report](../results/fence-backfill-2026-10-04.md).
    Tight left-eye rectangle (1740,1310,240,274); all 270 regenerated decode hashes
    match retained evidence. Keep both 1–90 and 10–89 windows and reference-only masks.
@@ -574,3 +581,31 @@ Take the first unblocked item. Items marked ∥ are independent.
   CPU CI. Before Q3b runs, finish WO-8's actual reduced-plane codec path and
   Python/shader area-filter parity. No owner-dependent blocker; no new GPU,
   headset, settings, installed-pair or arm-file changes at this checkpoint.
+
+- 2026-10-04 (Q3a ready; owner-dependent preflight stop): [WO-12 PR #27](https://github.com/ljk1291/Quest3-Pyrowave/pull/27)
+  merged as `7263314` after [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37162009050).
+  [Q3a PR #26](https://github.com/ljk1291/Quest3-Pyrowave/pull/26) merged as `3dfa1c0`
+  after [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37162261878)
+  and 36 local tests. The adapter records per-frame FFmpeg encoder-call wall
+  diagnostics (not GPU execution), explicit full-range 10-bit conversion, native
+  format/profile evidence, both score windows and initial H.264/HEVC IDR proof.
+  Compressed streams and hashes are retained after successful scoring.
+  Ten NVENC cells are frozen under plan SHA256
+  `e67a3bf7269239f5b677b00cce5eb8073ab090e39329c7359392ae298c8cc083`.
+  The controller adds only the required `kind=per_eye_crop` descriptor to the
+  unchanged public geometry; the public-wrapper API needs that small follow-up.
+  Fresh preflight then found active ComfyUI/603 MiB free VRAM, so no lease or
+  Q3a GPU cell began. Owner confirmation is now required; all agents stopped.
+  [Sanitized preflight](../results/q3a-preflight-blocked-2026-10-04.json).
+
+  Retained source checkpoints for resume: WO-10 PR #25 `dcb4d66`, CPU/Android
+  green and Windows native CI pending; WO-13 PR #24 `89dbea8`, 11 local CPU
+  tests and independent review passed, native CI pending. WO-8 branch
+  `codex/wo-8-foveation` at `4865045` is clean: 13 local tests, source-stack and
+  DXBC checks pass, but real WARP execution/CI and root review remain required.
+  Pyro Q3 adapter `codex/q3-pyro-adapter` at `cc74b27` is source-only, CPU CI
+  pending, no PR; shared-scorer integration and native telemetry qualification
+  remain. `codex/q3-pyro-timing` retains an uncommitted isolated CLI prototype
+  and contract test; patch regeneration, CI and qualified binaries are still
+  needed. Q3b adapter has no new edits. Q3a/Q3b results and final signed pair
+  remain incomplete; no optimization or default has been promoted.
