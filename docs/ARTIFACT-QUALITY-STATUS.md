@@ -69,9 +69,9 @@ It merged as `7302a25` after 55 focused tests, independent review and
 [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37172014888).
 The reduced and matching-blur first-frame hashes match both retained attempts.
 The finite r5 controller is running Q3b with three preparation workers and fresh
-r3 Pyro attempt paths. Its first Light / 9/7 / 1000 Mbps / softness 0 cell is
-complete with clean lease closure; nine Q3b cells remain. The second Light cell
-(softness 0.5) is active. Do not repeat completed cells. The first result is worse
+r3 Pyro attempt paths. Its Light / 9/7 / 1000 Mbps cells at softness 0 and 0.5
+are complete with clean lease closure; eight Q3b cells remain. The diagnostic
+softness-1 Light cell is active. Do not repeat completed cells. The first result is worse
 than cropped 9/7 without foveation on the primary fence: 30.832 versus 35.754 dB
 edge PSNR, temporal residual p99 32 versus 19 luma codes (both frames 10–89).
 No image filter, runtime decoder or baseline default changed during execution.
@@ -184,6 +184,25 @@ Take the first unblocked item. Items marked ∥ are independent.
 ## Log
 
 <!-- Codex appends entries here: date, checkpoint, verified (links), remaining, blocked? -->
+
+- 2026-10-04, second Q3b result: Light / CDF 9/7 / 1000 Mbps / softness 0.5
+  completed all 90 frames at the same geometry as softness 0. Both score windows,
+  frame-identity chains, source/build provenance and clean lease closure pass
+  publication checks. Tight fence (10–89): 30.832637 dB, temporal residual mean
+  5.327900 and p99 32. Versus softness 0, edge PSNR changes by +0.000766 dB and
+  temporal p99 is unchanged. Centre sharp-reference HVS changes by +0.009158 dB
+  in 10–89 (+0.008891 dB across all 90). Peripheral sharp-reference edge PSNR
+  falls by 0.901847 dB to 32.620879, with temporal p99 rising from 24 to 26;
+  matching-blur edge PSNR rises by 0.496987 dB to 41.495943, p99 remains 10.
+  These two reference domains must stay separate. Whole-image all-90 HVS is
+  37.741237 dB / VMAF 93.441130. No profile promoted.
+  Private controller report SHA256:
+  `e7383074a656c4c031cda7a9de03f4a31e5219ae48b738f7bebe4b01abe2a562`.
+  The private publisher now reads the requested softness from its nested
+  transform-provenance object; a focused nested-selector CPU test passes and
+  the complete eight-Pyro-row requirement is retained. Seventeen of 25 Q3 rows
+  are complete. The softness-1 cell is running; eight Q3b rows, combined
+  publication, the final signed pair and owner checklist remain. No owner blocker.
 
 - 2026-10-04, Light/softness-0 attribution (CPU-only, retained frames): the
   frozen sharp-source edge mask over frames 10–89 is reproduced exactly

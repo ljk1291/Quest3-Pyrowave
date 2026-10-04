@@ -74,9 +74,13 @@ The first r5 Q3b result is complete: Light / 9/7 / 1000 Mbps / softness 0,
 geometry. Its frames-10–89 fence edge PSNR is 30.832 dB with temporal residual
 p99 32, worse than cropped 9/7 without foveation (35.754 dB / p99 19). Both
 windows and sharp/matching-blur domains passed validation; its quality lease
-closed cleanly. This is one of ten Q3b rows, not a final ranking or promotion.
-Continue the remaining nine cells without repeating the completed encode; the
-softness-0.5 Light cell is active. See the status log for the exact report hash.
+closed cleanly. The softness-0.5 Light row is also complete: fence edge PSNR
+30.832637 dB / temporal p99 32, a +0.000766 dB edge change with unchanged p99.
+Its centre sharp HVS changes by +0.009158 dB in 10–89; peripheral sharp edge
+PSNR falls by 0.901847 dB while matching-blur edge PSNR rises by 0.496987 dB.
+These are two of ten Q3b rows, not a final ranking or promotion. Continue the
+remaining eight cells without repeating completed encodes; the diagnostic
+softness-1 Light cell is active. See the status log for exact report hashes.
 
 A CPU-only attribution on the retained first Q3b output finds substantial
 transform loss before compression: on the same sharp-source fence mask,
