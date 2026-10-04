@@ -36,6 +36,48 @@ Read with Get-NetAdapter; no network changes. Negotiated link speed is not goodp
 
 ## Queue (current owner goal)
 
+### Owner revision, 2026-10-04 17:36 CEST
+
+The owner's latest message supersedes the two-cell remainder and the 25-row
+publication gate below. ComfyUI is owner-confirmed idle; read-only preflight at
+15:36 UTC observed 0 running/0 pending and 12799 MiB free VRAM. Authorization
+is finite supervised offline frame-bank work on this PC only, with every safety
+stop retained. No headset, VR apps, VD, network, settings, arm or installation work.
+
+1. Finish **H264Fit / single H.264 / 700 Mbps / P7 / softness 0.5**. Drop the
+   unrun blur-only Light / dual H.264 cell: PyroWave blur-only showed no meaningful
+   fence gain, and dual-eye H.264 is not implemented in stock ALVR. This is a
+   scope decision, not a measured H.264 blur-only failure. Preserve the old plan
+   and stopped attempts; freeze a replacement with only the authorized row.
+2. WO-7 on its own branch: encoder-only `PYROWAVE_RDO_PX_PER_DEG`, default exactly
+   preserving 96 dpi / 1 m arithmetic and output, with CPU unit proof and CI.
+   Add cropped 9/7 / 1000 at 24 and 36 px/deg, plus Medium / 9/7 / 1000 /
+   softness 0.5 at 24 px/deg. Compare with the retained default-density rows.
+3. On a separate branch, fix Light's 1:1 centre texel phase in live and CPU paths;
+   require parity tests and CI, then score Light / 9/7 / 1000 / softness 0.5 once.
+   Retain the old Light rows as historical comparisons, not corrected outputs.
+4. Add cropped AV1 Main10 / 200 / P1 / spatial AQ as the requested stock-default
+   control; verify its relationship to actual stock settings in the source audit.
+5. Add default-density cropped 9/7 / 1500 and 2000, and Haar / 2000. These are
+   **offline-only, above measured Wi-Fi capacity**. Report fence edge PSNR,
+   temporal p99 and HVS, dB per bitrate doubling, and a qualified extrapolation
+   of 9/7's bitrate to the retained dual H.264 / 700 / P4 fence score.
+6. Report-only source audit: verify the actual stock-H.264 h264fit live path,
+   including inverse reconstruction and dimensional limits; identify missing code.
+7. Publish **32 measured rows** (23 retained + one H.264 + eight new), with the
+   dropped row explicit and historical full-FOV references separate. Rank fence
+   metrics then HVS; preserve source/build and requested/effective RDO identity.
+   Build and verify a stable-signed matching pair including WO-10, WO-8 plus
+   the Light fix, and WO-13, without installing it. Write the exact checklist,
+   putting baseline, cropped AV1 10-bit/200/P4/AQ-off, conditionally supported
+   H.264 h264fit/700, then best Medium Pyro/1000 first. Record GPU decode ms,
+   fresh submissions/s and estimated pipeline latency separately for each;
+   unavailable measurements stay unset. Retain Q4 and exact rollback, then stop.
+
+All source branches require CPU tests and green CI before integration. No protected
+harness change may be merged while a cell using those modules is in flight.
+The 08:37 UTC blocker and older queue below are retained historical evidence.
+
 **Checkpoint, 2026-10-04:** All ten revised Q3a NVENC rows are complete. The
 resumed quality lease closed with zero owned jobs, no cleanup errors, and unchanged
 source/tool/module provenance. The first row reused its verified retained encode

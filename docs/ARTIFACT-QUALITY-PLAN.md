@@ -1,5 +1,57 @@
 # Compression-artifact plan: fence-first codec and geometry investigation
 
+## Owner extension, 2026-10-04 17:36 CEST
+
+This revision supersedes the old Q3b two-row remainder and 25-row publication
+contract. Preserve the 23 complete rows and all failed-attempt evidence. The
+owner authorizes finite supervised offline PC leases only, with all existing
+safety stops; no headset, VR apps, VD, network, settings, arm or installed-pair changes.
+
+| New measurement | Geometry / transform | Total Mbps | Encoder options |
+|---|---|---:|---|
+| Remaining H.264 | H264Fit, single stream, softness 0.5 | 700 | P7, existing AQ-off contract |
+| RDO 9/7 A | Cropped, unfoveated | 1000 | 24 px/deg |
+| RDO 9/7 B | Cropped, unfoveated | 1000 | 36 px/deg |
+| RDO 9/7 C | Medium, softness 0.5 | 1000 | 24 px/deg |
+| Corrected Light 9/7 | Light, softness 0.5, corrected centre phase | 1000 | Default RDO density |
+| AV1 Main10 control | Cropped, unfoveated | 200 | P1, spatial AQ |
+| High-rate 9/7 A | Cropped, unfoveated | 1500 | Default RDO density; offline-only |
+| High-rate 9/7 B | Cropped, unfoveated | 2000 | Default RDO density; offline-only |
+| High-rate Haar | Cropped, unfoveated | 2000 | Default RDO density; offline-only |
+
+Drop the unrun blur-only Light / dual H.264 cell: the Pyro blur-only control
+provided no meaningful fence gain and the dual-eye layout cannot run in stock
+ALVR. This is a scope decision, not evidence of the unmeasured H.264 outcome.
+The completed Pyro blur-only control remains in the table.
+
+WO-7 gets its own branch, CPU tests and CI. `PYROWAVE_RDO_PX_PER_DEG` changes
+encoder RDO only; default/unset must preserve today's 96 dpi / 1 m computation
+bit-for-bit. Record requested/effective density, with the scorer's calibrated
+viewing density unchanged. Do not move dependency pins or change the bitstream.
+Light's texel-centre fix gets a separate branch, CPU/shader parity and CI. Keep
+old transform identities/results distinct; Medium and H264Fit must not drift.
+The stock-H.264 h264fit live path is a source audit only: report any missing
+forward/inverse mapping, format, configuration and size validation. Verify the
+AV1 P1/AQ default claim against the actual pinned implementation.
+
+All cells use the retained 90-frame corpus, fixed fence, source projection,
+both 1–90 and 10–89 score windows and qualified scorer. The 1500/2000 Mbps
+cells are above measured Wi-Fi capacity and cannot become live candidates.
+Compare their fence edge PSNR, temporal p99 and HVS with 800/1000. Report
+interval slopes in dB per `log2(rate ratio)`; extrapolate the rate needed for
+9/7 to match dual H.264/700/P4 on the same fence only if the measured slopes
+support it, naming the fit interval and uncertainty. Do not promise that rate
+would transport or decode on Quest, or that equal PSNR means equal artifacts.
+
+Final publication contains 32 measured Q3 rows, with historical full-FOV
+references separate, ranked by fence metrics then HVS. After source merges and
+reports, build and verify (do not install) a stable-signed matching pair. Put
+these headset cells first in the checklist: today's baseline; cropped AV1
+Main10/200/P4/AQ-off; H.264 h264fit/700 only if quality and live support permit;
+best Medium Pyro/1000. Require separate GPU decode ms, fresh submissions/s and
+estimated pipeline latency fields for each, retaining null for unavailable
+telemetry. Retain the Q4 prerequisite and exact settings rollback. Stop for owner.
+
 ## Active owner objective and scope (2026-10-04)
 
 The owner's 2026-10-03 22:45 planner revision below supersedes every earlier planner
