@@ -1983,9 +1983,18 @@ index c98098df355e98af740663365428fbdf6fa5f69b..11ea6fddaf8c20e5a04f2223f368f2ce
              "video.foveated_encoding.content.center_size_x",
              json::json!(0.20),
 diff --git a/alvr/session/src/beta_tests.rs b/alvr/session/src/beta_tests.rs
-index 3af8fce6c7444c43ccc2f03e1878fa8bbbdc7e6a..ab2499d317efdefe913de153396acbb7b43a2d71 100644
+index 3af8fce6c7444c43ccc2f03e1878fa8bbbdc7e6a..ccf28875de672740519e13af3cef6af714a03796 100644
 --- a/alvr/session/src/beta_tests.rs
 +++ b/alvr/session/src/beta_tests.rs
+@@ -31,7 +31,7 @@ fn video_shows_only_codec_experiment_controls() {
+     let entries = visible_children(&schema(), &["video"]).unwrap();
+     assert_eq!(
+         names(entries.clone(), Visibility::Experiment),
+-        sorted(&["passthrough", "bitrate", "preferred_codec", "pyrowave"])
++        sorted(&["passthrough", "bitrate", "preferred_codec", "pyrowave", "fov_crop"])
+     );
+     assert_eq!(
+         names(entries, Visibility::Advanced),
 @@ -141,6 +141,7 @@ fn fresh_install_streams_the_recommended_profile() {
          ));
      }
