@@ -127,7 +127,12 @@ int main(int argc,char **argv) {
         auto joinDc=w.draw(foveated.Get(),std::vector<float>(128,.37f),16,8,16,8,fjoin,uv)[0];
         for(float x:joinDc) require(std::abs(x-.37f)<1e-6f,"foveation join emitted black");
         std::vector<float> foveatedStereo(128); for(unsigned y=0;y<8;y++) for(unsigned x=8;x<16;x++) foveatedStereo[y*16+x]=1;
-        auto fseam=w.draw(foveated.Get(),foveatedStereo,16,8,16,8,foveation,uv)[0];
+        // Blur-only retains matching source/output geometry while exercising
+        // the same source-pixel filter. A compressed profile needs its real
+        // smaller optimized dimensions, which this compact seam fixture does
+        // not model.
+        auto seamFoveation=foveation; seamFoveation[15]=1;
+        auto fseam=w.draw(foveated.Get(),foveatedStereo,16,8,16,8,seamFoveation,uv)[0];
         for(unsigned y=0;y<8;y++) for(unsigned x=0;x<16;x++)
             require(std::abs(fseam[y*16+x]-(x<8?0.f:1.f))<1e-6f,"foveation crossed eye seam");
         std::vector<float> ramp(24);for(unsigned y=0;y<4;y++)for(unsigned x=0;x<6;x++)ramp[y*6+x]=float(x)/5;
