@@ -67,6 +67,50 @@ class SupervisedTests(unittest.TestCase):
         self.assertEqual(s.stop_jobs({'owned_pc_jobs':[row]},self.host),[]);self.assertEqual(self.host.stopped,[3])
         s.JobRegistry().unregister(self.path/'state.json',3)
         self.assertEqual(u.json_read(self.path/'state.json')['owned_pc_jobs'],[])
+
+    def test_completed_child_uses_parent_poll_evidence_not_registration_snapshot(self):
+        with mock.patch.object(s.time,'time',return_value=100):
+            s.JobRegistry().register(self.path/'state.json',3,host=self.host)
+            completed=s.JobRegistry().unregister(self.path/'state.json',3,completion_observed=True)
+        self.assertTrue(completed['exited'])
+        self.assertTrue(completed['completion_observed_by_parent'])
+        self.assertTrue(u.json_read(self.path/'state.json')['completed_pc_jobs'][0]['exited'])
+
+    def test_monitor_exception_marks_stop_and_runs_owned_cleanup(self):
+        self.state['owned_pc_jobs']=[dict(self.host.process_identity(3),nonce='nonce')];self.write()
+        self.host.gpu_sample=lambda: (_ for _ in ()).throw(RuntimeError('monitor fault'))
+        with mock.patch.object(u,'Host',return_value=self.host),mock.patch.object(s,'_close_owned_jobs',wraps=s._close_owned_jobs) as cleanup:
+            with self.assertRaisesRegex(RuntimeError,'monitor fault'):
+                s.worker(self.path,'nonce')
+        cleanup.assert_called_once_with(self.path/'state.json',self.host,'nonce',reason='monitor_worker_error')
+        self.assertTrue((self.path/'stop').exists())
+        self.assertTrue(u.json_read(self.path/'state.json')['closed'])
+
+    def test_monitor_death_during_session_runs_parent_cleanup(self):
+        class DeadProcess:
+            pid = 2
+            def poll(self): return 1
+            def wait(self, timeout=None): return 1
+        with tempfile.TemporaryDirectory() as root:
+            private_root = Path(root) / 'results' / 'local'
+            window = private_root / 'lease'
+            with mock.patch.object(u, 'ROOT', Path(root)), mock.patch.object(u, 'Host', return_value=self.host), \
+                 mock.patch.object(s.subprocess, 'Popen', return_value=DeadProcess()), \
+                 mock.patch.object(s, 'status_payload', return_value={'lease': {'active': False}}), \
+                 mock.patch.object(s, '_close_owned_jobs', wraps=s._close_owned_jobs) as cleanup:
+                with self.assertRaisesRegex(u.Refusal, 'monitor startup failed'):
+                    with s.session(window, evidence='owner present', duration_s=60):
+                        pass
+            self.assertTrue((window/'stop').exists())
+            cleanup.assert_called_once()
+            self.assertEqual(cleanup.call_args.kwargs['reason'], 'session_finally')
+
+    def test_cleanup_rejects_replaced_state_before_stopping_jobs(self):
+        self.state['owned_pc_jobs']=[dict(self.host.process_identity(3),nonce='nonce')]
+        self.state['guard_nonce']='replacement'; self.write()
+        with self.assertRaisesRegex(u.Refusal, 'identity changed'):
+            s._close_owned_jobs(self.path/'state.json', self.host, 'nonce', reason='test')
+        self.assertEqual(self.host.stopped, [])
     def test_registration_refused_after_stop_or_with_arm(self):
         (self.path/'stop').touch()
         with mock.patch.object(s.time,'time',return_value=100):
