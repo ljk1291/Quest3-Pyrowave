@@ -70,8 +70,9 @@ It merged as `7302a25` after 55 focused tests, independent review and
 The reduced and matching-blur first-frame hashes match both retained attempts.
 The finite r5 controller is running Q3b with three preparation workers and fresh
 r3 Pyro attempt paths. Its three Light / 9/7 / 1000 Mbps softness cells (0, 0.5,
-1) are complete with clean lease closure; seven Q3b cells remain. Light / 5/3 /
-1000 Mbps / softness 0.5 is active. Do not repeat completed cells. The first result is worse
+1) and Light / 5/3 / 1000 Mbps / softness 0.5 are complete with clean lease
+closure; six Q3b cells remain. Medium / 5/3 / 1000 Mbps / softness 0.5 is active.
+Do not repeat completed cells. The first result is worse
 than cropped 9/7 without foveation on the primary fence: 30.832 versus 35.754 dB
 edge PSNR, temporal residual p99 32 versus 19 luma codes (both frames 10–89).
 No image filter, runtime decoder or baseline default changed during execution.
@@ -184,6 +185,38 @@ Take the first unblocked item. Items marked ∥ are independent.
 ## Log
 
 <!-- Codex appends entries here: date, checkpoint, verified (links), remaining, blocked? -->
+
+- 2026-10-04 05:48 UTC, Light wavelet comparison completed: CDF 5/3 and CDF 9/7
+  at 1000 Mbps / softness 0.5 use identical transformed inputs, reference frame
+  identities, geometry, projection, corpus and scorer. The reduced-source SHA256
+  is `d1196cdc356f6c36f3816405f0aeb0ab950a28b2c1c6db35e96404f6f591514c`;
+  both contain 90 frames with identity SHA256
+  `677bba9eb8bf9c6ada570fa07eb87c656d4d75f8f0a2b0f9732bb2c87eabe5ab`.
+  Both score windows and clean lease closures pass publication checks; decoded
+  payloads differ as expected for the wavelet change.
+
+  | Light / 1000 Mbps / softness 0.5 | CDF 9/7 | CDF 5/3 |
+  |---|---:|---:|
+  | Fence edge PSNR-Y, 10–89 | 30.832637 dB | 30.451866 dB |
+  | Fence temporal mean / p99 | 5.327900 / 32 | 5.615133 / 33 |
+  | Peripheral sharp edge PSNR-Y | 32.620879 dB | 32.274144 dB |
+  | Peripheral sharp temporal mean / p99 | 4.424289 / 26 | 4.619353 / 27 |
+  | Peripheral matching-blur edge PSNR-Y | 41.495943 dB | 40.194070 dB |
+  | Peripheral matching-blur temporal mean / p99 | 1.654715 / 10 | 1.883143 / 11 |
+  | Centre sharp HVS, 10–89 | 38.589534 dB | 37.981399 dB |
+  | Centre matching-blur HVS, 10–89 | 42.455854 dB | 41.579830 dB |
+
+  Fence/peripheral values use frames 10–89; temporal values are luma residual
+  codes, not optical shimmer. CDF 5/3 loses 0.455447 dB whole-image HVS across
+  all 90 frames and 0.457824 dB in 10–89. Centre sharp HVS changes by −0.609990
+  dB all-90 / −0.608135 dB trimmed. This favors 9/7 on the measured quality
+  metrics for this geometry; it establishes no Quest decoder-speed comparison.
+  CDF 5/3 private controller report SHA256:
+  `88e33b30ee7f5149750a42055631fb2d4618221a8cb0fafa63a53047d5dfcc9e`.
+  Nineteen of 25 Q3 rows are complete. The existing controller has advanced to
+  Medium / CDF 5/3 / 1000 Mbps / softness 0.5. Six Q3b cells, final combined
+  publication, verified stable pair and owner checklist remain. No owner blocker
+  or headset/settings/installed-pair change.
 
 - 2026-10-04 05:01 UTC, three-way Light softness comparison completed: all three
   CDF 9/7 / 1000 Mbps rows contain 90 ordered decoded identities and 90 ordered

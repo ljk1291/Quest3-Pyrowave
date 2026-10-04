@@ -94,6 +94,17 @@ lease checks. The existing controller is running Light / 5/3 / 1000 Mbps /
 softness 0.5 next; seven Q3b cells remain. Do not promote softness or alter the
 frozen matrix based on a better score against an already blurred reference.
 
+Subsequent checkpoint, 2026-10-04 05:48 UTC: Light / CDF 5/3 / 1000 Mbps /
+softness 0.5 is complete. Its reduced input, all reference identities, transform,
+geometry, corpus and scorer exactly match the CDF 9/7 comparator. Against 9/7,
+5/3 loses 0.380771 dB fence edge PSNR (30.451866 dB) and raises temporal p99
+from 32 to 33 in 10–89. It also loses 0.346735 dB peripheral sharp-reference
+edge PSNR, 0.608135 dB centre sharp HVS in 10–89, and 0.455447 dB whole-image
+HVS all-90. This is an offline quality comparison, not a Quest decode-speed
+result. Both windows and clean lease closures pass validation. Q3b is four of
+ten complete (19 of 25 overall); Medium / 5/3 / 1000 / softness 0.5 is running.
+The six remaining cells and final deliverables remain required.
+
 A CPU-only attribution on the retained first Q3b output finds substantial
 transform loss before compression: on the same sharp-source fence mask,
 sharp→matching-blur PSNR is 32.067 dB and matching-blur→decoded reconstruction
