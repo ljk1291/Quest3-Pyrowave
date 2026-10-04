@@ -36,9 +36,16 @@ Read with Get-NetAdapter; no network changes. Negotiated link speed is not goodp
 
 ## Queue (current owner goal)
 
-1. Fence metric source work and backfill: freeze the mesh-over-fire rectangle;
-   Sobel top-5% reference mask, edge PSNR-Y/p99.9 error, temporal residual mean/p99
-   over explicitly indexed 10–89; backfill full-FOV Haar/500, 5/3/1000, 9/7/1000.
+**Owner-dependent stop, 2026-10-04:** Q3a's fresh preflight found ComfyUI running
+one job and only **603 MiB free VRAM**, below the **2048 MiB** safety margin.
+No Q3a lease or encode was started. Per the current owner goal, source and GPU
+work are stopped for the owner to finish/pause ComfyUI, free VRAM and confirm.
+Keep the ten-cell frozen plan and completed evidence; resume with a fresh preflight.
+[Sanitized preflight](../results/q3a-preflight-blocked-2026-10-04.json).
+
+1. Fence metrics and three-cell backfill are complete: [ranked report](../results/fence-backfill-2026-10-04.md).
+   Tight left-eye rectangle (1740,1310,240,274); all 270 regenerated decode hashes
+   match retained evidence. Keep both 1–90 and 10–89 windows and reference-only masks.
 2. WO-10 first: opt-in tangent FOV crop (default 1/1), client reports/projection,
    server density-preserving dimensions, logs and both-eye/asymmetry/alignment tests.
 3. In parallel, revised Q3a adapter and 15 offline cells (13 cropped + two full-FOV
@@ -542,3 +549,63 @@ Take the first unblocked item. Items marked ∥ are independent.
   replaced the active queue and Q3 schedule, and retained historical evidence.
   Get-NetAdapter readback confirms 2.5 Gbps / driver 10.73.813.2024; no settings
   changed. Current owner goal supplies finite offline lease authorization only.
+
+- 2026-10-04 (fence metrics/backfill checkpoint): [PR #23](https://github.com/ljk1291/Quest3-Pyrowave/pull/23)
+  merged as `5f320c0` after [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37160444658)
+  and 14 local CPU tests. Backfilled Haar/500, 5/3/1000 and 9/7/1000 at full FOV;
+  exact 270/270 retained decode hashes match. Trimmed-window edge PSNR is
+  26.117 / 33.286 / 34.583 dB; temporal residual p99 is 44 / 24 / 21 luma codes.
+  All three leases closed with zero owned jobs and no cleanup errors. Two retained
+  orchestration interruptions (private-identity lookup and unreadable status response)
+  were corrected without repeating an encode/decode. No optical/timing claim.
+  [Report](../results/fence-backfill-2026-10-04.md), [JSON](../results/fence-backfill-2026-10-04.json).
+  Exact offline crop offsets: left (278,274), right (170,274), size 2624×2776.
+  wood_gravel_region is partially excluded; fence and three other fixed crops fit.
+  [Geometry and effective FOV](../results/q3-crop-geometry-2026-10-04.json) preserve
+  density and explicitly distinguish fixed height 2776 from 0.85×3232=2747.2.
+  WO-10, WO-8, revised Q3 and WO-13 source work are active on separate branches;
+  Q3a/Q3b and the final stable-signed pair remain incomplete. No owner blocker.
+
+- 2026-10-04 (source review and Q3 preparation): [PR #28](https://github.com/ljk1291/Quest3-Pyrowave/pull/28)
+  merged as `9944e63` after [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37161080084),
+  adding reference-only band masks and sharp/matching-blur scoring. [WO-11 design PR #29](https://github.com/ljk1291/Quest3-Pyrowave/pull/29)
+  merged as `961f1aa` after [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37161552217).
+  Q3a's native C420 crop is prepared without resampling: 90 frames, 5248x2776 stereo,
+  SHA256 `4c833e175610488ffa05a8037e52c166424db8308a67a2bfed4ed48861fad2e5`.
+  WO-10 is in native CI. WO-13's reviewed follow-up now measures delayed ACKs,
+  retains skipped/partial/unacknowledged slots, and bounds receiver teardown;
+  11 CPU tests pass, native CI pending. The reconstructed stock-codec audit found
+  that Windows NVENC does not explicitly apply the H.264 High-profile setting;
+  two-eye H.264 Q3 rows remain offline proxies, not selectable live profiles.
+  Before Q3a runs, complete per-frame encoder-call timing/probe evidence and its
+  CPU CI. Before Q3b runs, finish WO-8's actual reduced-plane codec path and
+  Python/shader area-filter parity. No owner-dependent blocker; no new GPU,
+  headset, settings, installed-pair or arm-file changes at this checkpoint.
+
+- 2026-10-04 (Q3a ready; owner-dependent preflight stop): [WO-12 PR #27](https://github.com/ljk1291/Quest3-Pyrowave/pull/27)
+  merged as `7263314` after [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37162009050).
+  [Q3a PR #26](https://github.com/ljk1291/Quest3-Pyrowave/pull/26) merged as `3dfa1c0`
+  after [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37162261878)
+  and 36 local tests. The adapter records per-frame FFmpeg encoder-call wall
+  diagnostics (not GPU execution), explicit full-range 10-bit conversion, native
+  format/profile evidence, both score windows and initial H.264/HEVC IDR proof.
+  Compressed streams and hashes are retained after successful scoring.
+  Ten NVENC cells are frozen under plan SHA256
+  `e67a3bf7269239f5b677b00cce5eb8073ab090e39329c7359392ae298c8cc083`.
+  The controller adds only the required `kind=per_eye_crop` descriptor to the
+  unchanged public geometry; the public-wrapper API needs that small follow-up.
+  Fresh preflight then found active ComfyUI/603 MiB free VRAM, so no lease or
+  Q3a GPU cell began. Owner confirmation is now required; all agents stopped.
+  [Sanitized preflight](../results/q3a-preflight-blocked-2026-10-04.json).
+
+  Retained source checkpoints for resume: WO-10 PR #25 `dcb4d66`, CPU/Android
+  green and Windows native CI pending; WO-13 PR #24 `89dbea8`, 11 local CPU
+  tests and independent review passed, native CI pending. WO-8 branch
+  `codex/wo-8-foveation` at `4865045` is clean: 13 local tests, source-stack and
+  DXBC checks pass, but real WARP execution/CI and root review remain required.
+  Pyro Q3 adapter `codex/q3-pyro-adapter` at `cc74b27` is source-only, CPU CI
+  pending, no PR; shared-scorer integration and native telemetry qualification
+  remain. `codex/q3-pyro-timing` retains an uncommitted isolated CLI prototype
+  and contract test; patch regeneration, CI and qualified binaries are still
+  needed. Q3b adapter has no new edits. Q3a/Q3b results and final signed pair
+  remain incomplete; no optimization or default has been promoted.
