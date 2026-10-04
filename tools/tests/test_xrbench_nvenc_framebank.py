@@ -1,6 +1,7 @@
 """CPU-only contract tests for the offline NVENC frame-bank adapter."""
 import json
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 import unittest
@@ -304,6 +305,57 @@ class NvencFramebankTests(unittest.TestCase):
         self.assertGreater(centre["width"],1000)
         mask,desc=nf._q3b_periphery_mask(cell,info,{"eye":"left","x":0,"y":0,"width":200,"height":200})
         self.assertEqual(mask.dtype,np.bool_); self.assertEqual(desc["criterion"],"softness_ramp>0")
+
+    def _cropped_same_score_fixture(self, root):
+        info = fb.Y4MInfo(4, 4, 90, 1, "420", "FULL", 24, 90)
+        reference, decoded = Path(root) / "reference.y4m", Path(root) / "decoded.y4m"
+        ref = [np.zeros((4, 4), np.uint8), np.zeros((2, 2), np.uint8), np.zeros((2, 2), np.uint8)]
+        got = [np.ones((4, 4), np.uint8), np.ones((2, 2), np.uint8), np.ones((2, 2), np.uint8)]
+        fb.write_y4m(reference, info, [ref] * 90); fb.write_y4m(decoded, info, [got] * 90)
+        geometry = {"eyes": [{"eye":"left","x":0,"y":0,"width":2,"height":4},
+                              {"eye":"right","x":0,"y":0,"width":2,"height":4}]}
+        plan = {"hvs_calibration":{"codec_cells":[{"vertical_pixels_per_degree":23.5}], "crops":[]}, "crops":[],
+                "source_adapter":{"geometry":geometry}}
+        cell = {"source_geometry":"crop", "eye_width":2, "eye_height":4,
+                "score_vertical_pixels_per_degree":23.5}
+        return info, reference, decoded, plan, cell
+
+    def test_q3_crop_bit_identity_reuses_only_display_score_windows(self):
+        with tempfile.TemporaryDirectory() as root:
+            info, reference, decoded, plan, cell = self._cropped_same_score_fixture(root)
+            def identity_display(source, source_info, output, display_eye):
+                shutil.copyfile(source, output); return source_info
+            with mock.patch.object(fb, "_write_display", side_effect=identity_display), \
+                 mock.patch.object(fb, "score_pair", return_value={"metric":"score"}) as score:
+                row = nf._same_frame_scores(plan, 0, cell, {}, None, Path(root), reference, info,
+                                            decoded, info, reference, info, 1, True)
+            # Codec full+trim remain. Display full+trim are not rerun.
+            self.assertEqual(score.call_count, 2)
+            self.assertEqual(row["displayed"], row["codec_only"])
+            self.assertEqual(row["displayed_windows"], row["codec_only_windows"])
+            self.assertEqual(row["displayed_reused_from_codec_only"]["duplicate_score_stages_skipped"], 4)
+            self.assertTrue(all(row["displayed_reused_from_codec_only"]["checks"].values()))
+
+    def test_q3_crop_hash_or_calibration_mismatch_keeps_independent_display_scores(self):
+        with tempfile.TemporaryDirectory() as root:
+            info, reference, decoded, plan, cell = self._cropped_same_score_fixture(root)
+            def identity_display(source, source_info, output, display_eye):
+                shutil.copyfile(source, output); return source_info
+            def unequal_hash(path):
+                return "display-decoded" if Path(path).name == "decoded-display.y4m" else "same"
+            with mock.patch.object(fb, "_write_display", side_effect=identity_display), \
+                 mock.patch.object(fb, "sha256_file", side_effect=unequal_hash), \
+                 mock.patch.object(fb, "score_pair", return_value={"metric":"score"}) as score:
+                row = nf._same_frame_scores(plan, 0, cell, {}, None, Path(root), reference, info,
+                                            decoded, info, reference, info, 1, True)
+            self.assertEqual(score.call_count, 4)
+            self.assertNotIn("displayed_reused_from_codec_only", row)
+            display_ref, display_dec = Path(root) / "display-ref.y4m", Path(root) / "display-dec.y4m"
+            shutil.copyfile(reference, display_ref); shutil.copyfile(decoded, display_dec)
+            with mock.patch.object(fb, "hvs_calibration_for_vertical_ppd", side_effect=[{"p":1}, {"p":2}]):
+                self.assertIsNone(nf._display_reuse_evidence(is_crop=True, reference=reference, decoded=decoded,
+                    ref_info=info, decoded_info=info, display_ref=display_ref, display_dec=display_dec,
+                    display_info=info, decoded_display_info=info, codec_ppd=23.5, display_ppd=23.5))
 
     def test_mocked_runner_wraps_raw_planes_and_keeps_observed_metadata(self):
         with tempfile.TemporaryDirectory() as root:
