@@ -471,28 +471,36 @@ class FrameBankTests(unittest.TestCase):
                               {'path': 'patches.wo8_light_centre_phase.sha256', 'old': None,
                                'new': '4f4ce22430f810c78195d749425f35f77ffdb1a14c844b927dff485c3c91e7f3', 'role': 'presentation_foveation_only'}]}
             descriptor_path = folder / 'compatibility.json'; descriptor_path.write_text(json.dumps(descriptor))
+            with self.assertRaisesRegex(ValueError, 'not the reviewed tracked proof'):
+                fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)
+            def historical():
+                with mock.patch.object(fb, '_HISTORICAL_HVS_DESCRIPTOR_RELATIVE', descriptor_path), \
+                     mock.patch.object(fb, '_HISTORICAL_HVS_DESCRIPTOR_SHA256', fb._lock_sha256(descriptor_path)):
+                    return fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)
             with self.assertRaisesRegex(ValueError, 'source provenance'):
                 fb.verify_tools_build(tools, meta_path)
-            record = fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)
+            record = historical()
             self.assertTrue(record['historical_scorer_mode'])
             self.assertEqual(record['historical_sources_lock_sha256'], historical_hash)
             self.assertEqual(record['current_sources_lock_sha256'], current_hash)
+            self.assertEqual(record['historical_scorer_proof']['qualified_scorer_bundle']['scorer_sha256'],
+                             descriptor['qualified_scorer_bundle']['scorer_sha256'])
             tampered = dict(descriptor); tampered['historical_lock_sha256'] = '0' * 64
             descriptor_path.write_text(json.dumps(tampered))
             with self.assertRaisesRegex(ValueError, 'snapshot hash'):
-                fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)
+                historical()
             tampered = json.loads(json.dumps(descriptor)); tampered['allowed_current_lock_changes'][0]['new'] = 'changed.patch'
             descriptor_path.write_text(json.dumps(tampered))
             with self.assertRaisesRegex(ValueError, 'lock changes exceed'):
-                fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)
+                historical()
             tampered = json.loads(json.dumps(descriptor)); tampered['allowed_current_lock_changes'].append(
                 {'path': 'granite.commit', 'old': 'old', 'new': 'new', 'role': 'codec_encoder_only'})
             descriptor_path.write_text(json.dumps(tampered))
             with self.assertRaisesRegex(ValueError, 'allowed lock change is malformed'):
-                fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)
+                historical()
             descriptor_path.write_text(json.dumps(descriptor)); tools['psnr_hvs_m_h'].write_bytes(b'changed scorer')
             with self.assertRaisesRegex(ValueError, 'qualified scorer identity differs'):
-                fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)
+                historical()
 
     def test_hvs_transport_requires_the_exact_scored_frame_count(self):
         class Guard:

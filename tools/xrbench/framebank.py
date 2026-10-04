@@ -416,6 +416,11 @@ _HISTORICAL_HVS_ALLOWED_LOCK_ROLES = {
     'patches.wo8_light_centre_phase.path': 'presentation_foveation_only',
     'patches.wo8_light_centre_phase.sha256': 'presentation_foveation_only',
 }
+_HISTORICAL_HVS_DESCRIPTOR_RELATIVE = Path(
+    'tools/xrbench/historical_locks/qualified-hvs-scorer-b4a61-compatibility.json')
+# Normalized EOL hash of the one reviewed descriptor. It is intentionally not
+# a generic descriptor mechanism: callers must name this tracked proof.
+_HISTORICAL_HVS_DESCRIPTOR_SHA256 = 'cc452a7a7ca1140b7ad7df21483b15bea72f15ce8dcdbc64a3d5e0433fd7749c'
 
 
 def _verify_tools_build_against_lock(tools, metadata_path, *, lock_hash: str, lock_data: dict):
@@ -496,7 +501,13 @@ def verify_historical_hvs_scorer(tools, metadata_path, compatibility_path):
     """
     root = Path(__file__).resolve().parents[2]
     try:
-        descriptor_path = Path(compatibility_path)
+        descriptor_path = Path(compatibility_path).resolve()
+        expected_descriptor = (root / _HISTORICAL_HVS_DESCRIPTOR_RELATIVE).resolve()
+        if descriptor_path != expected_descriptor:
+            raise ValueError('historical HVS compatibility descriptor is not the reviewed tracked proof')
+        descriptor_hash = _lock_sha256(descriptor_path)
+        if descriptor_hash != _HISTORICAL_HVS_DESCRIPTOR_SHA256:
+            raise ValueError('historical HVS compatibility descriptor hash differs from the reviewed proof')
         descriptor = json.loads(descriptor_path.read_text(encoding='utf-8-sig'))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError('historical HVS compatibility descriptor is unreadable') from exc
@@ -556,12 +567,18 @@ def verify_historical_hvs_scorer(tools, metadata_path, compatibility_path):
     if actual_rows != sorted(expected_rows, key=lambda row: row['path']):
         raise ValueError('historical HVS lock changes exceed the explicit scorer compatibility proof')
     verified = _verify_tools_build_against_lock(tools, path, lock_hash=historical_hash, lock_data=historical_lock)
+    proof = {'schema': 1, 'compatibility_descriptor_sha256': descriptor_hash,
+             'historical_sources_lock_sha256': historical_hash,
+             'current_sources_lock_sha256': current_hash,
+             'qualified_scorer_bundle': json.loads(json.dumps(qualified, sort_keys=True)),
+             'allowed_current_lock_changes': json.loads(json.dumps(expected_changes, sort_keys=True))}
     return {**verified,
             'historical_scorer_mode': True,
             'historical_sources_lock_sha256': historical_hash,
             'current_sources_lock_sha256': current_hash,
-            'compatibility_descriptor_sha256': sha256_file(descriptor_path),
-            'allowed_current_lock_changes': expected_changes}
+            'compatibility_descriptor_sha256': descriptor_hash,
+            'allowed_current_lock_changes': proof['allowed_current_lock_changes'],
+            'historical_scorer_proof': proof}
 
 def parse_hvs_m_h(text,pixels_per_degree:float,image_height:int)->dict:
     expected=hvs_calibration_for_vertical_ppd(pixels_per_degree,image_height)
