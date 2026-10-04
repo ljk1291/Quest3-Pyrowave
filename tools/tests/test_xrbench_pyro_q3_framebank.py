@@ -86,6 +86,42 @@ class PyroQ3FramebankTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"RDO provenance"):
             q3.validate_plan(plan)
 
+    def test_overnight_static_extension_is_additive_and_has_exact_six_static_rows(self):
+        base=self.plan()
+        with mock.patch.object(q3, "build_plan", return_value=base):
+            plan=q3.build_overnight_static_plan(Path("cropped.y4m"),23.5,projection_evidence="p",crop_evidence="c",
+                                                crops=[],full_source=Path("parent.y4m"),fixture=True,
+                                                light_phase_identity=self.LIGHT_ID)
+        self.assertIs(q3.validate_plan(plan), plan)
+        self.assertEqual(plan["extension_matrix"]["kind"], "overnight_static_rdo")
+        self.assertEqual([cell["experiment_id"] for cell in plan["cells"]],
+                         [row["experiment_id"] for row in q3.Q3_OVERNIGHT_STATIC_ROWS])
+        self.assertTrue(all(cell["source_geometry"] == "crop" for cell in plan["cells"]))
+        self.assertEqual(plan["cells"][3]["source_transform"]["implementation_source_sha256"], self.LIGHT_ID["implementation_source_sha256"])
+        plan["cells"][0]["rdo_viewing_density"]["requested_ppd"] = 25
+        with self.assertRaisesRegex(ValueError, "RDO provenance"):
+            q3.validate_plan(plan)
+
+    def test_overnight_full_a2_plan_is_full_parent_and_runnable_by_common_runner(self):
+        info=fb.Y4MInfo(6144,3232,90,1,"420","FULL",6144*3232*3//2,90)
+        source_contract={"sha256":"a"*64,"geometry":[6144,3232],"frames":90,"fps":[90,1],"chroma":"420","color_range":"FULL","frame_identity":[]}
+        base={"cells":[{"wavelet":"haar","rate_mbps":500,"fps":90,"eye_width":3072,"eye_height":3232,"stereo_width":6144,"encoded_chroma":"420","cap_bytes":fb.cap_bytes(500,90),"bits_per_pixel":fb.bpp(fb.cap_bytes(500,90),3072,3232)}],
+              "presentation_eye":[3072,3232],"projection":{"vertical_pixels_per_degree":23.5},"crops":[],
+              "hvs_calibration":{"codec_cells":[{}],"crops":[]}}
+        with mock.patch.object(q3,"_require_full_source",return_value=info), \
+             mock.patch.object(q3,"_source_contract",return_value=source_contract), \
+             mock.patch.object(q3,"_hash",return_value="a"*64), \
+             mock.patch.object(fb,"build_plan",return_value=base):
+            plan=q3.build_overnight_full_a2_plan(Path("parent.y4m"),23.5,projection_evidence="p",crop_evidence="c",crops=[],fixture=True)
+        plan["frozen_module_hashes"] = q3._module_hashes()
+        self.assertIs(q3.validate_plan(plan),plan)
+        self.assertEqual(plan["cells"][0]["source_geometry"],"full_fov")
+        self.assertEqual(plan["cells"][0]["rdo_viewing_density"],q3._rdo_descriptor(24))
+        self.assertEqual(q3._require_plan_source.__name__, "_require_plan_source")
+        plan["cells"][0]["eye_width"] = 2624
+        with self.assertRaisesRegex(ValueError, "full a2 codec row drifted"):
+            q3.validate_plan(plan)
+
     def test_extension_refuses_corrected_light_until_its_wo8_source_is_active(self):
         base=self.plan()
         with mock.patch.object(q3,"build_plan",return_value=base), \
