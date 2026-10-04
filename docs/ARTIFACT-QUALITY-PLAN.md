@@ -1,5 +1,38 @@
 # Compression-artifact plan: fence-first codec and geometry investigation
 
+## Execution complete — owner review required, 2026-10-04 20:52 CEST
+
+The owner extension below is now complete. See the
+[32-row combined Q3 report](../results/metro-q3-combined-2026-10-04.md),
+[verified stable-signed pair receipt](../results/quality-candidate-build-80a1635-2026-10-04.json),
+and [prepared headset checklist](Q3-HEADSET-CHECKLIST.md). This checkpoint
+supersedes pending/running instructions in the historical plan below. **Stop for
+the owner; do not begin Q4, headset work, installation or further optimization.**
+
+The final report preserves both score windows, fixed corpus and fence identity,
+all historical rows, requested/effective RDO, source/build provenance and clean
+lease closure. It ranks 30 cropped rows and keeps two full-FOV references separate.
+Single-stream H264Fit/700/P7 leads the fence (47.837276 dB, p99 4) but loses broad
+image detail (36.976144 HVS). The selected Medium preparation candidate is
+9/7/1000/softness 0.5/RDO24 (42.412796 dB, p99 9, 37.356360 HVS). Cropped
+AV1 Main10/200/P4/AQ-off remains the requested stock-codec comparison; none is
+promoted from offline quality alone.
+
+Default-density 9/7 gains 3.749361 fence dB from 1000 to 2000 Mbps. Its four-point
+fit predicts about 7628.7 Mbps to match the retained dual-H.264/700/P4 fence,
+with alternative intervals yielding 7426.6–8045.7 Mbps. This is extrapolation
+beyond the measured 800–2000 interval, not live bandwidth or decoder feasibility.
+Keep the 1500/2000 rows offline-only and above measured Wi-Fi capacity.
+
+WO-7 and the Light fix passed separate-branch CPU tests and CI before merging.
+The final matching pair is source `80a16353ca127508fec745dec53dc790ceb77fb2`,
+full CI `37217852222`, verified but not installed. WO-13 in that pair is the
+TCP frame-paced network-test tooling. The checklist requires future owner
+authorization, Q4 qualification, exact geometry/readback, recommended AHB
+allocation, unchanged comparison knobs and per-key/environment restoration.
+GPU decode, completion, fresh-rate and estimated pipeline latency are separate
+pending fields; no new timing or stable-90-Hz claim follows from Q3.
+
 ## Owner extension, 2026-10-04 17:36 CEST
 
 This revision supersedes the old Q3b two-row remainder and 25-row publication

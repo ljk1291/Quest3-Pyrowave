@@ -1,0 +1,122 @@
+{
+  "identity": {
+    "application_version": "20.13.0-ljk1291.2+80a16353ca12",
+    "client_package_id": "io.github.ljk1291.quest3pyrowave",
+    "dependency_revisions": {
+      "alvr": {
+        "commit": "7eda092dbf0002281410a4222683ec228700cffb",
+        "url": "https://github.com/alvr-org/ALVR"
+      },
+      "android_ndk": "27.2.12479018",
+      "cargo_apk": {
+        "commit": "0fd3126dad5aa1c5f0f26cdae3410f2e5af62c60",
+        "url": "https://github.com/zarik5/cargo-apk"
+      },
+      "granite": {
+        "commit": "842d9d5686ba8c799a7d34a78a68f98d6aeb5a68",
+        "url": "https://github.com/Themaister/Granite"
+      },
+      "integration": {
+        "commit": "54cc8519bddceff57e159e6f39914e373b512809",
+        "url": "https://github.com/Terminal-ennui/galaxy-xr-alvr-pyrowave-444"
+      },
+      "openxr_loader": {
+        "android_aar": "openxr_loader_for_android-1.0.34.aar",
+        "release": "release-1.0.34",
+        "sha256": "c8b50603ad3b81756c6bd203ab9c9d19341326e14f6cbae87ee894137ee5e256"
+      },
+      "patches": {
+        "pyrowave_rdo_density": {
+          "path": "patches/pyrowave-rdo-density.patch",
+          "sha256": "1641a9456dd9d9e5811a110016cfe673587e7de56d9a76d709a3ea7599f3a4cc"
+        },
+        "wo8_light_centre_phase": {
+          "path": "patches/wo8-light-centre-phase.patch",
+          "sha256": "4f4ce22430f810c78195d749425f35f77ffdb1a14c844b927dff485c3c91e7f3"
+        }
+      },
+      "pyrowave": {
+        "commit": "d2997ac172bdc00e29c58e3f2938acb7e94580bf",
+        "url": "https://github.com/Themaister/pyrowave"
+      },
+      "reproducibility": "Pinned inputs and build recipe; signed APKs and ZIP metadata are not claimed byte-identical.",
+      "rust": "1.97.1"
+    },
+    "protocol_version": "20.13.0-ljk1291.2",
+    "repository_commit": "80a16353ca127508fec745dec53dc790ceb77fb2",
+    "server_version": "20.13.0-ljk1291.2+80a16353ca12",
+    "shader_hashes": {
+      "shaders/constants.h": "3bc9555f8399bad2bd6960536125588fd7dbc7936a7147755fc497241f04e062",
+      "shaders/dwt.comp": "f58c3f95d68a90f4621fc1999bcf9a95e1a263b80d20355b0ac20002828a90b1",
+      "shaders/dwt_common.h": "591f529143fce7efad00c0f5a5e6d9be0a714fb2d5098ac5e89242c0041ada26",
+      "shaders/dwt_quant_scale.h": "4a5e60c22785075341afa29211275857a4f3922999e0f5799131c5f4acf2c4be",
+      "shaders/dwt_swizzle.h": "0283e54d268f25375866274dd3728384c75d9783cab12787d8914588b80f0f30",
+      "shaders/idwt.comp": "e3bb1b44e1e0cb0c2137c44dc50c42f0de4b625f8505f26e96b89ea210c2c3af",
+      "shaders/idwt_haar_fused.comp": "a85ffbeb0966e22855d8c76690a7283fb6a2a5967ae5028feac81663c99be629",
+      "shaders/slangmosh.hpp": "4f84897f9d7fbb07cbc5ccba6d98bc83b85f697ca170578ba959118c84032995",
+      "shaders/slangmosh.json": "d5ea9829b89ee2ac5d16c12b34561971cfeaef5e97eec5ac47ec9a4baa3d06d5",
+      "shaders/wavelet_dequant.comp": "e588ddfdd7c3d1873b758a9d8511b80a946fccf384a7aab0b3368d4212aa1a44"
+    },
+    "sources_lock_sha256": "f8510aa72b713ca658475bab0956c98f3adf98b1962b553c781bdc62e5e7bbb0"
+  },
+  "included_work_orders": [
+    "WO-10 opt-in FOV crop",
+    "WO-8 opt-in foveation including Light centre-phase fix",
+    "WO-13 network frame pacing telemetry",
+    "WO-7 opt-in RDO density; legacy default unchanged"
+  ],
+  "installed": false,
+  "kind": "quality_candidate_matching_pair",
+  "packages": {
+    "android": {
+      "artifact_sha256": {
+        "APK-CERTIFICATE.txt": "d43d9c45a97636413ec298b83b1c971d47ab0c1411a483eea7cf6c6f6a30fd81",
+        "LICENSES.zip": "749f760dbc9d74e1784b68ce70ce9bb6119eaf75c2a115d86c547e9c44e958ca",
+        "Quest3-Pyrowave-stable.apk": "3d74c6e76964ecf752a4e0dc5414a562c92e14f2b072411f8f83f5e2d281ed53",
+        "libc++_shared.so": "f9992c4ba6b7c5a716e3a202fceb1ce029d6a2b0605838ac6b3219f489dd7970",
+        "libpyroclient.so": "bd33b0fa2ac6eb600c16806f645b4704afa4144a501fed08835efa39bc6c246d",
+        "libpyrowave-shared.so": "79a1aa40d3697dea68a243d3a47365c53fa90c2e255d9689d6a69dc4cfe5a459",
+        "pyroclient_test": "547da209d7bdfa2f5cd7e11503f6ccf8969c6e5d39dd60593b324cab199ef2f8",
+        "pyrowave_android": "0d940d943a7eb05e9c0b6335f85ac41dd308f824042fafa46a78afcff6cd31d9",
+        "tcpframerecv-android": "3c5e8938954bcd441e82c908a1ccf1537088989b5394771c5628edacb5488841",
+        "udprecv-android": "b8e092ec3dcd0a2d2640d1296e8abe0d4f0537c4cbb59f882329620c3a8aac05"
+      },
+      "metadata_sha256": "4c914a16baac96c9fb921164f28a0e1502b9eac0c0080db9bac58a0a1b9be2d9"
+    },
+    "windows": {
+      "artifact_sha256": {
+        "FRAMEBANK-IMPORTS.json": "67043419fdece99cc50c19e99f8d6b3615f816c853e778cc43ec7a5a8e3286d3",
+        "FRAMEBANK-LICENSES.zip": "b5290be94367c2e8afae7a6d5f4bda9b2533f09272347c0dc43e2857124c05bb",
+        "FRAMEBANK-TOOLS-BUILD-METADATA.json": "602bce856cd45b0efac49a112e6e49f5ff2fdde204536270d14b60fb5f5577d1",
+        "HVS-SCORER-SOURCE.json": "1a595cb750741e51725b9b6e6afd536d4814bac79dce57322b2e0a6feb1fe0c7",
+        "PYROWAVE-LICENSE.txt": "2bda201d3849fcb515f784a299c4eb0c3e0c86f4a134484e73af29684e51bb15",
+        "Quest3-Pyrowave-Windows.zip": "3359e5670580e061609c5b5d7333414536285dde2279bc66aece6bf15b49610a",
+        "WINDOWS-COMPOSITION-SHADERS.json": "d7d3d90b349ad84c33f5febcfbdb7243e3936b67fce58bd5f903295240492f7c",
+        "psnr_hvs_m.comp": "87fd53541193fd2543be754ecb8a6a38f810894993d1c8963e1d86bd8edc30bf",
+        "pyrowave-decode.exe": "14bb87b7a839f96033cef65cc8a6bd1cb32b2e898ced4382ff268a58ed89cc1e",
+        "pyrowave-encode.exe": "92baaa067a88b917b81b729293bd1de697d0449243e66c8151bd197f6a8a6c23",
+        "pyrowave-psnr-hvs-m.exe": "ef855100c5dab3d6843d9bcc3291b3766ce70ca16cab33b691bd3c569ac67033"
+      },
+      "metadata_sha256": "53cbcfdeb0ef4f379a2d5a89190794213618c3aa7deeb15090a5655e916a6064",
+      "native_zip_members": {
+        "bin/win64/driver_alvr_server.dll": "6f40366ed01166541471f22714090cae10b04b344c6fb43dda0f8fffc3de8670",
+        "bin/win64/libpyrowave-shared-0.dll": "1b0a6bd0b7c978c063c58f5349f87748fd7d44806dda1ed5fc4111c19d880cc1"
+      }
+    }
+  },
+  "qualification": "Build and package verification only; no live performance or image-quality acceptance.",
+  "runtime_started": false,
+  "schema": 1,
+  "signing": {
+    "certificate_sha256": "4a3fe0a8d47ee67b01710df6ffdc870e91ebc5b8e7feec7c87534944ca2a44aa",
+    "kind": "stable"
+  },
+  "verification_receipt_sha256": "ba75bb306d780f9582b8d2bd488d5d77014509d72913ae586f6300c3897428ed",
+  "verified": true,
+  "workflow": {
+    "conclusion": "success",
+    "event": "workflow_dispatch",
+    "run_id": 37217852222,
+    "url": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37217852222"
+  }
+}

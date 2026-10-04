@@ -5,6 +5,72 @@ agent (Codex). Codex reads it at every checkpoint and appends to **Log**. The ow
 Claude may reorder **Queue** or add **Notes for Codex** between checkpoints. Keep
 entries short and link to evidence.
 
+## Current owner-review checkpoint — 2026-10-04 20:52 CEST
+
+**The revised Q3 request is complete; stop for owner review.** The
+[combined 32-row report](../results/metro-q3-combined-2026-10-04.md) and
+[machine-readable evidence](../results/metro-q3-combined-2026-10-04.json)
+retain 23 previous rows plus nine authorized measurements. Thirty cropped rows
+are ranked by trimmed fence metrics then HVS; two historical full-FOV references
+remain separate. All nine new measurements completed their 90-frame corpus with
+clean finite supervised quality leases, zero owned jobs left, no cleanup errors
+and unchanged protected harness hashes. GPU-load samples are retained. No headset,
+VR, VD, network/settings, arm-file or installed-pair operation occurred.
+
+| Candidate / control | Fence edge PSNR-Y dB | Temporal p99, luma codes | Whole-crop HVS dB |
+|---|---:|---:|---:|
+| Single H.264 H264Fit / 700 / P7 / softness 0.5 | 47.837276 | 4 | 36.976144 |
+| Cropped AV1 Main10 / 200 / P4 / AQ off (retained) | 42.997587 | 9 | 43.346668 |
+| Cropped AV1 Main10 / 200 / P1 / spatial AQ | 42.619633 | 9 | 43.103077 |
+| Medium 9/7 / 1000 / softness 0.5 / RDO 24 | 42.412796 | 9 | 37.356360 |
+| Cropped 9/7 / 1000 / RDO 24 | 39.933228 | 12 | 43.008816 |
+| Cropped 9/7 / 2000 / default RDO — offline-only | 39.503112 | 13 | 45.043698 |
+| Corrected Light 9/7 / 1000 / softness 0.5 / default RDO | 36.525299 | 17 | 38.710948 |
+
+Fence metrics use frames **10–89**; HVS above uses all **90** frames. Temporal
+p99 is an 8-bit luma reconstruction residual, not milliseconds or optical shimmer.
+The source contains 89 distinct payloads and irregular capture timestamps. F90
+normalizes the bitrate budget; it does not establish fresh rate or display FPS.
+H264Fit leads the fence but has a substantial whole-crop/peripheral tradeoff.
+Medium/RDO24 is the selected **offline-quality preparation candidate** among the
+tested Medium rows, not a new baseline or a stable 90 Hz result.
+
+At unchanged default density, 9/7 gains **3.749361 dB** from 1000 to 2000 Mbps.
+The four-point 800/1000/1500/2000 fit gives **3.895236 dB per doubling** and
+extrapolates to **7628.7 Mbps** for the retained dual-H.264/700/P4 fence target
+(47.032668 dB). Alternative intervals give **7426.6–8045.7 Mbps**, a model
+sensitivity range, not a confidence interval or a feasible transport/decode rate.
+All 1500/2000-Mbps rows remain **offline-only, above measured Wi-Fi capacity**.
+
+WO-7 ([PR #43](https://github.com/ljk1291/Quest3-Pyrowave/pull/43)) preserves
+the legacy default arithmetic bit-for-bit and adds explicit RDO density; 96 dpi
+at 1 m corresponds to **65.28 px/deg**, not 96 px/deg. The Light fix
+([PR #42](https://github.com/ljk1291/Quest3-Pyrowave/pull/42)) improves its fence
+from 30.832637 to 36.525299 dB and p99 from 32 to 17, with Medium/H264Fit parity
+preserved. The extension/provenance adapter is
+[PR #44](https://github.com/ljk1291/Quest3-Pyrowave/pull/44). Separate branch
+tests and required CI passed before integration. The dropped blur-only Light /
+dual-H.264 row was not run: the Pyro blur-only control gave no meaningful fence
+gain and stock ALVR lacks live dual-eye H.264 transport.
+
+The matching stable-signed pair at `80a16353ca127508fec745dec53dc790ceb77fb2`
+passed [full CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37217852222).
+[Verification receipt](../results/quality-candidate-build-80a1635-2026-10-04.json)
+pins both artifacts, native payloads, shader/source identities and stable certificate.
+It includes WO-10, WO-8 with Light correction, WO-13 and WO-7, and is **not installed**.
+The [source audit](STOCK-H264-FOVEATION-AUDIT.md) confirms single-stream stock
+H.264 H264Fit forward/inverse support, with live dimension/decoder/quality/timing
+gates still open; the offline P1/AQ-strength-8 control is not an exact live AQ match.
+
+Next action is owner review of the report and
+[headset checklist](Q3-HEADSET-CHECKLIST.md). Its first cells are baseline,
+AV1 Main10/200/P4/AQ-off, conditional H264Fit/700/P7, and Medium 9/7/RDO24/1000.
+It pins recommended AHB allocation, exact settings/environment restoration and
+separate GPU execution, fence completion, fresh submissions and estimated pipeline
+latency fields. Those live measurements remain unset. The historical approximately
+82–83 fresh submissions/s is still distinct from a stable 90 Hz pass. No automatic
+headset, network test, installation or optimization promotion follows this checkpoint.
+
 ## Owner objective (revised 2026-10-04)
 
 Fewest artifacts at Godlike density, fresh submissions at least today's (~82–83/s,
@@ -1083,3 +1149,57 @@ remain fixed; current codec and historical scorer lock identities stay separate.
 Eight new cells, the combined 32-row report, stable-signed pair verification and
 final owner checklist remain pending. No headset, settings or installed-pair
 operation occurred. The baseline remains unchanged.
+
+### 2026-10-04 19:24 CEST — extension integrated; signed pair verified
+
+PRs #42, #43 and #44 are merged at `80a16353ca127508fec745dec53dc790ceb77fb2`.
+The Light follow-up preserves Medium's aligned sampling exactly; its CPU-only
+follow-up passed [CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37217662526)
+in addition to the native phase-fix build. The integration's complete
+[manual CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37217852222)
+passed. Its stable-signed APK/server pair was downloaded and independently verified
+against matching identities, artifact/native-library/shader hashes and the retained
+stable certificate. It has **not been installed or launched**.
+
+Three of the eight extension cells are complete with clean leases. Primary fence
+figures below use frames 10–89; HVS is the separate all-90 secondary score:
+
+| Cell | Fence edge PSNR-Y dB | Temporal p99 | HVS dB |
+|---|---:|---:|---:|
+| Cropped AV1 Main10 / 200 / P1 / spatial AQ | 42.619633 | 9 | 43.103077 |
+| Cropped 9/7 / 1000 / RDO 24 px/deg | 39.933228 | 12 | 43.008816 |
+| Cropped 9/7 / 1000 / RDO 36 px/deg | 39.504094 | 13 | 42.598806 |
+
+The retained default-density 9/7 / 1000 comparator is 35.753751 dB / p99 19 /
+HVS 39.904984 dB. Its legacy 96 dpi / 1 m constant corresponds to 65.28 px/deg,
+not 96 px/deg. Both new native logs confirm the requested/effective densities.
+The AV1 control explicitly sets FFmpeg AQ strength 8; live ALVR enables Spatial
+AQ but leaves strength to its NVENC preset/driver, so this is not an exact live
+encoder-configuration equivalence claim.
+
+The seven new Pyro reports bind their frozen plan but omit a top-level projection
+copy. The private publisher now recovers it only from the exact hash-bound plan,
+checking selected cell, all 90 source/frame identities and observed HVS calibration;
+it publishes that derivation proof without modifying original reports. Independent
+review and 15 publication/rate CPU checks pass. Medium/RDO24 is currently preparing
+its 90-frame references; corrected Light and three high-rate cells remain. No
+headset, VR, VD, network/settings, arm or installed-pair operation occurred. This
+checkpoint is offline quality evidence, not a fresh-rate, timing or 90 Hz pass.
+
+### 2026-10-04 20:52 CEST — revised Q3 complete; stop for owner
+
+All nine authorized additions (H264Fit plus eight extension cells) are complete
+with clean supervised quality leases. The [combined report](../results/metro-q3-combined-2026-10-04.md)
+contains 32 validated rows and the requested default-density bitrate analysis.
+The corrected Light publisher proof follows the actual nested transform schema
+and checks all 90 frame identities; missing redundant aggregate metadata is not
+fabricated in the original report. Both that adjustment and the frozen-plan
+projection recovery received independent review. The report retains their
+derivation evidence and immutable raw-report hashes.
+
+The [verified build receipt](../results/quality-candidate-build-80a1635-2026-10-04.json)
+and [headset preparation checklist](Q3-HEADSET-CHECKLIST.md) are ready. Full native
+CI passed for `80a1635`; later documentation commits do not change the pair's
+identity. Independent review verifies all 32 rows, correct score windows,
+high-rate limitations, provenance/privacy and clean lease closure. Current
+queue is owner review only. No new hardware test, install or default promotion.

@@ -111,3 +111,26 @@ that is absent from this audit:
 Until those gates exist, `H264Fit` should be presented as a **single-stream,
 source-backed stock H.264 candidate**. It is neither a PyroWave-only feature
 nor a qualified replacement for the current baseline.
+
+## Q3 extension clarification, 2026-10-04
+
+The verified integration pair is source `80a16353ca127508fec745dec53dc790ceb77fb2`.
+WO-8's Light phase correction leaves Medium and H264Fit's already aligned phases
+unchanged, with CPU/shader parity checks. The codec-independent H.264 conclusion
+above therefore remains applicable. The foveated-encoding setting is schema-hidden
+(`settings.rs:872-874` in the audited reconstruction); ordinary dashboard controls
+must not be assumed. The later checklist uses explicit per-setting writes and
+requires negotiated readback.
+
+The offline single-stream H264Fit / 700 Mbps / P7 cell has now completed on this
+RTX 5080 at **3968 x 2112**. That records offline NVENC acceptance for those exact
+dimensions; it does not qualify the distinct live **3968 x 2080** crop geometry,
+Quest decoder, or generic inverse compositor performance.
+
+The new AV1 P1/Spatial-AQ control explicitly uses FFmpeg `-spatial_aq 1` and
+`-aq-strength 8` (`tools/xrbench/nvenc_framebank.py:159-168`). Live ALVR sets
+`enableAQ` at `VideoEncoderNVENC.cpp:411-416` but never assigns `aqStrength`,
+leaving that field to the NVENC preset/driver. Thus P1 and Spatial AQ are
+source-default choices, while strength 8 is an **offline proxy**, not proven
+equivalent to the live encoder. AV1, Main10 and 200 Mbps are explicit candidate
+settings, not the stock default bundle.
