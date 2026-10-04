@@ -296,6 +296,16 @@ class NvencFramebankTests(unittest.TestCase):
         self.assertEqual(plan["q3_revision"],"2026-10-04-q3b")
         self.assertEqual([(c["eye_width"],c["eye_height"]) for c in plan["cells"]],[(1984,2112),(2624,2776)])
         self.assertTrue(all(c["source_transform"]["kind"]=="wo8_foveation" for c in plan["cells"]))
+        self.assertNotIn("per_stream_mbps", plan["cells"][0])
+        self.assertEqual(plan["cells"][1]["per_stream_mbps"], 350)
+        self.assertEqual(plan["hvs_calibration"]["codec_cells"][0],
+                         fb.hvs_calibration_for_vertical_ppd(23.5 * 2112 / fb.DISPLAY_EYE[1], 2112))
+        self.assertEqual(plan["hvs_calibration"]["codec_cells"][1],
+                         fb.hvs_calibration_for_vertical_ppd(23.5 * 2776 / fb.DISPLAY_EYE[1], 2776))
+        # The fixture intentionally stubs the shared frame-bank source schema;
+        # reach the NVENC layout validation without redefining that schema here.
+        with mock.patch.object(fb, "validate_plan"):
+            self.assertIs(nf.validate_plan(plan), plan)
 
     def test_q3b_bands_use_exact_wo8_source_space_ramp(self):
         cell={"source_transform":nf.foveation_transform_descriptor(profile="light",softness=.5,blur_only=False)}
