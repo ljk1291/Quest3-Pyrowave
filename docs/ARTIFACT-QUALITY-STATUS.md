@@ -70,9 +70,9 @@ It merged as `7302a25` after 55 focused tests, independent review and
 The reduced and matching-blur first-frame hashes match both retained attempts.
 The finite r5 controller is running Q3b with three preparation workers and fresh
 r3 Pyro attempt paths. Its three Light / 9/7 / 1000 Mbps softness cells (0, 0.5,
-1), Light / 5/3 / 1000 Mbps / softness 0.5 and Medium / 5/3 / 1000 Mbps /
-softness 0.5 are complete with clean lease closure; five Q3b cells remain.
-Medium / 9/7 / 1000 Mbps / softness 0.5 is active.
+1), Light / 5/3 / 1000 Mbps / softness 0.5 and both Medium / 5/3 and 9/7 /
+1000 Mbps / softness 0.5 are complete with clean lease closure; four Q3b
+cells remain. H264Fit / 9/7 / 1000 Mbps / softness 0.5 is active.
 Do not repeat completed cells. The first result is worse
 than cropped 9/7 without foveation on the primary fence: 30.832 versus 35.754 dB
 edge PSNR, temporal residual p99 32 versus 19 luma codes (both frames 10–89).
@@ -186,6 +186,46 @@ Take the first unblocked item. Items marked ∥ are independent.
 ## Log
 
 <!-- Codex appends entries here: date, checkpoint, verified (links), remaining, blocked? -->
+
+- 2026-10-04 07:05 UTC, Medium wavelet comparison completed: the 5/3 and 9/7
+  cells use identical reduced input, all 90 source/encoded-reference/sharp/blur
+  frame identities, transform, fence, centre ROI, peripheral descriptor and
+  corpus/projection/scorer provenance. Both score windows and clean lease
+  closures pass the private publisher's validation. Encoded geometry is
+  2112×2240/eye; expanded scoring remains 2624×2776/eye.
+
+  | Medium / 1000 Mbps / softness 0.5 | CDF 5/3 | CDF 9/7 |
+  |---|---:|---:|
+  | Fence edge PSNR-Y, 10–89 | 36.150850 dB | 37.543370 dB |
+  | Fence temporal mean / p99 | 2.889889 / 18 | 2.605163 / 15.32 |
+  | Whole-image HVS, all-90 | 36.013034 dB | 36.261744 dB |
+  | Whole-image HVS, 10–89 | 35.824581 dB | 36.078479 dB |
+  | Peripheral sharp edge PSNR-Y, 10–89 | 30.657437 dB | 30.854177 dB |
+  | Peripheral sharp temporal mean / p99 | 5.413821 / 34 | 5.288778 / 33 |
+  | Peripheral matching-blur edge PSNR-Y, 10–89 | 40.388626 dB | 41.683527 dB |
+  | Peripheral matching-blur temporal mean / p99 | 1.814631 / 11 | 1.621190 / 10 |
+  | Centre sharp HVS, 10–89 | 40.736892 dB | 41.498037 dB |
+  | Centre matching-blur HVS, 10–89 | 40.786983 dB | 41.554029 dB |
+
+  CDF 9/7 improves the matched fence by 1.392520 dB and whole-image HVS by
+  0.248710 dB all-90 / 0.253898 dB trimmed. Temporal values are luma residual
+  codes; the fractional p99 is retained rather than rounded to an integer.
+  Compared with Light 9/7, Medium 9/7 gains 6.710732 dB on the same fence but
+  loses 1.479493 dB whole-image HVS (all-90). Versus unfoveated cropped 9/7,
+  it gains 1.789618 dB fence PSNR but loses 3.643241 dB whole-image HVS.
+  Fixed-crop trimmed HVS changes versus Light / unfoveated 9/7 respectively:
+  UI +4.992162 / +3.955675 dB, tunnel +4.383665 / +3.131298 dB, rail
+  −1.928551 / −3.539538 dB. These cross-profile comparisons have common
+  fence, expanded whole-image and fixed-crop domains; centre/peripheral domains
+  differ across profiles and must not be treated as matched gains.
+  This favors 9/7 within Medium on the measured quality metrics, but does not
+  promote Medium overall or establish any Quest decoder-speed or 90-Hz claim.
+  Private controller report SHA256:
+  `ea7dbf1145bbd6c1ba9cce66d8884444a29ed0eac90210077bfd703fefe95e5f`.
+  Twenty-one of 25 Q3 rows are complete. The existing controller has advanced
+  to H264Fit / 9/7 / 1000 / softness 0.5. Four Q3b cells, combined publication,
+  verified stable pair and owner checklist remain. No owner blocker or headset,
+  settings, arm-file or installed-pair change.
 
 - 2026-10-04 06:26 UTC, first Medium result completed: CDF 5/3 / 1000 Mbps /
   softness 0.5 at 2112×2240 encoded pixels per eye, reconstructed to the same

@@ -136,6 +136,22 @@ this tradeoff explicit and do not promote a profile from fence metrics alone.
 Q3b is five of ten complete (20 of 25 overall); Medium / 9/7 is running.
 The final ranking, signed pair and owner checklist remain outstanding.
 
+Measured follow-up, 2026-10-04 07:05 UTC: Medium / CDF 9/7 / 1000 / softness
+0.5 completes with the exact same transformed input, reference frame identities,
+geometry and scoring domains as Medium 5/3. Both windows, provenance and clean
+lease closure pass validation. Fence edge PSNR improves from 36.150850 to
+37.543370 dB; temporal residual mean/p99 improve from 2.889889/18 to
+2.605163/15.32 (10–89). Whole-image HVS improves by 0.248710 dB all-90 and
+0.253898 dB trimmed, with matched centre/peripheral improvements as well.
+Compared with unfoveated cropped 9/7, Medium gains 1.789618 dB fence PSNR but
+loses 3.643241 dB whole-image HVS all-90; UI/tunnel crop gains accompany a
+3.539538 dB rail-crop loss in 10–89. Keep the quality tradeoff and cross-profile
+centre/periphery domain qualification explicit. No timing or profile promotion.
+Q3b is six of ten complete (21 of 25 overall); H264Fit / 9/7 is running.
+Continue the four remaining frozen cells, then combined publication and the
+verified stable pair/checklist. The report identity and detailed table are in
+the status log.
+
 ## 1. Owner input (2026-10-03 21:44)
 
 - **Live decoder caps on Quest 3.** These come from the owner's experience; verify them on
