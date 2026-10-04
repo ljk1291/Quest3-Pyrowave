@@ -50,6 +50,19 @@ def test_fetch_script_reads_lock_and_applies_the_complete_alvr_stack_in_order():
     assert positions == sorted(positions)
 
 
+def test_fetch_script_applies_rdo_density_after_the_pyrowave_overlays():
+    script = (REPO / "tools/ci/fetch_sources.sh").read_text()
+    names = ("pyrowave-cdf53-haar-experiments2-3.patch", "quest3-pyrowave.patch",
+             "pyrowave-rdo-density.patch")
+    positions = [script.index(name) for name in names]
+    assert positions == sorted(positions)
+    assert (REPO / "patches/pyrowave-rdo-density.patch").is_file()
+    import hashlib
+    expected = LOCK["patches"]["pyrowave_rdo_density"]
+    assert expected["path"] == "patches/pyrowave-rdo-density.patch"
+    assert expected["sha256"] == hashlib.sha256((REPO / expected["path"]).read_bytes()).hexdigest()
+
+
 def test_workflow_loads_pins_from_the_lock_before_building():
     workflow = (REPO / ".github/workflows/ci.yml").read_text()
     assert workflow.count("source_lock.py --github-env") >= 3
@@ -77,3 +90,4 @@ def test_stable_windows_build_uses_the_reconstructed_locked_pyrowave_tree():
     script = (REPO / "tools/windows/build_pyrowave_pc.cmd").read_text()
     assert 'set "PW=%WS%\\research\\pyrowave"' in script
     assert "XRWIRED_PYROWAVE" not in script
+    assert "pyrowave-rdo-density-test" in script

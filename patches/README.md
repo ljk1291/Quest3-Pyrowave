@@ -67,6 +67,7 @@ Two traps when regenerating, both of which have silently produced a patch that d
 | `alvr-ca2deca-XRWIRED.patch` | `alvr-org/ALVR` | `ca2decae968f2fd37b43b777cca4ba597808ba52` | abandoned direct-USB/stereo experiment, package `alvr.client.dev` |
 | `pyrowave-galaxy-xr.patch` | `Themaister/pyrowave` | `d2997ac` | older subset: the standalone decode CLI on Galaxy XR, see below; superseded by the next row |
 | `pyrowave-cdf53-haar-experiments2-3.patch` | `Themaister/pyrowave` | `d2997ac` | **cumulative: the whole pyrowave clone** (14 files incl. the regenerated `shaders/slangmosh.hpp`): Galaxy XR fixes, CDF 5/3 and Haar, precision, the Experiment 3 decoder API; apply it alone |
+| `pyrowave-rdo-density.patch` | `Themaister/pyrowave` | `d2997ac` plus the two PyroWave overlays above | additive encoder-only WO-7 overlay: `PYROWAVE_RDO_PX_PER_DEG`, strict validation and a CPU parity test; apply after the cumulative research and Quest overlays |
 | `openxr-sdk-2b99fec-hello_xr.patch` | `KhronosGroup/OpenXR-SDK-Source` | `2b99fec` | the `hello_xr` distortion-grid / stereo decoder test app (9 files); the repo's `.gitattributes` makes checkouts CRLF, so compare ignoring line endings |
 | `alvr-20.14.1-galaxy-xr-client.stale-20260919.patch` | — | — | superseded snapshot, kept for reference only |
 
