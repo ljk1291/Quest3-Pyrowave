@@ -27,7 +27,7 @@ class PyroQ3FramebankTests(unittest.TestCase):
             from xrbench.foveation import FoveationConfig, encoded_size
             for p,w,r in q3.Q3B_ROWS:
                 t=q3._q3b_transform(p); ew,eh=encoded_size(2624,2776,FoveationConfig(t['profile'],t['softness'],t['blur_only'])); cap=fb.cap_bytes(r,90)
-                cells.append(dict(phase='q3b',profile=p,wavelet=w,rate_mbps=r,fps=90,eye_width=ew,eye_height=eh,stereo_width=ew*2,cap_bytes=cap,bits_per_pixel=fb.bpp(cap,ew,eh),score_vertical_pixels_per_degree=23.5,source_geometry='crop',source_transform=t,requires_wo8_reduced_encode=True))
+                cells.append(dict(phase='q3b',profile=p,wavelet=w,rate_mbps=r,fps=90,eye_width=ew,eye_height=eh,stereo_width=ew*2,cap_bytes=cap,bits_per_pixel=fb.bpp(cap,ew,eh),encoded_chroma='420',score_vertical_pixels_per_degree=23.5,source_geometry='crop',source_transform=t,requires_wo8_reduced_encode=True))
         return {"schema": 1, "kind": "pyro_q3_framebank", "fixture_only": True,
                 "source": self.source_contract(), "projection_evidence": "p", "crop_evidence": "c",
                 "source_derivation": {"parent_sha256": "b" * 64, "parent_geometry": [6144, 3232], "operation": "native_per_eye_crop_no_resampling"},
@@ -51,6 +51,17 @@ class PyroQ3FramebankTests(unittest.TestCase):
         q3b["cells"][-1]["requires_wo8_reduced_encode"] = False
         with self.assertRaisesRegex(ValueError, "reduced-encode"):
             q3.validate_plan(q3b)
+
+    def test_q3b_manifest_rejects_geometry_cap_or_chroma_drift(self):
+        for key, value in (("eye_width", 2), ("cap_bytes", 1), ("encoded_chroma", "444"),
+                           ("score_vertical_pixels_per_degree", 24.0)):
+            plan = self.plan(True)
+            if key in ("eye_width", "cap_bytes"):
+                plan["cells"][-1][key] += value
+            else:
+                plan["cells"][-1][key] = value
+            with self.assertRaisesRegex(ValueError, "Q3b reduced geometry/cap/scoring contract drifted"):
+                q3.validate_plan(plan)
 
     def test_module_hash_freezes_runner_dependencies(self):
         plan = self.plan(); plan["frozen_module_hashes"]["framebank.py"] = "0" * 64
@@ -117,6 +128,30 @@ class PyroQ3FramebankTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "payload mismatch"):
                 q3._native_records(path, [1] * 90)
 
+    def test_q3b_reduced_source_identity_must_match_transform_output(self):
+        identities = [{"source_frame": i, "encoded_reference_sha256": f"{i:064x}"}
+                      for i in range(90)]
+        records = [{"source_frame": i, "source_sha256": f"{i:064x}"} for i in range(90)]
+        with mock.patch.object(fb, "frame_records", return_value=records), \
+             mock.patch.object(q3, "_hash", return_value="c" * 64):
+            provenance = q3._q3b_encoded_source_provenance(Path("reduced.y4m"), identities)
+        self.assertEqual(provenance["frames"], 90)
+        records[-1]["source_sha256"] = "wrong"
+        with mock.patch.object(fb, "frame_records", return_value=records):
+            with self.assertRaisesRegex(ValueError, "q3b_encoded_source_identity_mismatch"):
+                q3._q3b_encoded_source_provenance(Path("reduced.y4m"), identities)
+
+    def test_cli_passes_explicit_q3b_phase_to_runner(self):
+        with tempfile.TemporaryDirectory() as root:
+            report = Path(root) / "report.json"
+            args = ["run", "--plan", "p", "--source", "s", "--private-out", "o", "--report", str(report),
+                    "--window", "w", "--encode", "e", "--decode", "d", "--psnr-hvs-m-h", "h",
+                    "--ffmpeg", "f", "--tools-metadata", "m", "--phase", "q3b"]
+            with mock.patch.object(q3, "run_plan", return_value={"complete": True}) as run:
+                self.assertEqual(q3.main(args), 0)
+            self.assertEqual(run.call_args.kwargs["phase"], "q3b")
+            self.assertTrue(report.is_file())
+
     def test_q3b_never_substitutes_shared_scorer_or_blur_only_path(self):
         with mock.patch("xrbench.nvenc_framebank._same_frame_scores", create=True) as scorer:
             # The adapter itself must only delegate to an actual shared scorer.
@@ -151,6 +186,8 @@ class PyroQ3FramebankTests(unittest.TestCase):
                         return 0,'CDF 9/7',''
                 encoded_info=fb.Y4MInfo(cell['stereo_width'],cell['eye_height'],90,1,'420','FULL',1,90)
                 score_info=info; ids=[{'source_frame':i,'source_sha256':'a','encoded_reference_sha256':'b'} for i in range(90)]
-                with mock.patch.object(q3,'validate_plan',return_value=plan), mock.patch.object(q3,'_require_cropped_source',return_value=info), mock.patch.object(q3,'_source_contract',return_value=plan['source']), mock.patch.object(fb,'WindowGuard',return_value=Guard()), mock.patch.object(fb,'required_tools'), mock.patch.object(q3,'verify_split_bundles',return_value={}), mock.patch.object(fb,'hvs_gpu_sanity',return_value={'passed':True}), mock.patch.object(fb,'codec_environment',return_value=({},{})), mock.patch.object(q3,'parse_wave',return_value={'payload_bytes':[1]*90}), mock.patch.object(q3,'_native_records',return_value={'qualified':True}), mock.patch.object(nv,'_stream_q3b_sources',return_value=(encoded_info,score_info,ids,{})) as prep, mock.patch.object(nv,'_reconstruct_q3b_decoded') as expand, mock.patch.object(fb,'canonicalize_decoded_header',return_value={}), mock.patch.object(fb,'_assert_same_frames',side_effect=[encoded_info,score_info]), mock.patch.object(fb,'iter_y4m',return_value=iter((i,None,'d') for i in range(90))), mock.patch.object(q3,'_same_frame_scores',return_value={'centre_hvs':{},'fence_metrics':{}}) as score:
+                encoded_records=[{'source_frame':i,'source_sha256':'b'} for i in range(90)]
+                with mock.patch.object(q3,'validate_plan',return_value=plan), mock.patch.object(q3,'_require_cropped_source',return_value=info), mock.patch.object(q3,'_source_contract',return_value=plan['source']), mock.patch.object(q3,'_hash',return_value='c'*64), mock.patch.object(fb,'WindowGuard',return_value=Guard()), mock.patch.object(fb,'required_tools'), mock.patch.object(q3,'verify_split_bundles',return_value={}), mock.patch.object(fb,'hvs_gpu_sanity',return_value={'passed':True}), mock.patch.object(fb,'codec_environment',return_value=({},{})), mock.patch.object(q3,'parse_wave',return_value={'payload_bytes':[1]*90}), mock.patch.object(q3,'_native_records',return_value={'qualified':True}), mock.patch.object(nv,'_stream_q3b_sources',return_value=(encoded_info,score_info,ids,{})) as prep, mock.patch.object(fb,'frame_records',return_value=encoded_records), mock.patch.object(nv,'_reconstruct_q3b_decoded') as expand, mock.patch.object(fb,'canonicalize_decoded_header',return_value={}), mock.patch.object(fb,'_assert_same_frames',side_effect=[encoded_info,score_info]), mock.patch.object(fb,'iter_y4m',side_effect=lambda *_: iter((i,None,'d') for i in range(90))), mock.patch.object(q3,'_same_frame_scores',return_value={'centre_hvs':{},'fence_metrics':{}}) as score:
                     result=q3.run_plan(root/'plan.json',source,root/('out'+profile),tools,root/'lease',tools_metadata=root/'meta.json',supervised=True)
                 self.assertTrue(prep.called); self.assertTrue(expand.called); self.assertTrue(score.called, result)
+                self.assertEqual(result['cells'][0]['q3b_encoded_source']['frames'],90)

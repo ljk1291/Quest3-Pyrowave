@@ -134,6 +134,7 @@ def build_plan(source: Path, vertical_pixels_per_degree: float, *, projection_ev
                               wavelet=w, rate_mbps=r, fps=90, eye_width=ew, eye_height=eh,
                               stereo_width=ew*2, cap_bytes=fb.cap_bytes(r,90),
                               bits_per_pixel=fb.bpp(fb.cap_bytes(r,90),ew,eh),
+                              encoded_chroma="420",
                               score_vertical_pixels_per_degree=float(vertical_pixels_per_degree),
                               requires_wo8_reduced_encode=True))
     calibration_cells = [base["hvs_calibration"]["codec_cells"][i] for i, _ in pairs]
@@ -189,7 +190,7 @@ def validate_plan(plan: dict) -> dict:
         from .foveation import FoveationConfig, encoded_size
         ew, eh = encoded_size(2624,2776,FoveationConfig(cell["source_transform"]["profile"],cell["source_transform"]["softness"],cell["source_transform"]["blur_only"]))
         cap=fb.cap_bytes(cell["rate_mbps"],90)
-        if (cell.get("eye_width"),cell.get("eye_height"),cell.get("stereo_width")) != (ew,eh,ew*2) or cell.get("cap_bytes") != cap or cell.get("bits_per_pixel") != fb.bpp(cap,ew,eh) or cell.get("score_vertical_pixels_per_degree") != plan["projection"]["vertical_pixels_per_degree"]:
+        if (cell.get("eye_width"),cell.get("eye_height"),cell.get("stereo_width")) != (ew,eh,ew*2) or cell.get("cap_bytes") != cap or cell.get("bits_per_pixel") != fb.bpp(cap,ew,eh) or cell.get("encoded_chroma") != "420" or cell.get("score_vertical_pixels_per_degree") != plan["projection"]["vertical_pixels_per_degree"]:
             raise ValueError("Q3b reduced geometry/cap/scoring contract drifted")
     return plan
 
@@ -231,6 +232,19 @@ def _native_records(path: Path, payloads: list[int]) -> dict:
         raise ValueError("native telemetry values invalid")
     if [r["payload_bytes"] for r in rows] != payloads: raise ValueError("native telemetry payload mismatch")
     return {"qualified": True, "frames": rows, "semantics": {"submit_to_observed_fence_ms": "completion latency, not GPU execution"}}
+
+
+def _q3b_encoded_source_provenance(path: Path, identities: list[dict]) -> dict:
+    """Bind the generated reduced Y4M to the hashes written by the transform."""
+    records = fb.frame_records(path)
+    expected = [{"source_frame": item["source_frame"],
+                 "source_sha256": item["encoded_reference_sha256"]}
+                for item in identities]
+    if records != expected:
+        raise ValueError("q3b_encoded_source_identity_mismatch")
+    return {"sha256": _hash(path), "frames": len(records),
+            "frame_identity_sha256": hashlib.sha256(
+                fb.report_json(records).encode("utf-8")).hexdigest()}
 
 
 def _same_frame_scores(plan, index, cell, tools, guard, directory, source, source_info, decoded, decoded_info, timeout, keep_artifacts, *, reference=None, reference_info=None, matching_blur_reference=None):
@@ -321,6 +335,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
                     score_ref, score_blur = directory / "score-sharp-reference.y4m", directory / "score-blur-reference.y4m"
                     encode_info, score_info, identities, transform = nvenc._stream_q3b_sources(
                         source, info, plan["crop_geometry"], cell["source_transform"], encode_source, score_ref, score_blur)
+                    row["q3b_encoded_source"] = _q3b_encoded_source_provenance(encode_source, identities)
                     row["q3b_transform"] = transform
                 timing = directory / "pyrowave-encode-timing.jsonl"
                 start = time.time(); code, stdout, stderr = guard.run([str(tools["encode"]), str(encode_source), str(encoded), str(cell["cap_bytes"]), "--timing-jsonl", str(timing)], cwd=directory, env=env, timeout_s=command_timeout_s); end = time.time()
@@ -362,7 +377,7 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
 
 
 def sanitized_report(result: dict) -> dict:
-    keep = ("phase", "profile", "wavelet", "rate_mbps", "fps", "eye_width", "eye_height", "stereo_width", "cap_bytes", "bits_per_pixel", "bitstream", "native_encoder_telemetry", "codec_only", "displayed", "crops", "codec_only_windows", "displayed_windows", "crop_windows", "centre_hvs", "fence_metrics", "q3b_transform", "error")
+    keep = ("phase", "profile", "wavelet", "rate_mbps", "fps", "eye_width", "eye_height", "stereo_width", "cap_bytes", "bits_per_pixel", "encoded_chroma", "bitstream", "native_encoder_telemetry", "codec_only", "displayed", "crops", "codec_only_windows", "displayed_windows", "crop_windows", "centre_hvs", "fence_metrics", "q3b_transform", "q3b_encoded_source", "error")
     return {"schema": SCHEMA, "kind": "pyro_q3_framebank_sanitized", "complete": result.get("complete") is True,
             "failure_reasons": list(result.get("failure_reasons", [])), "frozen_plan_sha256": result.get("frozen_plan_sha256"),
             "source_sha256": result.get("source_sha256_end"), "tool_provenance": result.get("tool_provenance_end"),
