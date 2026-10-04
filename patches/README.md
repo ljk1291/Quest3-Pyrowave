@@ -478,6 +478,23 @@ set ALVR_PYROWAVE_DIR=<workspace>\pyrowave-pc
 cargo build -p alvr_server_openvr --release
 ```
 
+### Offline encoder timing sidecar
+
+`pyrowave-encode` keeps its default output unchanged. For an offline frame-bank run, pass
+`--timing-jsonl <path>` after the existing three positional arguments. The optional sidecar writes
+one JSON object per completed frame after all encoder fences have been observed:
+
+```json
+{"schema_version":1,"frame_id":0,"payload_bytes":1234,"cpu_command_record_submit_ms":0.42,"submit_to_observed_fence_ms":1.73}
+```
+
+`frame_id` is zero based and `payload_bytes` is the packet size stored in the PyroWave container.
+The first time is CPU command-recording through return from submission. The second is queue
+completion observed at its fence; it includes queueing and must not be called GPU execution time.
+The encoder retains its two-buffer overlap and writes the sidecar only after the run, so file I/O
+does not perturb the submission cadence being recorded. A Q3 cell accepts the timing evidence only
+when its 90 rows have unique IDs 0 through 89 and all fields are valid.
+
 **Deploying it needs two files, not one.** Linking against `pyrowave-shared.lib` makes
 `driver_alvr_server.dll` depend on `libpyrowave-shared-0.dll` at load time, so that DLL must sit
 beside it in `bin\win64\`. Without it SteamVR fails with
