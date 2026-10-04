@@ -199,6 +199,17 @@ class FoveationTests(unittest.TestCase):
         self.assertEqual(encoded.encoded_eye,(256,256))
         rebuilt=reconstruct_planes(encoded.planes,encoded)
         self.assertEqual(rebuilt[0].shape,y.shape)
+    def test_width_only_h264_has_identity_y_and_invertible_x(self):
+        cfg=FoveationConfig('h264width',.5)
+        size=(2624,2784); packed=encoded_size(*size,cfg)
+        uv=np.array([[[.03,.14],[.31,.72],[.5,.5],[.91,.87]]])
+        forward=forward_map_uv(uv,size,packed,cfg)
+        self.assertLess(float(np.max(np.abs(forward[...,1]-uv[...,1]))),1e-12)
+        # The HLSL mirror deliberately evaluates in float32; the Python oracle
+        # keeps float64 intermediates.
+        self.assertLess(float(np.max(np.abs(hlsl_forward_map_uv(uv,size,packed,cfg)-forward))),5e-8)
+        restored=inverse_map_uv(forward,size,packed,cfg)
+        self.assertLess(float(np.max(np.abs(restored-uv))),1e-9)
     def test_forward_inverse_are_numeric_inverses(self):
         uv=np.array([[[.03,.14],[.31,.72],[.5,.5],[.91,.87]]])
         cfg=FoveationConfig('medium',center_shift=(.1,-.2)); got=inverse_map_uv(forward_map_uv(uv,(2624,2784),(2112,2240),cfg),(2624,2784),(2112,2240),cfg)

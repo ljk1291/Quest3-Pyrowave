@@ -1,0 +1,223 @@
+# Layered after patches/wo8-foveation.patch.
+#
+# This is intentionally a source-only layer. It does not select the profile by
+# default and it must be compiled with the matching server/client source before
+# any live use.  H264WidthOnly is the one opt-in fixed profile whose Y axis is
+# identity.  The explicit verticalIdentity flag avoids treating a full-height
+# centre (where the peripheral band has zero height) as normal foveation.
+
+diff --git a/alvr/session/src/settings.rs b/alvr/session/src/settings.rs
+--- a/alvr/session/src/settings.rs
++++ b/alvr/session/src/settings.rs
+@@ -531,6 +531,8 @@ pub enum FoveationProfile {
+      Medium,
+      #[schema(strings(display_name = "H.264 fit (0.5 / 2x)"))]
+      H264Fit,
++    #[schema(strings(display_name = "H.264 width-only (0.5 / 2x X; identity Y)"))]
++    H264WidthOnly,
+      #[schema(strings(display_name = "Custom"))]
+      Custom,
+  }
+@@ -544,7 +546,7 @@ pub struct FoveatedEncodingConfig {
+-    #[schema(strings(display_name = "Foveation profile", help = "Light, Medium and H.264 fit pin the documented fixed centre and edge values. Custom exposes the advanced values below. The feature remains disabled until its parent switch is enabled."))]
++    #[schema(strings(display_name = "Foveation profile", help = "Light, Medium and H.264 fit foveate both axes. H.264 width-only uses the H.264 fit X axis and an explicit identity Y axis. The feature remains disabled until its parent switch is enabled."))]
+      #[schema(flag = "steamvr-restart")]
+      pub profile: FoveationProfile,
+  
+diff --git a/alvr/server_core/src/connection.rs b/alvr/server_core/src/connection.rs
+--- a/alvr/server_core/src/connection.rs
++++ b/alvr/server_core/src/connection.rs
+@@ -103,6 +103,7 @@ fn openvr_config_with_env(
+                  FoveationProfile::Light => (0.8, 1.5, (0., 0.)),
+                  FoveationProfile::Medium => (0.6, 2.0, (0., 0.)),
+                  FoveationProfile::H264Fit => (0.5, 2.0, (0., 0.)),
++                FoveationProfile::H264WidthOnly => (0.5, 2.0, (0., 0.)),
+                  FoveationProfile::Custom => (config.center_size_x, config.edge_ratio_x,
+                      (config.center_shift_x, config.center_shift_y)),
+              };
+@@ -126,10 +127,14 @@ fn openvr_config_with_env(
+                  (false, 0., 0., 0., 0., 1., 1., 0., false)
+              } else {
+-                let center_y = if matches!(config.profile, FoveationProfile::Custom) {
+-                    config.center_size_y
+-                } else { center };
+-                let edge_y = if matches!(config.profile, FoveationProfile::Custom) {
+-                    config.edge_ratio_y
+-                } else { edge };
++                // 1.0 / 1.0 is a deliberate identity-Y sentinel. The native
++                // layer below branches before the zero-height band algebra.
++                let center_y = match config.profile {
++                    FoveationProfile::H264WidthOnly => 1.0,
++                    FoveationProfile::Custom => config.center_size_y,
++                    _ => center,
++                };
++                let edge_y = match config.profile {
++                    FoveationProfile::H264WidthOnly => 1.0,
++                    FoveationProfile::Custom => config.edge_ratio_y,
++                    _ => edge,
++                };
+                  (true, center, center_y, shift.0, shift.1, edge, edge_y,
+                   config.peripheral_softness, config.blur_only)
+              }
+ 
+diff --git a/alvr/server_openvr/cpp/alvr_server/shader/FoveatedRendering.hlsli b/alvr/server_openvr/cpp/alvr_server/shader/FoveatedRendering.hlsli
+--- a/alvr/server_openvr/cpp/alvr_server/shader/FoveatedRendering.hlsli
++++ b/alvr/server_openvr/cpp/alvr_server/shader/FoveatedRendering.hlsli
+@@ -8,6 +8,8 @@ cbuffer FoveationVars {
+      float2 edgeRatio;
+      float peripheralSoftness;
+      float blurOnly;
++    float verticalIdentity;
++    float3 foveationPadding;
+  };
+  
+diff --git a/alvr/server_openvr/cpp/platform/win32/FFR.cpp b/alvr/server_openvr/cpp/platform/win32/FFR.cpp
+--- a/alvr/server_openvr/cpp/platform/win32/FFR.cpp
++++ b/alvr/server_openvr/cpp/platform/win32/FFR.cpp
+@@ -31,6 +31,10 @@ struct FoveationVars {
+      float edgeRatioY;
+      float peripheralSoftness;
+      float blurOnly;
++    float verticalIdentity;
++    float _padding0;
++    float _padding1;
++    float _padding2;
+  
+      // D3D11 rejects a constant buffer whose size is not a multiple of 16, and the HLSL cbuffer
+@@ -61,14 +65,22 @@ FoveationVars CalculateFoveationVars(
+      float edgeSizeXAligned = floor(edgeSizeX / (edgeRatioX * 2.)) * (edgeRatioX * 2.);
+      float edgeSizeYAligned = floor(edgeSizeY / (edgeRatioY * 2.)) * (edgeRatioY * 2.);
++    // H264WidthOnly arrives as an exact whole-height Y centre / 1x edge
++    // ratio. Branch before the alignment and centre-shift divisions: the
++    // normal formula has a zero-height peripheral band in this case.
++    const bool verticalIdentity = centerSizeY == 1.f && edgeRatioY == 1.f;
++    if (verticalIdentity) {
++        edgeSizeYAligned = targetEyeHeight;
++    }
+  
+      float centerShiftRightXAligned = ceil(centerShiftRightX * edgeSizeXAligned / (edgeRatioX * 2.))
+          * (edgeRatioX * 2.) / edgeSizeXAligned;
+-    float centerShiftRightYAligned = ceil(centerShiftRightY * edgeSizeYAligned / (edgeRatioY * 2.))
+-        * (edgeRatioY * 2.) / edgeSizeYAligned;
++    float centerShiftRightYAligned = verticalIdentity ? 0.f
++        : ceil(centerShiftRightY * edgeSizeYAligned / (edgeRatioY * 2.))
++            * (edgeRatioY * 2.) / edgeSizeYAligned;
+  
+      float foveationScaleX = Settings::Instance().m_foveationBlurOnly ? 1.f : (centerSizeXAligned + (1. - centerSizeXAligned) / edgeRatioX);
+-    float foveationScaleY = Settings::Instance().m_foveationBlurOnly ? 1.f : (centerSizeYAligned + (1. - centerSizeYAligned) / edgeRatioY);
++    float foveationScaleY = (Settings::Instance().m_foveationBlurOnly || verticalIdentity)
++        ? 1.f : (centerSizeYAligned + (1. - centerSizeYAligned) / edgeRatioY);
+@@ -102,6 +114,10 @@ FoveationVars CalculateFoveationVars(
+               // different softness value here.
+               Settings::Instance().m_foveationPeripheralSoftness,
+-             Settings::Instance().m_foveationBlurOnly ? 1.f : 0.f };
++             Settings::Instance().m_foveationBlurOnly ? 1.f : 0.f,
++             verticalIdentity ? 1.f : 0.f,
++             0.f,
++             0.f,
++             0.f };
+  }
+  }
+  
+diff --git a/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl b/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl
+--- a/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl
++++ b/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl
+@@ -35,6 +35,17 @@ float4 main(FoveationPixelInput input) : SV_Target {
+ 
+     float2 loBound = c0 * (shift + 1.) / c2;
+     float2 hiBound = c0 * (shift - 1.) / c2 + 1.;
++    // The C++ producer marks H264WidthOnly explicitly. Give its Y component
++    // finite neutral coefficients before the shared vector mapping runs; then
++    // restore the exact unscaled output Y below. This prevents zero-height
++    // peripheral joins from reaching any division or footprint calculation.
++    if (verticalIdentity > .5) {
++        eyeUV.y = outputEyeUV.y;
++        c0.y = .5;
++        c1.y = 0.;
++        c2.y = 1.;
++        loBound.y = .5;
++        hiBound.y = .5;
++    }
+@@ -52,6 +63,10 @@ float4 main(FoveationPixelInput input) : SV_Target {
+  
+      float2 compressedUV = underBound * leftEdge + inBound * center + overBound * rightEdge;
++    if (verticalIdentity > .5) {
++        compressedUV.y = outputEyeUV.y;
++    }
+      if (blurOnly > .5) compressedUV = outputEyeUV;
+@@ -75,6 +90,9 @@ float4 main(FoveationPixelInput input) : SV_Target {
+      float2 mappingDerivative = underBound * leftDerivative
+          + inBound * (c2 / edgeRatio) + overBound * rightDerivative;
++    if (verticalIdentity > .5) {
++        mappingDerivative.y = 1.;
++    }
+      if (blurOnly > .5) mappingDerivative = float2(1., 1.);
+
+
+diff --git a/alvr/graphics/resources/stream.wgsl b/alvr/graphics/resources/stream.wgsl
+--- a/alvr/graphics/resources/stream.wgsl
++++ b/alvr/graphics/resources/stream.wgsl
+@@ -18,6 +18,7 @@ override VIEW_HEIGHT_RATIO: f32 = 0.0;
+  override EDGE_X_RATIO: f32 = 0.0;
+  override EDGE_Y_RATIO: f32 = 0.0;
++override FFE_IDENTITY_Y: f32 = 0.0;
+  
+@@ -95,6 +96,7 @@ fn fragment_main(@location(0) uv: vec2f) -> @location(0) vec4f {
+          if pc.view_idx == 1 {
+              corrected_uv.x = 1.0 - corrected_uv.x;
+          }
++        let pre_inverse_y = corrected_uv.y;
+  
+          let center = (corrected_uv - c1) * edge_ratio / c2;
+@@ -107,6 +109,10 @@ fn fragment_main(@location(0) uv: vec2f) -> @location(0) vec4f {
+          corrected_uv = under_bound * left_edge + in_bound * center + over_bound * right_edge;
++        if FFE_IDENTITY_Y > 0.5 {
++            // Width-only decodes the regular finite placeholder coefficients
++            // below, then restores the untouched decoded image Y coordinate.
++            corrected_uv.y = pre_inverse_y;
++        }
+  
+diff --git a/alvr/graphics/src/stream.rs b/alvr/graphics/src/stream.rs
+--- a/alvr/graphics/src/stream.rs
++++ b/alvr/graphics/src/stream.rs
+@@ -470,6 +470,24 @@ fn set_passthrough_push_constants(render_pass: &mut RenderPass, config: Option<&
+  }
+  
++/// The fixed server profile overrides the dashboard's numeric fields.  Keep the
++/// receiver's inverse in the same coordinate system. For identity Y, feed the
++/// vector inverse finite H264Fit Y coefficients and let stream.wgsl restore the
++/// decoded Y coordinate before sampling; this avoids evaluating 0/0 joins.
++fn receiver_foveation_profile(mut config: FoveatedEncodingConfig) -> (FoveatedEncodingConfig, bool) {
++    let identity_y = matches!(
++        config.profile,
++        alvr_session::FoveationProfile::H264WidthOnly
++    );
++    if identity_y {
++        config.center_size_x = 0.5;
++        config.edge_ratio_x = 2.0;
++        // Placeholder values are only used by the inactive Y algebra.
++        config.center_size_y = 0.5;
++        config.edge_ratio_y = 2.0;
++    }
++    (config, identity_y)
++}
++
+  pub fn foveated_encoding_shader_constants(
+@@ -478,6 +496,7 @@ pub fn foveated_encoding_shader_constants(
+      view_resolution: UVec2,
+      config: FoveatedEncodingConfig,
+  ) -> (UVec2, HashMap<String, f64>) {
++    let (config, identity_y) = receiver_foveation_profile(config);
+      let view_resolution = view_resolution.as_vec2();
+@@ -514,6 +533,7 @@ pub fn foveated_encoding_shader_constants(
+          ("EDGE_X_RATIO", edge_ratio.x),
+          ("EDGE_Y_RATIO", edge_ratio.y),
++        ("FFE_IDENTITY_Y", if identity_y { 1.0 } else { 0.0 }),
+          ("C2_X", c2.x),
+@@ -1182,6 +1202,7 @@ pub fn foveated_encoding_dynamic_params(
+      config: FoveatedEncodingConfig,
+      center_shift: glam::Vec2,
+  ) -> [f32; 16] {
++    let (config, identity_y) = receiver_foveation_profile(config);
+      let view_resolution = expanded_view_resolution.as_vec2();
++    debug_assert!(!identity_y || (config.center_size_y == 0.5 && config.edge_ratio_y == 2.0));
