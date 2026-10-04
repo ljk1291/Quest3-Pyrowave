@@ -1,9 +1,10 @@
 #!/bin/sh
 # Checks out the upstream sources the beta is built from and applies our patches, into <dest>.
 # sources.lock.json is authoritative: environment variables cannot replace its pins.
-#   <dest>/pyrowave      Themaister/pyrowave at PYROWAVE_BASE + patches/pyrowave-cdf53-haar-experiments2-3.patch,
+#   <dest>/pyrowave      Themaister/pyrowave at PYROWAVE_BASE + the cumulative research/Quest
+#                        overlays and the additive WO-7 RDO-density overlay,
 #                        with Granite (and its submodules) at GRANITE_COMMIT
-# Both patches are cumulative: base + one patch reproduces the measured clone exactly.
+# The research/Quest patches are cumulative; WO-7 applies after both and changes the encoder only.
 # Usage: tools/ci/fetch_sources.sh <dest>
 set -eu
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -45,5 +46,9 @@ git -C "$dest/pyrowave/Granite" submodule update -q --init --recursive --depth 1
     || { echo "Granite is not at $GRANITE_COMMIT"; exit 1; }
 apply_patch "$dest/pyrowave" "$repo/patches/pyrowave-cdf53-haar-experiments2-3.patch"
 apply_patch "$dest/pyrowave" "$repo/patches/quest3-pyrowave.patch"
+expected_rdo_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value pyrowave_rdo_density_patch_sha256)
+actual_rdo_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/pyrowave-rdo-density.patch")
+[ "$actual_rdo_patch" = "$expected_rdo_patch" ] || { echo "WO-7 PyroWave RDO patch hash does not match sources.lock.json" >&2; exit 1; }
+apply_patch "$dest/pyrowave" "$repo/patches/pyrowave-rdo-density.patch"
 
 echo "sources ready in $dest: ALVR ${ALVR_BASE%${ALVR_BASE#???????}}, pyrowave ${PYROWAVE_BASE%${PYROWAVE_BASE#???????}}, Granite ${GRANITE_COMMIT%${GRANITE_COMMIT#???????}}"

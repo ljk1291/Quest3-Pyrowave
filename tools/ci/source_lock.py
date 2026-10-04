@@ -32,17 +32,24 @@ def load():
             and re.fullmatch(r"[A-Za-z0-9_.-]+\.aar", loader.get("android_aar", ""))
             and re.fullmatch(r"[0-9a-f]{64}", loader.get("sha256", ""))):
         raise SystemExit("sources.lock.json: openxr_loader must include a release and SHA-256")
+    patch = data.get("patches", {}).get("pyrowave_rdo_density", {})
+    if (not isinstance(patch, dict) or patch.get("path") != "patches/pyrowave-rdo-density.patch"
+            or not re.fullmatch(r"[0-9a-f]{64}", patch.get("sha256", ""))):
+        raise SystemExit("sources.lock.json: patches.pyrowave_rdo_density must pin the additive patch SHA-256")
     return data
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--github-env", action="store_true")
-    parser.add_argument("--value", choices=("rust", "android_ndk"))
+    parser.add_argument("--value", choices=("rust", "android_ndk", "pyrowave_rdo_density_patch_sha256"))
     args = parser.parse_args()
     data = load()
     if args.value:
-        print(data[args.value])
+        if args.value == "pyrowave_rdo_density_patch_sha256":
+            print(data["patches"]["pyrowave_rdo_density"]["sha256"])
+        else:
+            print(data[args.value])
         return
     values = {
         "ALVR_URL": data["alvr"]["url"],
@@ -57,6 +64,7 @@ def main():
         "OPENXR_LOADER_RELEASE": data["openxr_loader"]["release"],
         "OPENXR_LOADER_AAR": data["openxr_loader"]["android_aar"],
         "OPENXR_LOADER_SHA256": data["openxr_loader"]["sha256"],
+        "PYROWAVE_RDO_DENSITY_PATCH_SHA256": data["patches"]["pyrowave_rdo_density"]["sha256"],
     }
     for key, value in values.items():
         print(f"{key}={value}" if args.github_env else f"{key}={shlex.quote(value)}")

@@ -4,7 +4,8 @@ rem PC has always used:
 rem   build-interop : pyrowave-shared.dll/.lib (-DPYROWAVE_DEVEL=OFF), linked by the ALVR server
 rem   build-pc      : pyrowave-encode.exe / pyrowave-decode.exe (-DPYROWAVE_DEVEL=ON), offline RD
 rem   build-tools   : slangmosh.exe (Granite tools), only needed to regenerate shaders\slangmosh.hpp
-rem Usage: build_pyrowave_pc.cmd [interop] [pc] [tools]   (no arguments = interop pc)
+rem   rdo-test      : CPU-only default-density parity and invalid-input test
+rem Usage: build_pyrowave_pc.cmd [interop] [pc] [rdo-test] [tools]   (no arguments = interop pc rdo-test)
 setlocal
 set "WS=%~dp0..\..\.."
 if not "%XRWIRED_INPUTS%"=="" set "WS=%XRWIRED_INPUTS%"
@@ -13,7 +14,7 @@ if not exist "%PW%\pyrowave.h" ( echo no pyrowave.h under %PW% & exit /b 1 )
 set "GEN=Visual Studio 17 2022"
 if not "%Q3PW_CMAKE_GENERATOR%"=="" set "GEN=%Q3PW_CMAKE_GENERATOR%"
 set "TARGETS=%*"
-if "%TARGETS%"=="" set "TARGETS=interop pc"
+if "%TARGETS%"=="" set "TARGETS=interop pc rdo-test"
 cd /d "%PW%"
 for %%T in (%TARGETS%) do call :%%T || exit /b 1
 echo BUILD_OK
@@ -30,6 +31,12 @@ exit /b 0
 cmake -S . -B build-pc -G "%GEN%" -DCMAKE_BUILD_TYPE=Release -DPYROWAVE_DEVEL=ON -DSHADERC_ENABLE_SHARED_CRT=ON || exit /b 1
 cmake --build build-pc --config Release --target pyrowave-encode pyrowave-decode -j 16 || exit /b 1
 dir /b build-pc\Release\pyrowave-encode.exe build-pc\Release\pyrowave-decode.exe
+exit /b 0
+
+:rdo-test
+if not exist build-pc\pyrowave-rdo-density-test.vcxproj ( echo build-pc is not configured; run pc first & exit /b 1 )
+cmake --build build-pc --config Release --target pyrowave-rdo-density-test -j 16 || exit /b 1
+build-pc\Release\pyrowave-rdo-density-test.exe || exit /b 1
 exit /b 0
 
 :tools
