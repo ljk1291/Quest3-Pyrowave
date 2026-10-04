@@ -142,6 +142,21 @@ def validate_plan(plan: dict) -> dict:
             cell.get("cap_bytes") != fb.cap_bytes(spec["rate_mbps"],90) or
             (spec["runner"] == "pyrowave" and cell.get("rdo_viewing_density") != pyro._rdo_descriptor(spec["rdo_px_per_deg"]))):
             raise ValueError("motion codec row drifted")
+        transform=spec.get("source_transform")
+        if transform:
+            from .foveation import FoveationConfig, encoded_size
+            expected_geometry=encoded_size(2624,2776,FoveationConfig(transform["profile"],transform["softness"],transform["blur_only"]))
+        else:
+            expected_geometry=(2624,2776)
+        if (cell.get("eye_width"),cell.get("eye_height"),cell.get("stereo_width"),cell.get("fps"),cell.get("encoded_chroma")) != (*expected_geometry,expected_geometry[0]*2,90,"420"):
+            raise ValueError("motion encoded geometry or format drifted")
+        if spec["runner"] == "nvenc":
+            expected_profile=nvenc.profile(spec["codec"],spec["rate_mbps"],90,preset=spec["preset"],spatial_aq=False)
+            if cell.get("nvenc_profile") != expected_profile:
+                raise ValueError("motion NVENC profile drifted")
+        elif (cell.get("bits_per_pixel") != fb.bpp(cell["cap_bytes"],*expected_geometry) or
+              cell.get("requires_wo8_reduced_encode") is not True):
+            raise ValueError("motion PyroWave geometry or reduced-encode contract drifted")
     if cells[-1].get("runner") != "reuse_only": raise ValueError("motion diagnostic must never encode")
     return plan
 

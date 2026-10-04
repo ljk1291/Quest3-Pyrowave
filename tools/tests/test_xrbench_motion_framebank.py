@@ -19,8 +19,17 @@ class MotionFramebankTests(unittest.TestCase):
                   "cap_bytes":fb.cap_bytes(spec["rate_mbps"],90),"score_vertical_pixels_per_degree":23.5,
                   "tracked_score":"source_space_fence_residual","quality_windows_one_based":[[1,90],[10,89]]}
             if spec["runner"] == "nvenc":
+                transform=spec.get("source_transform")
+                if transform:
+                    from xrbench.foveation import FoveationConfig, encoded_size
+                    ew,eh=encoded_size(2624,2776,FoveationConfig(transform["profile"],transform["softness"],transform["blur_only"]))
+                else: ew,eh=2624,2776
+                cell.update(eye_width=ew,eye_height=eh,stereo_width=ew*2)
                 cell["nvenc_profile"] = motion.nvenc.profile(spec["codec"],spec["rate_mbps"],90,preset=spec["preset"],spatial_aq=False)
             else:
+                from xrbench.foveation import FoveationConfig, encoded_size
+                transform=spec["source_transform"]; ew,eh=encoded_size(2624,2776,FoveationConfig(transform["profile"],transform["softness"],transform["blur_only"]))
+                cell.update(eye_width=ew,eye_height=eh,stereo_width=ew*2,bits_per_pixel=fb.bpp(cell["cap_bytes"],ew,eh))
                 cell["rdo_viewing_density"] = pyro._rdo_descriptor(spec["rdo_px_per_deg"])
                 cell["requires_wo8_reduced_encode"] = True
             cells.append(cell)
@@ -36,6 +45,9 @@ class MotionFramebankTests(unittest.TestCase):
         self.assertEqual(plan["cells"][-1]["runner"],"reuse_only")
         plan["cells"][0]["rate_mbps"]=500
         with self.assertRaisesRegex(ValueError,"motion codec row drifted"):
+            motion.validate_plan(plan)
+        plan=self.plan(); plan["cells"][0]["nvenc_profile"]["preset"]="p4"
+        with self.assertRaisesRegex(ValueError,"NVENC profile drifted"):
             motion.validate_plan(plan)
 
     def test_command_api_pins_stock_profile_and_pyro_cap_without_execution(self):
