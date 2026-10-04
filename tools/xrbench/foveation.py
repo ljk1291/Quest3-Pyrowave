@@ -68,6 +68,22 @@ def _params(full: int, encoded: int, center_fraction: float, ratio: float, shift
     hi = c0*(shift-1.0)/c2+1.0
     return eye_ratio, c1, c2, lo, hi
 
+def _sample_phase_uv(full: int, encoded: int, center_fraction: float, ratio: float, shift: float) -> float:
+    """Translation that makes a 1:1 aligned centre land on source texel centres.
+
+    ALVR's 32-pixel output allocation can make the centre intercept half-integral.
+    Light at the Q3 crop is the concrete case: its x intercept is 87.5 pixels,
+    so an output centre maps to a source *boundary* and a nominal 1x1 area box
+    averages two texels.  Select the nearest lower texel centre on exact ties.
+    The same formula is zero for the current Medium/H264Fit zero-shift profiles.
+    """
+    if encoded <= 0:
+        raise ValueError("invalid encoded size")
+    _, c1, _, _, _ = _params(full, encoded, center_fraction, ratio, shift)
+    intercept = c1 * full
+    # Keep this tie convention explicit and match the float32 HLSL epsilon.
+    return (math.floor(intercept + 0.5 - 1e-4) - intercept) / full
+
 def forward_map_uv(uv: np.ndarray, full_size: tuple[int,int], encoded_size_: tuple[int,int], config: FoveationConfig) -> np.ndarray:
     """Map encoded UV to full-resolution source UV, matching the HLSL path."""
     uv=np.asarray(uv,dtype=np.float64)
@@ -81,7 +97,8 @@ def forward_map_uv(uv: np.ndarray, full_size: tuple[int,int], encoded_size_: tup
         d2=x*c2; d3=(x-1.0)*c2+1.0
         left=(x/lo)*center+(1.0-x/lo)*d2
         right=((1.0-x)/(1.0-hi))*center+(1.0-(1.0-x)/(1.0-hi))*d3
-        out[...,axis]=np.where(x < lo,left,np.where(x > hi,right,center))
+        mapped=np.where(x < lo,left,np.where(x > hi,right,center))
+        out[...,axis]=mapped + _sample_phase_uv(full, enc, config.center_fraction, config.edge_ratio, shift)
     return out
 
 def hlsl_forward_map_uv(uv: np.ndarray, full_size: tuple[int,int], encoded_size_: tuple[int,int], config: FoveationConfig) -> np.ndarray:
@@ -103,7 +120,11 @@ def hlsl_forward_map_uv(uv: np.ndarray, full_size: tuple[int,int], encoded_size_
         d2=x*c2; d3=(x-np.float32(1.0))*c2+np.float32(1.0)
         left=(x/lo)*center+(np.float32(1.0)-x/lo)*d2
         right=((np.float32(1.0)-x)/(np.float32(1.0)-hi))*center+(np.float32(1.0)-(np.float32(1.0)-x)/(np.float32(1.0)-hi))*d3
-        out[...,axis]=np.where(x < lo,left,np.where(x > hi,right,center))
+        # Match _sample_phase_uv with shader float32 arithmetic. The correction
+        # is a constant coordinate translation, so it does not affect Jacobians.
+        intercept=c1*np.float32(full)
+        phase=(np.floor(intercept+np.float32(.5)-np.float32(1e-4))-intercept)/np.float32(full)
+        out[...,axis]=np.where(x < lo,left,np.where(x > hi,right,center))+phase
     return out
 
 def hlsl_area_weights(source_uv: np.ndarray, footprint: np.ndarray, size: tuple[int,int]) -> tuple[np.ndarray, np.ndarray]:
@@ -151,7 +172,8 @@ def inverse_map_uv(uv: np.ndarray, full_size: tuple[int,int], encoded_size_: tup
             ar=c2*(ratio-1.0)/(ratio*(1.0-hic))
             br=(c2-ratio*c1-2*ratio*c2+c2*ratio*(1.0-hic)+ratio)/(ratio*(1.0-hic))
             cr=(c2*ratio-c2)*(c1-hic+c2*hic)/(ratio*(1.0-hic)**2)
-            source=uv[...,axis]
+            phase=_sample_phase_uv(full, enc, config.center_fraction, config.edge_ratio, 0.0)
+            source=uv[...,axis]-phase
             left=(-bl+np.sqrt(np.maximum(0.0,bl*bl+4.0*al*source)))/(2.0*al)
             right=(-br+np.sqrt(np.maximum(0.0,br*br-4.0*(cr-ar*source))))/(2.0*ar)
             middle=(source-c1)*ratio/c2
@@ -161,7 +183,10 @@ def inverse_map_uv(uv: np.ndarray, full_size: tuple[int,int], encoded_size_: tup
     # duplicating algebra that is easy to get wrong at the aligned join.
     lo=np.zeros(uv.shape[:-1],dtype=np.float64); hi=np.ones_like(lo)
     for axis in range(2):
-        low=lo.copy(); high=hi.copy(); target=uv[...,axis]
+        low=lo.copy(); high=hi.copy()
+        # forward_map_uv includes the phase correction, so bisection solves
+        # directly against the corrected requested source coordinate.
+        target=uv[...,axis]
         for _ in range(42):
             mid=(low+high)*.5
             probe=np.zeros((*mid.shape,2)); probe[...,axis]=mid

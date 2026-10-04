@@ -4,6 +4,18 @@ Local modifications to third-party clones, kept as patches so the clones themsel
 stay out of this history. Each one applies to a public upstream commit, so patch + base fully
 reconstructs the tree.
 
+## `wo8-light-centre-phase.patch`: Light aligned-centre texel phase correction
+
+This overlay stacks immediately after `wo8-foveation.patch`. A 32-pixel packed
+allocation can leave Light's 1:1 centre at a half-source-texel intercept
+(87.5 pixels on the 2624-wide Q3 crop). The overlay translates the sampling
+lattice to texel centres, choosing the lower texel for exact ties. The matching offline
+forward/inverse transform and Quest WGSL inverse apply the same translation.
+The current zero-shift Medium and H.264-fit profiles have integer intercepts,
+so their mappings are unchanged; blur-only remains identity. It is part of the
+opt-in/default-off foveation path and includes a regenerated DXBC shader plus
+a WARP reduced-Light gradient readback gate.
+
 ## `wo8-foveation.patch`: fixed-centre foveated encoding with area prefilter
 
 This opt-in/default-off overlay restores ALVR's `CompressAxisAlignedPixelShader`
@@ -50,10 +62,12 @@ Two traps when regenerating, both of which have silently produced a patch that d
 |---|---|---|---|
 | `alvr-20.13.0-galaxy-xr-client.patch` | `alvr-org/ALVR` | `7eda092` (v20.13.0) | older client-only subset, package `alvr.client.galaxy2013`; superseded by the cumulative patch below, do not stack them |
 | `alvr-20.13.0-server-instrumentation.patch` | `alvr-org/ALVR` | `7eda092` (v20.13.0) | **cumulative: the whole 20.13.0 clone** (71 files: client, PyroWave decoder, streamer, frame ids, bitstream tap, PyroWave encoder, the beta's trimmed settings and streaming profiles, headset telemetry and the dashboard test report; version `20.13.0-pyro.1`); apply it alone |
+| `wo8-light-centre-phase.patch` | `alvr-org/ALVR` | `7eda092` (v20.13.0) plus preceding ALVR overlays through `wo8-foveation.patch` | Light sampling-phase overlay; stack after `wo8-foveation.patch` |
 | `alvr-20.14.1-galaxy-xr-client.patch` | `alvr-org/ALVR` | `a9f6542` (v20.14.1) | the version-comparison client, package `alvr.client.stabletest` |
 | `alvr-ca2deca-XRWIRED.patch` | `alvr-org/ALVR` | `ca2decae968f2fd37b43b777cca4ba597808ba52` | abandoned direct-USB/stereo experiment, package `alvr.client.dev` |
 | `pyrowave-galaxy-xr.patch` | `Themaister/pyrowave` | `d2997ac` | older subset: the standalone decode CLI on Galaxy XR, see below; superseded by the next row |
 | `pyrowave-cdf53-haar-experiments2-3.patch` | `Themaister/pyrowave` | `d2997ac` | **cumulative: the whole pyrowave clone** (14 files incl. the regenerated `shaders/slangmosh.hpp`): Galaxy XR fixes, CDF 5/3 and Haar, precision, the Experiment 3 decoder API; apply it alone |
+| `pyrowave-rdo-density.patch` | `Themaister/pyrowave` | `d2997ac` plus the two PyroWave overlays above | additive encoder-only WO-7 overlay: `PYROWAVE_RDO_PX_PER_DEG`, strict validation and a CPU parity test; apply after the cumulative research and Quest overlays |
 | `openxr-sdk-2b99fec-hello_xr.patch` | `KhronosGroup/OpenXR-SDK-Source` | `2b99fec` | the `hello_xr` distortion-grid / stereo decoder test app (9 files); the repo's `.gitattributes` makes checkouts CRLF, so compare ignoring line endings |
 | `alvr-20.14.1-galaxy-xr-client.stale-20260919.patch` | — | — | superseded snapshot, kept for reference only |
 

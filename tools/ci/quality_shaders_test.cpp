@@ -166,6 +166,30 @@ int main(int argc,char **argv) {
             std::cerr << "compressed foveation did not apply its outer local squeeze: "
                       << fgradient[112*224+8] << " identity " << identityLeft << '\n'; return 1;
         }
+        // Reduced Light geometry with a half-integral aligned central intercept:
+        // target=512, c=.8/r=1.5 -> aligned c=407/512, pre-align output=477,
+        // packed output=480 and c1*target=17.5. Without the phase correction,
+        // output x=240 maps to source coordinate 258.0 and linearly averages
+        // texels 257/258. The corrected shader deliberately ties down to source
+        // texel centre 257.5, therefore returns exactly texel 257.
+        const std::vector<float> lightPhase={
+            u32bits(512),u32bits(512),u32bits(480),u32bits(480),
+            477.f/480.f,477.f/480.f,407.f/512.f,407.f/512.f,0,0,0,0,1.5f,1.5f,0,0};
+        std::vector<float> lightGradient(1024*512);
+        for(unsigned y=0;y<512;y++) for(unsigned x=0;x<1024;x++) {
+            const float rampX=float(x % 512)/511.f;
+            lightGradient[y*1024+x]=(x<512 ? rampX : .5f+.5f*rampX);
+        }
+        auto lightOut=w.draw(foveated.Get(),lightGradient,1024,512,480,480,
+                             lightPhase,{0,0,.5f,1})[0];
+        const float correctedLight=257.f/511.f;
+        const float uncorrectedLight=257.5f/511.f;
+        const float observedLight=lightOut[240*480+240];
+        require(std::abs(observedLight-correctedLight)<2e-5f,
+                "Light central phase did not sample the aligned source texel centre");
+        require(std::abs(observedLight-uncorrectedLight)>.0004f,
+                "Light central phase still averaged neighbouring texels");
+
         std::vector<float> ramp(24);for(unsigned y=0;y<4;y++)for(unsigned x=0;x<6;x++)ramp[y*6+x]=float(x)/5;
         auto fractional=w.draw(area.Get(),ramp,6,4,4,4,params,uv)[0];
         const float expected[]={1.f/15,1.f/3,2.f/3,14.f/15};

@@ -1,9 +1,11 @@
 #!/bin/sh
 # Checks out the upstream sources the beta is built from and applies our patches, into <dest>.
 # sources.lock.json is authoritative: environment variables cannot replace its pins.
-#   <dest>/pyrowave      Themaister/pyrowave at PYROWAVE_BASE + patches/pyrowave-cdf53-haar-experiments2-3.patch,
+#   <dest>/pyrowave      Themaister/pyrowave at PYROWAVE_BASE + the cumulative research/Quest
+#                        overlays and the additive WO-7 RDO-density overlay,
 #                        with Granite (and its submodules) at GRANITE_COMMIT
-# Both patches are cumulative: base + one patch reproduces the measured clone exactly.
+# The ALVR stack is applied in explicit order; the Light phase overlay depends on WO-8.
+# The PyroWave research/Quest patches are cumulative; WO-7 applies after both and changes the encoder only.
 # Usage: tools/ci/fetch_sources.sh <dest>
 set -eu
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -35,6 +37,10 @@ apply_patch "$dest/ALVR-20.13.0" "$repo/patches/quest3-alvr.patch"
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/stable-baseline-alvr.patch"
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/fork-identity-alvr.patch"
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/wo8-foveation.patch"
+expected_wo8_phase_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value wo8_light_centre_phase_patch_sha256)
+actual_wo8_phase_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/wo8-light-centre-phase.patch")
+[ "$actual_wo8_phase_patch" = "$expected_wo8_phase_patch" ] || { echo "WO-8 Light phase patch hash does not match sources.lock.json" >&2; exit 1; }
+apply_patch "$dest/ALVR-20.13.0" "$repo/patches/wo8-light-centre-phase.patch"
 
 checkout "$PYROWAVE_URL" "$dest/pyrowave" "$PYROWAVE_BASE"
 # pyrowave's checkout_granite.sh pins a newer Granite (9d44761), which spiked encoder p99 to 14 ms;
@@ -45,5 +51,9 @@ git -C "$dest/pyrowave/Granite" submodule update -q --init --recursive --depth 1
     || { echo "Granite is not at $GRANITE_COMMIT"; exit 1; }
 apply_patch "$dest/pyrowave" "$repo/patches/pyrowave-cdf53-haar-experiments2-3.patch"
 apply_patch "$dest/pyrowave" "$repo/patches/quest3-pyrowave.patch"
+expected_rdo_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value pyrowave_rdo_density_patch_sha256)
+actual_rdo_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/pyrowave-rdo-density.patch")
+[ "$actual_rdo_patch" = "$expected_rdo_patch" ] || { echo "WO-7 PyroWave RDO patch hash does not match sources.lock.json" >&2; exit 1; }
+apply_patch "$dest/pyrowave" "$repo/patches/pyrowave-rdo-density.patch"
 
 echo "sources ready in $dest: ALVR ${ALVR_BASE%${ALVR_BASE#???????}}, pyrowave ${PYROWAVE_BASE%${PYROWAVE_BASE#???????}}, Granite ${GRANITE_COMMIT%${GRANITE_COMMIT#???????}}"

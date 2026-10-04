@@ -223,7 +223,7 @@ jobs:
       - name: PyroWave and ALVR streamer
         shell: cmd
         run: |
-          call tools\windows\build_pyrowave_pc.cmd interop pc || exit /b 1
+          call tools\windows\build_pyrowave_pc.cmd interop pc rdo-test || exit /b 1
           call tools\windows\build_streamer.cmd || exit /b 1
       - name: Build isolated frame-bank HVS scorer
         shell: pwsh
