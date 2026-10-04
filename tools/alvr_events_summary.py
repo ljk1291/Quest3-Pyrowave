@@ -54,6 +54,14 @@ def summarize(events):
     result["server_fps"] = _stats([g["server_fps"] for g in graph])
     result["bitrate_mbps"] = _stats([g["bitrate_bps"] / 1e6 for g in graph
                                      if g.get("bitrate_bps") is not None])
+    # Byte sizes are only meaningful when the server instrumentation supplied a frame
+    # key. GraphStatistics itself is a sampled stream, so never turn an unkeyed sample
+    # into a claimed frame-size distribution.
+    frame_bytes = [r["video_packet_bytes"] for r in per_frame_rows(events)
+                   if isinstance(r.get("video_packet_bytes"), (int, float))
+                   and r["video_packet_bytes"] >= 0]
+    result["frame_size_bytes"] = _stats(frame_bytes)
+    result["frame_size_sample_count"] = len(frame_bytes)
     lost = [s["packets_lost_total"] for s in summaries]
     result["packets_lost"] = lost[-1] - lost[0] if lost else None
     result["graph_events"] = len(graph)

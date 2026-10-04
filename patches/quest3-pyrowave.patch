@@ -1,5 +1,225 @@
+diff --git a/encode.cpp b/encode.cpp
+index cfcea490d03c86c27960d781aa3e8862248a2d41..c65ec8f28310db551c3ce035fb230bfa2b3cd12f 100644
+--- a/encode.cpp
++++ b/encode.cpp
+@@ -1,6 +1,7 @@
+ // Copyright (c) 2025 Hans-Kristian Arntzen
+ // SPDX-License-Identifier: MIT
+ 
++#include <chrono>
+ #include <string.h>
+ 
+ #include "global_managers_init.hpp"
+@@ -18,13 +19,26 @@ struct EncodedBuffer
+ 	BufferHandle payload;
+ 	BufferHandle meta;
+ 	Fence fence;
++	uint32_t frame_index = 0;
++	std::chrono::steady_clock::time_point command_record_start;
++	std::chrono::steady_clock::time_point submit_returned;
++	bool timing_enabled = false;
++};
++
++struct EncoderFrameTiming
++{
++	uint32_t frame_index = 0;
++	uint32_t payload_bytes = 0;
++	double cpu_command_record_submit_ms = 0.0;
++	double submit_to_observed_fence_ms = 0.0;
+ };
+ 
+ static EncodedBuffer run_encoder_frame(CommandBufferHandle &cmd,
+                                        PyroWave::Encoder &enc,
+                                        const PyroWave::ViewBuffers &inputs,
+                                        uint32_t frame_index,
+-                                       uint32_t bitstream_size)
++                                       uint32_t bitstream_size,
++                                       bool timing_enabled)
+ {
+ 	auto &device = cmd->get_device();
+ 
+@@ -51,6 +65,11 @@ static EncodedBuffer run_encoder_frame(CommandBufferHandle &cmd,
+ 	buffers.bitstream.size = bitstream->get_create_info().size;
+ 	buffers.target_size = bitstream_size;
+ 
++	encoded.frame_index = frame_index;
++	encoded.timing_enabled = timing_enabled;
++	if (timing_enabled)
++		encoded.command_record_start = std::chrono::steady_clock::now();
++
+ 	enc.encode(*cmd, inputs, buffers);
+ 	cmd->copy_buffer(*encoded.payload, *bitstream);
+ 	cmd->copy_buffer(*encoded.meta, *meta);
+@@ -58,6 +77,8 @@ static EncodedBuffer run_encoder_frame(CommandBufferHandle &cmd,
+ 	             VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+ 	             VK_ACCESS_HOST_READ_BIT);
+ 	device.submit(cmd, &encoded.fence);
++	if (timing_enabled)
++		encoded.submit_returned = std::chrono::steady_clock::now();
+ 	device.next_frame_context();
+ 
+ 	LOGI("Submitted frame %06u ...\n", frame_index);
+@@ -99,7 +120,8 @@ static YCbCrImages create_ycbcr_images(Device &device, int width, int height, Vk
+ 	return images;
+ }
+ 
+-static bool write_payload(FILE *file, PyroWave::Encoder &encoder, Device &device, const Buffer &payload, const Buffer &meta)
++static bool write_payload(FILE *file, PyroWave::Encoder &encoder, Device &device, const Buffer &payload, const Buffer &meta,
++                          uint32_t *payload_bytes)
+ {
+ 	auto *mapped_payload = device.map_host_buffer(payload, MEMORY_ACCESS_READ_BIT);
+ 	auto *mapped_meta = device.map_host_buffer(meta, MEMORY_ACCESS_READ_BIT);
+@@ -118,10 +140,54 @@ static bool write_payload(FILE *file, PyroWave::Encoder &encoder, Device &device
+ 	uint32_t u32_size = packet.size;
+ 	if (fwrite(&u32_size, sizeof(u32_size), 1, file) != 1)
+ 		return false;
+-	return fwrite(packetized_data.data() + packet.offset, 1, packet.size, file) == packet.size;
++	if (fwrite(packetized_data.data() + packet.offset, 1, packet.size, file) != packet.size)
++		return false;
++
++	*payload_bytes = u32_size;
++	return true;
++}
++
++static bool write_timing_jsonl(const char *path, const std::vector<EncoderFrameTiming> &timings)
++{
++	auto file = fopen(path, "wb");
++	if (!file)
++		return false;
++
++	for (const auto &timing : timings)
++	{
++		if (fprintf(file,
++		            "{\"schema_version\":1,\"frame_id\":%u,\"payload_bytes\":%u,"
++		            "\"cpu_command_record_submit_ms\":%.6f,\"submit_to_observed_fence_ms\":%.6f}\n",
++		            timing.frame_index, timing.payload_bytes, timing.cpu_command_record_submit_ms,
++		            timing.submit_to_observed_fence_ms) < 0)
++		{
++			fclose(file);
++			return false;
++		}
++	}
++
++	return fclose(file) == 0;
+ }
+ 
+-static void run_encoder(Device &device, const char *out_path, const char *in_path, uint32_t bitstream_size)
++static void collect_frame_timing(std::vector<EncoderFrameTiming> &timings, const EncodedBuffer &encoded,
++	                             uint32_t payload_bytes,
++	                             const std::chrono::steady_clock::time_point &fence_observed)
++{
++	if (!encoded.timing_enabled)
++		return;
++
++	EncoderFrameTiming timing;
++	timing.frame_index = encoded.frame_index;
++	timing.payload_bytes = payload_bytes;
++	timing.cpu_command_record_submit_ms =
++		std::chrono::duration<double, std::milli>(encoded.submit_returned - encoded.command_record_start).count();
++	timing.submit_to_observed_fence_ms =
++		std::chrono::duration<double, std::milli>(fence_observed - encoded.submit_returned).count();
++	timings.push_back(timing);
++}
++
++static void run_encoder(Device &device, const char *out_path, const char *in_path, uint32_t bitstream_size,
++                        const char *timing_jsonl_path)
+ {
+ 	YUV4MPEGFile input;
+ 
+@@ -176,6 +242,10 @@ static void run_encoder(Device &device, const char *out_path, const char *in_pat
+ 
+ 	EncodedBuffer queue[2];
+ 	uint32_t frame_index = 0;
++	const bool timing_enabled = timing_jsonl_path != nullptr;
++	std::vector<EncoderFrameTiming> timings;
++	if (timing_enabled)
++		timings.reserve(256);
+ 
+ 	for (;;)
+ 	{
+@@ -183,12 +253,15 @@ static void run_encoder(Device &device, const char *out_path, const char *in_pat
+ 		if (q.fence)
+ 		{
+ 			q.fence->wait();
++			const auto fence_observed = std::chrono::steady_clock::now();
+ 			q.fence.reset();
+-			if (!write_payload(out.get(), enc, device, *q.payload, *q.meta))
++			uint32_t payload_bytes = 0;
++			if (!write_payload(out.get(), enc, device, *q.payload, *q.meta, &payload_bytes))
+ 			{
+ 				LOGE("Failed to write payload.\n");
+ 				break;
+ 			}
++			collect_frame_timing(timings, q, payload_bytes, fence_observed);
+ 		}
+ 
+ 		if (!input.begin_frame())
+@@ -222,23 +295,36 @@ static void run_encoder(Device &device, const char *out_path, const char *in_pat
+ 			                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+ 		}
+ 
+-		queue[frame_index & 1] = run_encoder_frame(cmd, enc, inputs.views, frame_index, bitstream_size);
++		queue[frame_index & 1] = run_encoder_frame(cmd, enc, inputs.views, frame_index, bitstream_size, timing_enabled);
+ 		frame_index++;
+ 	}
+ 
++	if (frame_index == 0)
++		return;
++
+ 	frame_index--;
+ 
+ 	auto &q = queue[frame_index & 1];
+ 	if (q.fence)
+ 	{
+ 		q.fence->wait();
++		const auto fence_observed = std::chrono::steady_clock::now();
+ 		q.fence.reset();
+-		if (!write_payload(out.get(), enc, device, *q.payload, *q.meta))
++		uint32_t payload_bytes = 0;
++		if (!write_payload(out.get(), enc, device, *q.payload, *q.meta, &payload_bytes))
+ 			LOGE("Failed to write payload.\n");
++		else
++			collect_frame_timing(timings, q, payload_bytes, fence_observed);
+ 	}
++
++	// Flush after all fences have been observed, so the optional timing file cannot perturb
++	// command recording or queue submission for the frames it describes.
++	if (timing_enabled && !write_timing_jsonl(timing_jsonl_path, timings))
++		LOGE("Failed to write timing JSONL.\n");
+ }
+ 
+-static void run_encoder(const char *out_path, const char *in_path, uint32_t bytes_per_frame)
++static void run_encoder(const char *out_path, const char *in_path, uint32_t bytes_per_frame,
++                        const char *timing_jsonl_path)
+ {
+ 	if (!Context::init_loader(nullptr))
+ 		return;
+@@ -251,16 +337,19 @@ static void run_encoder(const char *out_path, const char *in_path, uint32_t byte
+ 	Device dev;
+ 	dev.set_context(ctx);
+ 
+-	run_encoder(dev, out_path, in_path, bytes_per_frame);
++	run_encoder(dev, out_path, in_path, bytes_per_frame, timing_jsonl_path);
+ }
+ 
+ int main(int argc, char **argv)
+ {
+-	if (argc != 4)
++	const char *timing_jsonl_path = nullptr;
++	if (argc == 6 && strcmp(argv[4], "--timing-jsonl") == 0 && argv[5][0] != '\0')
++		timing_jsonl_path = argv[5];
++	else if (argc != 4)
+ 	{
+-		LOGE("Usage: pyrowave-encode <input.y4m> <output.pyrowave> <bytes_per_frame>\n");
++		LOGE("Usage: pyrowave-encode <input.y4m> <output.pyrowave> <bytes_per_frame> [--timing-jsonl <path>]\n");
+ 		return EXIT_FAILURE;
+ 	}
+ 
+-	run_encoder(argv[2], argv[1], strtoul(argv[3], nullptr, 0));
++	run_encoder(argv[2], argv[1], strtoul(argv[3], nullptr, 0), timing_jsonl_path);
+ }
 diff --git a/pyrowave_decoder.cpp b/pyrowave_decoder.cpp
-index 114818c..f2fa70d 100644
+index 114818cbacd0c018982bf4346ddf4414cc1bf9ad..f2fa70d513eab2293a8b968d75af7fc2f3cf5714 100644
 --- a/pyrowave_decoder.cpp
 +++ b/pyrowave_decoder.cpp
 @@ -7,6 +7,8 @@
@@ -93,7 +313,7 @@ index 114818c..f2fa70d 100644
  	cmd.enable_subgroup_size_control(false);
  
 diff --git a/shaders/idwt.comp b/shaders/idwt.comp
-index e910c8b..18803c2 100644
+index e910c8b1630a197b3979a2324caa3799da623114..18803c226c9d976ce639c2efc9e58dcfacd70783 100644
 --- a/shaders/idwt.comp
 +++ b/shaders/idwt.comp
 @@ -222,8 +222,69 @@ void inverse_transform4x2(bool active_lane, int y_offset)
@@ -168,7 +388,7 @@ index e910c8b..18803c2 100644
      load_image_with_apron();
 diff --git a/shaders/idwt_haar_fused.comp b/shaders/idwt_haar_fused.comp
 new file mode 100644
-index 0000000..b2473a6
+index 0000000000000000000000000000000000000000..b2473a6bd8df4cdcb5348321e5ea415ca8a49922
 --- /dev/null
 +++ b/shaders/idwt_haar_fused.comp
 @@ -0,0 +1,89 @@
@@ -263,7 +483,7 @@ index 0000000..b2473a6
 +}
 diff --git a/shaders/quest3-manifest.json b/shaders/quest3-manifest.json
 new file mode 100644
-index 0000000..694ae14
+index 0000000000000000000000000000000000000000..694ae145e56b12f2463b0bb6089b8579d9617a09
 --- /dev/null
 +++ b/shaders/quest3-manifest.json
 @@ -0,0 +1,12 @@
@@ -280,7 +500,7 @@ index 0000000..694ae14
 +  "shaders/slangmosh.hpp": "4f84897f9d7fbb07cbc5ccba6d98bc83b85f697ca170578ba959118c84032995"
 +}
 diff --git a/shaders/slangmosh.hpp b/shaders/slangmosh.hpp
-index 9b8de39..6114ea7 100644
+index 9b8de3958b25b7599be100c191b28f7b3a61aba2..6114ea75973ec66ae3d6b0937aedc5798287c044 100644
 --- a/shaders/slangmosh.hpp
 +++ b/shaders/slangmosh.hpp
 @@ -24,6 +24,7 @@ struct Shaders
@@ -12637,7 +12857,7 @@ index 9b8de39..6114ea7 100644
  }
  #endif
 diff --git a/shaders/slangmosh.json b/shaders/slangmosh.json
-index da294ff..b7bbaf3 100644
+index da294ffc62396adc23e04790aca6401e21744e07..b7bbaf3ee477268207142d595b0b1199829c143e 100644
 --- a/shaders/slangmosh.json
 +++ b/shaders/slangmosh.json
 @@ -1,71 +1,110 @@
@@ -12821,7 +13041,7 @@ index da294ff..b7bbaf3 100644
 +  ]
  }
 diff --git a/shaders/wavelet_dequant.comp b/shaders/wavelet_dequant.comp
-index ebce604..42fa782 100644
+index ebce6047ed1ff02e11ab67138f0f1a7818342332..42fa7821997ead9c7964f4d1f3d53b9dff3722e0 100644
 --- a/shaders/wavelet_dequant.comp
 +++ b/shaders/wavelet_dequant.comp
 @@ -57,6 +57,7 @@ layout(push_constant) uniform Registers
