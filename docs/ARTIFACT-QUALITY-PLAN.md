@@ -47,8 +47,15 @@ WO-10, WO-8 and WO-13 are merged; WO-12 remains an audit and WO-11 a design.
 WO-8's resolved source `e61621d` passed full Android/Windows CI and merged as
 `55bb65b`. All runtime features remain opt-in/default-off. Q3b adapter PR #36 and
 exact-score reuse PR #37 passed CPU CI and merged as `c80fb3f` / `150dcff`;
-51 combined CPU tests pass. Ten Q3a NVENC rows are complete under a clean closed
-quality lease. The final combined ranking waits for five Pyro Q3a and ten Q3b rows.
+51 combined CPU tests pass. All ten NVENC and five Pyro Q3a rows are complete
+under clean closed quality leases; the final combined ranking waits for ten Q3b
+rows. The first Q3b attempt stopped cleanly during CPU reference preparation,
+before encoding, to repair redundant per-tile summed-area-table construction.
+Retain its partial references for exact-output verification and resume with new
+attempt paths; no completed Q3a encode needs repeating. PR #39 merged as `3512b19`
+after 53 focused CPU tests, independent review and green CPU CI; the first retained
+Metro frame matches bit-for-bit. This caches CPU preparation only, with no runtime
+decoder or image-filter change.
 CPU preparation found stale rate/encoded-calibration metadata on the Q3b SBS row;
 PR #38 (`9d55e32`) repaired it after CPU CI and independent review. Expanded-space
 scoring calibration is unchanged; the actual frozen Metro plan now validates. No runtime,

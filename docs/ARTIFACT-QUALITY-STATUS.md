@@ -47,8 +47,19 @@ WO-10, WO-8 and WO-13 are merged; WO-12's audit and WO-11's design are merged.
 The Q3b CPU preflight caught stale per-stream bitrate and encoded calibration
 metadata. [PR #38](https://github.com/ljk1291/Quest3-Pyrowave/pull/38) corrected them
 as `9d55e32` after [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37169330331)
-and independent review; actual expanded-space scoring calibration is unchanged. The five
-Pyro Q3a and ten Q3b rows, combined report and final stable pair remain outstanding.
+and independent review; actual expanded-space scoring calibration is unchanged.
+All five cropped Pyro Q3a rows are now complete with clean lease closure. CDF 9/7
+at 1000 Mbps leads them (trimmed fence edge PSNR 35.754 dB, temporal residual p99
+19 luma codes); cropped AV1/200 remains ahead (43.747 dB, p99 8). No timing pass.
+The first Q3b cell was deliberately stopped during CPU reference preparation,
+before any codec encode: the area-filter helper rebuilt a full-plane summed-area
+table for every tile. Its lease closed with zero jobs/errors; partial references
+are retained for byte-identity checks. [PR #39](https://github.com/ljk1291/Quest3-Pyrowave/pull/39)
+merged the exact-output CPU cache as `3512b19` after 53 focused CPU tests,
+independent review and [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37171100761).
+The rebuilt first retained Metro frame is bit-identical. Resume only the ten
+Q3b cells under new attempt paths with the repaired module hashes. Combined publication
+and the final stable pair remain outstanding; the 15 completed Q3a rows are retained.
 The earlier [preflight stop](../results/q3a-preflight-blocked-2026-10-04.json) remains
 historical evidence; no arm, headset, installed-pair or settings changes occurred.
 
