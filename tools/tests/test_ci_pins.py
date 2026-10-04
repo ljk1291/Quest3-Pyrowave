@@ -45,7 +45,8 @@ def test_fetch_script_reads_lock_and_applies_the_complete_alvr_stack_in_order():
     script = (REPO / "tools/ci/fetch_sources.sh").read_text()
     assert "source_lock.py" in script
     names = ("alvr-20.13.0-server-instrumentation.patch", "quest3-alvr.patch",
-             "stable-baseline-alvr.patch", "fork-identity-alvr.patch")
+             "stable-baseline-alvr.patch", "fork-identity-alvr.patch", "wo8-foveation.patch",
+             "wo8-light-centre-phase.patch")
     positions = [script.index(name) for name in names]
     assert positions == sorted(positions)
 
@@ -63,6 +64,37 @@ def test_fetch_script_applies_rdo_density_after_the_pyrowave_overlays():
     assert expected["sha256"] == hashlib.sha256((REPO / expected["path"]).read_bytes()).hexdigest()
 
 
+def test_light_phase_patch_is_pinned_and_verified_before_application():
+    import hashlib
+    expected = LOCK["patches"]["wo8_light_centre_phase"]
+    assert expected["path"] == "patches/wo8-light-centre-phase.patch"
+    patch = REPO / expected["path"]
+    assert patch.is_file()
+    assert expected["sha256"] == hashlib.sha256(patch.read_bytes()).hexdigest()
+    script = (REPO / "tools/ci/fetch_sources.sh").read_text()
+    assert script.index("wo8-foveation.patch") < script.index("wo8-light-centre-phase.patch")
+    assert "--value wo8_light_centre_phase_patch_sha256" in script
+
+
+def test_source_lock_rejects_malformed_light_phase_pin(tmp_path):
+    sys.path.insert(0, str(REPO / "tools/ci"))
+    try:
+        import source_lock
+    finally:
+        sys.path.pop(0)
+    duplicate = json.loads(json.dumps(LOCK))
+    duplicate["patches"]["wo8_light_centre_phase"]["sha256"] = "not-a-sha"
+    duplicate_path = tmp_path / "sources.lock.json"
+    duplicate_path.write_text(json.dumps(duplicate), encoding="utf-8")
+    original = source_lock.LOCK
+    source_lock.LOCK = duplicate_path
+    try:
+        with pytest.raises(SystemExit, match="wo8_light_centre_phase"):
+            source_lock.load()
+    finally:
+        source_lock.LOCK = original
+
+
 def test_workflow_loads_pins_from_the_lock_before_building():
     workflow = (REPO / ".github/workflows/ci.yml").read_text()
     assert workflow.count("source_lock.py --github-env") >= 3
@@ -77,6 +109,7 @@ def test_lock_emitter_uses_exact_values():
     assert actual["ALVR_BASE"] == LOCK["alvr"]["commit"]
     assert actual["PYROWAVE_BASE"] == LOCK["pyrowave"]["commit"]
     assert actual["GRANITE_COMMIT"] == LOCK["granite"]["commit"]
+    assert actual["WO8_LIGHT_CENTRE_PHASE_PATCH_SHA256"] == LOCK["patches"]["wo8_light_centre_phase"]["sha256"]
 
 
 def test_toolchain_is_read_from_the_lock_by_posix_builds():

@@ -37,6 +37,9 @@ apply_patch "$dest/ALVR-20.13.0" "$repo/patches/quest3-alvr.patch"
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/stable-baseline-alvr.patch"
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/fork-identity-alvr.patch"
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/wo8-foveation.patch"
+expected_wo8_phase_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value wo8_light_centre_phase_patch_sha256)
+actual_wo8_phase_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/wo8-light-centre-phase.patch")
+[ "$actual_wo8_phase_patch" = "$expected_wo8_phase_patch" ] || { echo "WO-8 Light phase patch hash does not match sources.lock.json" >&2; exit 1; }
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/wo8-light-centre-phase.patch"
 
 checkout "$PYROWAVE_URL" "$dest/pyrowave" "$PYROWAVE_BASE"
