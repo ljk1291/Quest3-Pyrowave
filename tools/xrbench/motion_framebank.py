@@ -51,6 +51,28 @@ def _load_contract(manifest: Path) -> dict:
     frames = doc.get("frames")
     if not isinstance(frames, list) or len(frames) != 90:
         raise ValueError("synthetic motion manifest must retain 90 layouts")
+    if [row.get("frame_one_based") for row in frames] != list(range(1, 91)):
+        raise ValueError("synthetic motion frame numbering drifted")
+    offsets = [row.get("displacement_x_pixels") for row in frames]
+    if (any(type(value) is not int for value in offsets) or
+            any(abs(offsets[index] - offsets[index - 1]) != 16 for index in range(1, 90))):
+        raise ValueError("synthetic motion 16-pixel step drifted")
+    source_fence = None
+    for row in frames:
+        left, right = row.get("left_source_window", {}), row.get("right_source_window", {})
+        rect = row.get("tracked_fence_output", {})
+        if (left.get("width"), left.get("height"), right.get("width"), right.get("height")) != (2624, 2776, 2624, 2776):
+            raise ValueError("synthetic motion eye geometry drifted")
+        if left.get("y") != right.get("y") or left.get("x") - right.get("x") != 108:
+            raise ValueError("synthetic motion eye offsets are inconsistent")
+        if not (0 <= left.get("x", -1) <= 448 and 0 <= right.get("x", -1) <= 448 and
+                0 <= rect.get("x", -1) and rect.get("x", 0) + rect.get("width", 0) <= 2624 and
+                rect.get("y") == 1036 and rect.get("width") == 240 and rect.get("height") == 274):
+            raise ValueError("synthetic motion crop or tracked fence leaves bounds")
+        if source_fence is None:
+            source_fence = row.get("tracked_fence_source")
+        elif row.get("tracked_fence_source") != source_fence:
+            raise ValueError("synthetic motion source fence drifted")
     if doc.get("score_windows") != {"spatial_one_based":[1,90], "temporal_one_based":[10,89], "temporal_pairs":79}:
         raise ValueError("synthetic motion windows drifted")
     return {"sha256": hashlib.sha256(raw).hexdigest(), "document": doc}
@@ -115,7 +137,10 @@ def validate_plan(plan: dict) -> dict:
     if [c.get("experiment_id") for c in cells] != [c["experiment_id"] for c in MOTION_ROWS] + ["motion_view_haar_full_parent_500_default_rdo"]:
         raise ValueError("motion cells drifted")
     for cell,spec in zip(cells,MOTION_ROWS):
-        if any(cell.get(k) != v for k,v in spec.items()) or cell.get("cap_bytes") != fb.cap_bytes(spec["rate_mbps"],90):
+        immutable={k:v for k,v in spec.items() if k != "rdo_px_per_deg"}
+        if (any(cell.get(k) != v for k,v in immutable.items()) or
+            cell.get("cap_bytes") != fb.cap_bytes(spec["rate_mbps"],90) or
+            (spec["runner"] == "pyrowave" and cell.get("rdo_viewing_density") != pyro._rdo_descriptor(spec["rdo_px_per_deg"]))):
             raise ValueError("motion codec row drifted")
     if cells[-1].get("runner") != "reuse_only": raise ValueError("motion diagnostic must never encode")
     return plan

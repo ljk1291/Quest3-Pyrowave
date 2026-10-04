@@ -1,6 +1,8 @@
 """CPU contracts for the separate synthetic-motion adapter; no codec is invoked."""
 from pathlib import Path
 import sys
+import json
+import tempfile
 import unittest
 from unittest import mock
 
@@ -59,4 +61,24 @@ class MotionFramebankTests(unittest.TestCase):
             report=motion.disk_preflight(Path("C:/temp/cell"),cell)
         self.assertTrue(report["passes"]); self.assertTrue(report["source_is_reused"])
 
+    def test_manifest_contract_rejects_step_eye_and_fence_drift(self):
+        rows=[]
+        for index in range(90):
+            phase=index%40; d=-160+16*phase if phase <= 20 else 160-16*(phase-20)
+            rows.append({"frame_one_based":index+1,"displacement_x_pixels":d,
+                         "left_source_window":{"x":278+d,"y":274,"width":2624,"height":2776},
+                         "right_source_window":{"x":170+d,"y":274,"width":2624,"height":2776},
+                         "tracked_fence_output":{"x":1462-d,"y":1036,"width":240,"height":274},
+                         "tracked_fence_source":{"eye":"left","x":1740,"y":1310,"width":240,"height":274}})
+        doc={"kind":"synthetic_integer_pixel_pingpong_motion","synthetic_not_actual_vr_tracking":True,
+             "motion_header":{"width":5248,"height":2776,"frames":90,"fps":[90,1],"chroma":"420","color_range":"FULL"},
+             "score_windows":{"spatial_one_based":[1,90],"temporal_one_based":[10,89],"temporal_pairs":79},"frames":rows}
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/"manifest.json"; path.write_text(json.dumps(doc))
+            self.assertEqual(motion._load_contract(path)["document"]["frames"][0]["frame_one_based"],1)
+            doc["frames"][1]["displacement_x_pixels"] = -160; path.write_text(json.dumps(doc))
+            with self.assertRaisesRegex(ValueError,"16-pixel step"):
+                motion._load_contract(path)
+
 if __name__ == "__main__": unittest.main()
+

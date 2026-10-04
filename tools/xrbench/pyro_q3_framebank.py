@@ -156,6 +156,12 @@ def _extension_transform(spec: dict, light_phase_identity: dict | None) -> dict 
 
 def _extension_matrix(rows: tuple[dict, ...], light_phase_identity: dict | None, *, kind: str) -> dict:
     """Exact, schema-visible identity for an additive extension matrix."""
+    # Historical extension plans and their retained result records use this
+    # exact object.  Do not add a generic kind or static-source label here.
+    if rows is Q3_EXTENSION_ROWS:
+        return {"runner":"pyrowave", "historical_q3b_dropped":["h264-dual-blur-light-s05-700"],
+                "light_phase_identity":_light_phase_identity(light_phase_identity), "quality_windows_one_based":[[1,90],[10,89]], "fence_and_hvs_required":True,
+                "offline_only_above_wifi_cap_mbps":[1500,2000]}
     common = {"runner": "pyrowave", "kind": kind,
               "quality_windows_one_based": [[1, 90], [10, 89]],
               "fence_and_hvs_required": True,
@@ -163,9 +169,6 @@ def _extension_matrix(rows: tuple[dict, ...], light_phase_identity: dict | None,
     if any(row.get("requires_light_phase_identity") or
            row["experiment_id"] == "q3b_phase_pyro_97_light_s05_default_rdo" for row in rows):
         common["light_phase_identity"] = _light_phase_identity(light_phase_identity)
-    if rows is Q3_EXTENSION_ROWS:
-        common.update({"historical_q3b_dropped": ["h264-dual-blur-light-s05-700"],
-                       "offline_only_above_wifi_cap_mbps": [1500, 2000]})
     return common
 
 
@@ -366,7 +369,7 @@ def build_overnight_full_a2_plan(source: Path, vertical_pixels_per_degree: float
 def _extension_rows_for_matrix(extension: dict) -> tuple[dict, ...]:
     if not isinstance(extension, dict):
         raise ValueError("Q3 extension matrix is invalid")
-    if extension.get("kind") == "owner_quality_extension":
+    if "kind" not in extension:
         return Q3_EXTENSION_ROWS
     if extension.get("kind") == "overnight_static_rdo":
         return Q3_OVERNIGHT_STATIC_ROWS
