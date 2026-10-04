@@ -31,6 +31,36 @@ RESTORE_LOCK_ATTEMPTS = 3
 
 class Refusal(RuntimeError): pass
 
+def is_comfy_backend_process(row):
+    """Recognize a backend launch, not a tool mentioning a ComfyUI directory."""
+    name = str(row.get('Name', '')).casefold()
+    if name in ('comfyui.exe', 'comfy.exe'):
+        return True
+    if not re.fullmatch(r'(?:python(?:w|\d+(?:\.\d+)*)?|py)\.exe', name):
+        return False
+    command = row.get('CommandLine')
+    if not command:
+        # A Python process with unreadable arguments remains a conservative
+        # candidate; queue/compute checks must not infer that it is idle.
+        return True
+    try:
+        args = [arg.strip('"') for arg in shlex.split(command, posix=False)][1:]
+    except ValueError:
+        return True
+    for index, arg in enumerate(args):
+        if arg == '-c':
+            return False
+        if arg == '-m':
+            module = args[index + 1].casefold() if index + 1 < len(args) else ''
+            return module in ('comfy', 'comfyui') or module.startswith('comfyui.')
+        if arg.casefold().endswith('.py'):
+            entry = arg.replace('\\', '/').casefold()
+            executable = str(row.get('ExecutablePath', '')).casefold()
+            return (entry.rsplit('/', 1)[-1] == 'main.py' and
+                    ('comfy' in entry or 'comfy' in executable or
+                     re.search(r'--port(?:\s+|=)8192(?:\s|$)', command) is not None))
+    return False
+
 class _BerlinFallback(tzinfo):
     """EU DST fallback for the owner-approved Europe/Berlin Windows host."""
     @staticmethod
@@ -254,10 +284,17 @@ class Host:
         return self.run('tasklist','/FO','CSV','/NH',timeout=10).lower() if os.name=='nt' else ''
     def _comfy_pids(self):
         if os.name != 'nt': return []
-        script="Get-CimInstance Win32_Process | Where-Object {$_.ProcessId -ne $PID -and $_.Name -notin @('powershell.exe','pwsh.exe') -and $_.CommandLine -match 'ComfyUI|--port\\s+8192|:8192'} | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"
+        script=("$ErrorActionPreference='Stop'; ConvertTo-Json -Compress -InputObject "
+                "@(Get-CimInstance Win32_Process | Where-Object {"
+                "$_.Name -match '^(python(w|[0-9.]+)?|py|comfyui|comfy)\\.exe$'} | "
+                "Select-Object ProcessId,Name,ExecutablePath,CommandLine)")
         try:
-            data=json.loads(self.run('powershell','-NoProfile','-NonInteractive','-Command',script,timeout=8)); return data if isinstance(data,list) else ([data] if data else [])
-        except Exception: return []
+            data=json.loads(self.run('powershell','-NoProfile','-NonInteractive','-Command',script,timeout=8))
+            if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
+                raise ValueError('invalid backend process inventory')
+            return [row for row in data if is_comfy_backend_process(row)]
+        except Exception:
+            return [{'discovery_error': 'backend_process_inventory_unavailable'}]
     def _comfy_queue(self):
         url=os.environ.get('Q3PW_COMFY_URL','http://127.0.0.1:8192')+'/queue'
         try:
@@ -294,6 +331,8 @@ class Host:
         """Record compute contention without treating every Python/service process as GPU work."""
         comfy_pids=self._comfy_pids(); comfy_running=bool(comfy_pids)
         comfy=self._comfy_queue() if comfy_running else {'known':True,'running':0,'pending':0,'error':None}
+        if any(row.get('discovery_error') for row in comfy_pids):
+            comfy={'known':False,'running':None,'pending':None,'error':'backend_process_inventory_unavailable'}
         conflicts=[]
         if comfy_running and (not comfy['known'] or comfy['running'] or comfy['pending']): conflicts.append('comfy_queue_active_or_unknown')
         apps=[]; activity=None; executable=shutil.which('nvidia-smi') or shutil.which('nvidia-smi.exe')
