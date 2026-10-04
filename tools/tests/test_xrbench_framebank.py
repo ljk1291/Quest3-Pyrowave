@@ -470,6 +470,10 @@ class FrameBankTests(unittest.TestCase):
                                'new': 'patches/pyrowave-rdo-live-readback.patch', 'role': 'observability_only'},
                               {'path': 'patches.pyrowave_rdo_live_readback.sha256', 'old': None,
                                'new': '2a8c8e151689204d05c8f8ebd480ea297a76bd3ece2c6c81997ee15d1f370f96', 'role': 'observability_only'},
+                              {'path': 'patches.pyrowave_rdo_session_setting.path', 'old': None,
+                               'new': 'patches/pyrowave-rdo-session-setting.patch', 'role': 'session_rdo_setting_only'},
+                              {'path': 'patches.pyrowave_rdo_session_setting.sha256', 'old': None,
+                               'new': 'e9f88932659a892d5c4a5a6e597e817e02d3738450838d6c7434e652fb4b5f9e', 'role': 'session_rdo_setting_only'},
                               {'path': 'patches.wo8_light_centre_phase.path', 'old': None,
                                'new': 'patches/wo8-light-centre-phase.patch', 'role': 'presentation_foveation_only'},
                               {'path': 'patches.wo8_light_centre_phase.sha256', 'old': None,
@@ -477,7 +481,11 @@ class FrameBankTests(unittest.TestCase):
                               {'path': 'patches.alvr_pyrowave_rdo_live_readback.path', 'old': None,
                                'new': 'patches/alvr-pyrowave-rdo-live-readback.patch', 'role': 'observability_only'},
                               {'path': 'patches.alvr_pyrowave_rdo_live_readback.sha256', 'old': None,
-                               'new': 'd32a96c6456f13ace911db9298800f1c7da9ebf9f75296b3b3c668489a2bb94d', 'role': 'observability_only'}]}
+                               'new': 'd32a96c6456f13ace911db9298800f1c7da9ebf9f75296b3b3c668489a2bb94d', 'role': 'observability_only'},
+                              {'path': 'patches.alvr_pyrowave_rdo_session_setting.path', 'old': None,
+                               'new': 'patches/alvr-pyrowave-rdo-session-setting.patch', 'role': 'session_rdo_setting_only'},
+                              {'path': 'patches.alvr_pyrowave_rdo_session_setting.sha256', 'old': None,
+                               'new': '0b334f0d1a2efd75a6c5178a9cb0401240d5f85fcd512fee07ada83f39e9943a', 'role': 'session_rdo_setting_only'}]}
             descriptor_path = folder / 'compatibility.json'; descriptor_path.write_text(json.dumps(descriptor))
             with self.assertRaisesRegex(ValueError, 'not the reviewed tracked proof'):
                 fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)

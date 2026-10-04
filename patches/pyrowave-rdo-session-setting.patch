@@ -1,0 +1,157 @@
+diff --git a/pyrowave.h b/pyrowave.h
+index 1202565d746d22befe5bf472d90446ccafc2a104..277efe909a420bed7190a991f8c760a96a49509c 100644
+--- a/pyrowave.h
++++ b/pyrowave.h
+@@ -371,6 +371,9 @@ typedef struct pyrowave_encoder_create_info
+ 	int height;
+ 	pyrowave_chroma_subsampling chroma;
+ 	pyrowave_wavelet wavelet;
++	// Zero preserves the existing environment/legacy RDO selection. A positive
++	// value is an embedding application's explicit viewing-density override.
++	float rdo_pixels_per_degree;
+ } pyrowave_encoder_create_info;
+ 
+ // Read-only state retained by an initialized encoder. The values are reported
+diff --git a/pyrowave_c.cpp b/pyrowave_c.cpp
+index 8f57e84e87800133074972147743d1b2ef5a019f..73114e29e207387bb1a63b18f9bd96f752e61bce 100644
+--- a/pyrowave_c.cpp
++++ b/pyrowave_c.cpp
+@@ -9,6 +9,7 @@
+ #include "pyrowave_decoder.hpp"
+ #include "pyrowave_encoder.hpp"
+ #include "logging.hpp"
++#include <cmath>
+ 
+ using namespace Granite;
+ using namespace Vulkan;
+@@ -841,6 +842,9 @@ pyrowave_encoder_create(const pyrowave_encoder_create_info *info, pyrowave_encod
+ 
+ 	if (info->width <= 0 || info->height <= 0)
+ 		return PYROWAVE_ERROR_INVALID_ARGUMENT;
++	if (!std::isfinite(info->rdo_pixels_per_degree) || info->rdo_pixels_per_degree < 0.0f ||
++	    info->rdo_pixels_per_degree > 10000.0f)
++		return PYROWAVE_ERROR_INVALID_ARGUMENT;
+ 
+ 	if (info->chroma == PYROWAVE_CHROMA_SUBSAMPLING_420 && (info->width % 2 || info->height % 2))
+ 		return PYROWAVE_ERROR_INVALID_ARGUMENT;
+@@ -853,7 +857,8 @@ pyrowave_encoder_create(const pyrowave_encoder_create_info *info, pyrowave_encod
+ 	enc->height = info->height;
+ 
+ 	if (!enc->encoder.init(&info->device->device, info->width, info->height, enc->chroma,
+-	                       info->wavelet == PYROWAVE_WAVELET_CDF53, info->wavelet == PYROWAVE_WAVELET_HAAR))
++	                       info->wavelet == PYROWAVE_WAVELET_CDF53, info->wavelet == PYROWAVE_WAVELET_HAAR,
++	                       info->rdo_pixels_per_degree))
+ 	{
+ 		delete enc;
+ 		return PYROWAVE_ERROR_GENERIC;
+diff --git a/pyrowave_encoder.cpp b/pyrowave_encoder.cpp
+index 8f2d1f12c34c55f76058dc5e403745d4be7b3bcc..98813f2191d1603b81fe248d0d9d45608fde7e4c 100644
+--- a/pyrowave_encoder.cpp
++++ b/pyrowave_encoder.cpp
+@@ -1247,18 +1247,21 @@ Encoder::Encoder()
+ 	impl.reset(new Impl);
+ }
+ 
+-bool Encoder::init(Device *device, int width_, int height_, ChromaSubsampling chroma_, bool legall53_, bool haar_)
++bool Encoder::init(Device *device, int width_, int height_, ChromaSubsampling chroma_, bool legall53_, bool haar_,
++                   float rdo_pixels_per_degree)
+ {
+-	const char *requested_rdo_density = std::getenv("PYROWAVE_RDO_PX_PER_DEG");
+-	impl->rdo_density = parse_rdo_pixels_per_degree(requested_rdo_density);
++	const bool has_embedding_override = rdo_pixels_per_degree > 0.0f;
++	const char *requested_rdo_density = has_embedding_override ? nullptr : std::getenv("PYROWAVE_RDO_PX_PER_DEG");
++	impl->rdo_density = has_embedding_override
++		? rdo_density_from_pixels_per_degree(rdo_pixels_per_degree)
++		: parse_rdo_pixels_per_degree(requested_rdo_density);
+ 	if (!impl->rdo_density.valid)
+ 	{
+-		LOGE("PYROWAVE_RDO_PX_PER_DEG must be a finite value in (0, 10000], got '%s'.\n",
+-		     requested_rdo_density ? requested_rdo_density : "");
++		LOGE("PyroWave RDO density must be finite and in (0, 10000].\n");
+ 		return false;
+ 	}
+ 	LOGI("PyroWave RDO viewing density: requested %s, effective %.9g px/deg, Nyquist %.9g cycles/deg%s.\n",
+-	     requested_rdo_density && *requested_rdo_density ? requested_rdo_density : "(legacy 96 DPI @ 1m)",
++	     has_embedding_override ? "embedding override" : requested_rdo_density && *requested_rdo_density ? requested_rdo_density : "(legacy 96 DPI @ 1m)",
+ 	     impl->rdo_density.pixels_per_degree,
+ 	     rdo_cpd_nyquist(impl->rdo_density),
+ 	     impl->rdo_density.legacy_equivalent ? " (legacy-equivalent)" : "");
+diff --git a/pyrowave_encoder.hpp b/pyrowave_encoder.hpp
+index da531801af21e74a07097d1ef659954284a7c1a7..7fde899fe1909c10891bde5d764f872bff7f6565 100644
+--- a/pyrowave_encoder.hpp
++++ b/pyrowave_encoder.hpp
+@@ -34,7 +34,8 @@ public:
+ 		size_t target_size;
+ 	};
+ 
+-	bool init(Vulkan::Device *device, int width, int height, ChromaSubsampling chroma, bool legall53 = false, bool haar = false);
++	bool init(Vulkan::Device *device, int width, int height, ChromaSubsampling chroma, bool legall53 = false,
++	          bool haar = false, float rdo_pixels_per_degree = 0.0f);
+ 	bool encode(Vulkan::CommandBuffer &cmd, const ViewBuffers &views, const BitstreamBuffers &buffers);
+ 
+ 	// Read-only initialized RDO state. This does not alter encoder state or the
+diff --git a/pyrowave_rdo_density.hpp b/pyrowave_rdo_density.hpp
+index b2b1628fa24c5fb3d505fcf96f5b6a75537077fb..ec2ae178abbfb325434a3d1afe9e36d4cbd9698e 100644
+--- a/pyrowave_rdo_density.hpp
++++ b/pyrowave_rdo_density.hpp
+@@ -26,6 +26,19 @@ struct RDODensity
+ 	bool legacy_equivalent = true;
+ };
+ 
++inline RDODensity rdo_density_from_pixels_per_degree(float requested)
++{
++	RDODensity density = {};
++	if (!std::isfinite(requested) || requested <= 0.0f || requested > 10000.0f)
++	{
++		density.valid = false;
++		return density;
++	}
++	density.pixels_per_degree = requested;
++	density.legacy_equivalent = requested == LegacyRDOPixelsPerDegree;
++	return density;
++}
++
+ // This is deliberately a value object rather than a logging format. Callers
+ // can report the exact density retained by an initialized encoder without
+ // reparsing its environment.
+@@ -46,19 +59,13 @@ inline RDODensity parse_rdo_pixels_per_degree(const char *requested)
+ 	errno = 0;
+ 	char *end = nullptr;
+ 	float parsed = std::strtof(requested, &end);
+-	if (errno == ERANGE || end == requested || !end || *end != '\0' ||
+-	    !std::isfinite(parsed) || parsed <= 0.0f || parsed > 10000.0f)
++	if (errno == ERANGE || end == requested || !end || *end != '\0')
+ 	{
+ 		density.valid = false;
+ 		return density;
+ 	}
+ 
+-	density.pixels_per_degree = parsed;
+-	// The explicit PPD knob is deliberately not a DPI alias. 96 PPD therefore
+-	// means a 48 cycles/degree Nyquist limit, whereas the legacy default is
+-	// 65.28 PPD / 32.64 cycles per degree.
+-	density.legacy_equivalent = parsed == LegacyRDOPixelsPerDegree;
+-	return density;
++	return rdo_density_from_pixels_per_degree(parsed);
+ }
+ 
+ inline float rdo_cpd_nyquist(const RDODensity &density)
+diff --git a/pyrowave_rdo_density_test.cpp b/pyrowave_rdo_density_test.cpp
+index 5024079019b6cbbcb845369c19dc52020384666d..d8522e94256adedd8485ff4692d688f44ec4f33d 100644
+--- a/pyrowave_rdo_density_test.cpp
++++ b/pyrowave_rdo_density_test.cpp
+@@ -38,10 +38,14 @@ int main()
+ 	ASSERT_THAT(unset_report.legacy_equivalent);
+ 
+ 	const auto rdo24 = parse_rdo_pixels_per_degree("24");
++	const auto embedded24 = rdo_density_from_pixels_per_degree(24.0f);
+ 	const auto rdo36 = parse_rdo_pixels_per_degree("36");
+ 	ASSERT_THAT(rdo24.valid && !rdo24.legacy_equivalent && rdo24.pixels_per_degree == 24.0f);
+ 	ASSERT_THAT(rdo36.valid && !rdo36.legacy_equivalent && rdo36.pixels_per_degree == 36.0f);
+ 	ASSERT_THAT(float_bits(rdo_cpd_nyquist(rdo24)) == float_bits(12.0f));
++	ASSERT_THAT(embedded24.valid && !embedded24.legacy_equivalent);
++	ASSERT_THAT(float_bits(embedded24.pixels_per_degree) == float_bits(rdo24.pixels_per_degree));
++	ASSERT_THAT(!rdo_density_from_pixels_per_degree(0.0f).valid);
+ 	ASSERT_THAT(float_bits(rdo_cpd_nyquist(rdo36)) == float_bits(18.0f));
+ 	const auto rdo24_report = rdo_density_report(rdo24);
+ 	ASSERT_THAT(float_bits(rdo24_report.pixels_per_degree) == float_bits(24.0f));
