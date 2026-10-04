@@ -51,8 +51,9 @@ historical evidence; no arm, headset, installed-pair or settings changes occurre
 1. Fence metrics and three-cell backfill are complete: [ranked report](../results/fence-backfill-2026-10-04.md).
    Tight left-eye rectangle (1740,1310,240,274); all 270 regenerated decode hashes
    match retained evidence. Keep both 1–90 and 10–89 windows and reference-only masks.
-2. WO-10 first: opt-in tangent FOV crop (default 1/1), client reports/projection,
-   server density-preserving dimensions, logs and both-eye/asymmetry/alignment tests.
+2. WO-10 merged as `5659c55` after [full CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37164210397):
+   opt-in tangent FOV crop (default 1/1), client reports/projection, server
+   density-preserving dimensions, logs and both-eye/asymmetry/alignment tests.
 3. In parallel, revised Q3a adapter and 15 offline cells (13 cropped + two full-FOV
    references), WO-13 TCP/frame-size telemetry, WO-12 stock-codec report and WO-11
    dual-stream design only. See active plan for exact rates/presets/formats.
@@ -149,6 +150,27 @@ Take the first unblocked item. Items marked ∥ are independent.
 ## Log
 
 <!-- Codex appends entries here: date, checkpoint, verified (links), remaining, blocked? -->
+
+- 2026-10-04, offline matrix and native source checkpoint:
+  [WO-10 PR 25](https://github.com/ljk1291/Quest3-Pyrowave/pull/25) merged as
+  `5659c55` after [full CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37164210397).
+  [Native CLI timing PR 32](https://github.com/ljk1291/Quest3-Pyrowave/pull/32)
+  merged as `8feaa1c` after [full CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37164304925).
+  Its downloaded frame-bank tools verify against metadata commit `552bbe942b917935608f7dedfc0d1a8c82c96b1e`
+  (CI's synthetic PR merge); archive SHA256
+  `2cd6c2cd2f507d6cce4587a66628561fd74c267de555a422fd1912b36bd777a0`.
+  The retained HVS scorer has the same verified source implementation and will
+  remain the comparison scorer; split bundle identity is explicit. Nothing was
+  installed. Q3a score-only recovery finished its first cell and the remaining
+  NVENC matrix is progressing under the quality lease with no safety stop.
+  [Q3b PR 36](https://github.com/ljk1291/Quest3-Pyrowave/pull/36) at `00aeeac`
+  passed [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37165790232).
+  It waits for WO-8 integration and closure of the current frozen harness.
+  [Score-reuse PR 37](https://github.com/ljk1291/Quest3-Pyrowave/pull/37)
+  proves exact input/header/calibration identity before reusing duplicate crop
+  scores; 68 local CPU tests and independent review pass, CPU CI pending.
+  Neither change alters the active matrix. Final Q3 tables, WO-8 native CI,
+  signed matching pair and owner checklist remain; no owner blocker.
 
 - 2026-10-04, Q3a guard repairs and Pyro adapter boundary review:
   [PR 33](https://github.com/ljk1291/Quest3-Pyrowave/pull/33) merged as `cdc55b9`
