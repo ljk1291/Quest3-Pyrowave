@@ -139,6 +139,16 @@ class FoveationTests(unittest.TestCase):
             uv=np.array([[(packed[0]//2+.5)/packed[0],(packed[1]//2+.5)/packed[1]]])
             source=forward_map_uv(uv,size,packed,cfg)*np.array(size)
             self.assertTrue(np.allclose(source,np.floor(source)+.5,atol=2e-12),profile)
+        # Float64 rational arithmetic used by the reference leaves Medium-y
+        # with a ~5.7e-14 source-pixel residue. Production f32 shader
+        # arithmetic is exactly aligned; reference output must preserve the
+        # historical quantised source bytes too.
+        medium=FoveationConfig("medium")
+        self.assertEqual(f._sample_phase_uv(2776,2240,medium.center_fraction,medium.edge_ratio,0.),0.)
+        h264=FoveationConfig("h264fit")
+        self.assertEqual(f._sample_phase_uv(2624,1984,h264.center_fraction,h264.edge_ratio,0.),0.)
+        light=FoveationConfig("light")
+        self.assertEqual(f._sample_phase_uv(2624,2464,light.center_fraction,light.edge_ratio,0.),-.5/2624)
         # Blur-only keeps the full raster and deliberately has no phase translation.
         blur=FoveationConfig("light",.5,True)
         self.assertTrue(np.array_equal(forward_map_uv(np.array([[[.5,.5]]]),size,encoded_size(*size,blur),blur),

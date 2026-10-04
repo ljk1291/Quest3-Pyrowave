@@ -82,7 +82,15 @@ def _sample_phase_uv(full: int, encoded: int, center_fraction: float, ratio: flo
     _, c1, _, _, _ = _params(full, encoded, center_fraction, ratio, shift)
     intercept = c1 * full
     # Keep this tie convention explicit and match the float32 HLSL epsilon.
-    return (math.floor(intercept + 0.5 - 1e-4) - intercept) / full
+    # ``c1`` is formed from rational ALVR constants.  In the float64 reference,
+    # an aligned intercept can retain a residue such as 277.99999999999994;
+    # native HLSL/WGSL f32 evaluates that particular Medium intercept as 278.
+    # Snap only sub-picometre source-pixel roundoff, rather than changing a
+    # real half-texel (or diagnostic shifted) phase.
+    phase_px = math.floor(intercept + 0.5 - 1e-4) - intercept
+    if abs(phase_px) <= 1e-10:
+        phase_px = 0.0
+    return phase_px / full
 
 def forward_map_uv(uv: np.ndarray, full_size: tuple[int,int], encoded_size_: tuple[int,int], config: FoveationConfig) -> np.ndarray:
     """Map encoded UV to full-resolution source UV, matching the HLSL path."""
