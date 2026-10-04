@@ -241,7 +241,8 @@ def _area_box_reference(image: np.ndarray, source_uv: np.ndarray, footprint: np.
             accum += image[iy,ix]*ww; weight += ww
     return accum/np.maximum(weight,1e-12)
 
-def _area_box(image: np.ndarray, source_uv: np.ndarray, footprint: np.ndarray) -> np.ndarray:
+def _area_box(image: np.ndarray, source_uv: np.ndarray, footprint: np.ndarray, *,
+              sat_cache: dict[int, tuple[np.ndarray, np.ndarray]] | None = None) -> np.ndarray:
     """Exact edge-clamped box integral in O(1) per output pixel.
 
     The padded summed-area table is mathematically the same piecewise-constant
@@ -255,8 +256,18 @@ def _area_box(image: np.ndarray, source_uv: np.ndarray, footprint: np.ndarray) -
         raise ValueError("foveation footprint exceeds declared profile bound")
     left=cx-fx*.5; right=cx+fx*.5; top=cy-fy*.5; bottom=cy+fy*.5
     pad=max(FILTER_RADIUS, int(math.ceil(max(0., -left.min(), right.max()-w, -top.min(), bottom.max()-h)))+1)
-    padded=np.pad(image.astype(np.float64),((pad,pad),(pad,pad)),mode="edge")
-    sat=np.pad(padded.cumsum(axis=0).cumsum(axis=1),((1,0),(1,0)))
+    # ``forward_eye`` tiles the same plane. Multiple tiles often need the same
+    # integer edge pad, so retain precisely the padded plane and SAT that this
+    # function would otherwise create. The key is the already-computed pad:
+    # no footprint, edge rule, or summation order is changed.
+    cached = None if sat_cache is None else sat_cache.get(pad)
+    if cached is None:
+        padded=np.pad(image.astype(np.float64),((pad,pad),(pad,pad)),mode="edge")
+        sat=np.pad(padded.cumsum(axis=0).cumsum(axis=1),((1,0),(1,0)))
+        if sat_cache is not None:
+            sat_cache[pad] = (padded, sat)
+    else:
+        padded, sat = cached
     def primitive(x,y):
         x=np.clip(x+pad,0.,padded.shape[1]); y=np.clip(y+pad,0.,padded.shape[0])
         ix=np.floor(x).astype(int); iy=np.floor(y).astype(int)
@@ -277,11 +288,12 @@ def forward_eye(image: np.ndarray, config: FoveationConfig, *, tile_rows: int=TI
     """
     if image.ndim != 2: raise ValueError("one image plane expected")
     h,w=image.shape; ew,eh=encoded_size(w,h,config); out=np.empty((eh,ew),np.float64); x=(np.arange(ew)+.5)/ew
+    sat_cache: dict[int, tuple[np.ndarray, np.ndarray]] = {}
     for start in range(0,eh,tile_rows):
         stop=min(eh,start+tile_rows); y=(np.arange(start,stop)+.5)/eh; xx,yy=np.meshgrid(x,y)
         uv=np.stack((xx,yy),axis=-1); source=forward_map_uv(uv,(w,h),(ew,eh),config)
         footprint=local_squeeze(uv,(w,h),(ew,eh),config)*(1+config.softness*softness_ramp(source,(w,h),(ew,eh),config)[...,None])
-        out[start:stop]=_area_box(image,source,footprint)
+        out[start:stop]=_area_box(image,source,footprint,sat_cache=sat_cache)
     return out
 
 def reconstruct_eye(encoded: np.ndarray, full_size: tuple[int,int], config: FoveationConfig, *, tile_rows: int=TILE_ROWS) -> np.ndarray:
