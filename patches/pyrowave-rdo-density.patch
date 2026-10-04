@@ -1,0 +1,243 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 6d3a9fe11e360ba26a34aaddfc7b497a7fe3d975..e65959459ab2e63f5d23d44e431dd205a92ec723 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -130,6 +130,12 @@ if (${PROJECT_IS_TOP_LEVEL})
+     target_link_libraries(pyrowave-c-test PRIVATE pyrowave-shared granite-volk-headers)
+     target_compile_options(pyrowave-c-test PRIVATE ${PYROWAVE_CXX_FLAGS})
+ 
++    # Pure CPU test: it proves that the unset and explicit legacy-equivalent PPD
++    # route through the exact legacy RDO constant, while explicit PPD and invalid input
++    # are distinguished before any encoder work starts.
++    add_executable(pyrowave-rdo-density-test pyrowave_rdo_density_test.cpp)
++    target_compile_options(pyrowave-rdo-density-test PRIVATE ${PYROWAVE_CXX_FLAGS})
++
+     add_executable(pyrowave-c-interop-test pyrowave_c_interop_test.cpp com_ptr.hpp)
+     target_link_libraries(pyrowave-c-interop-test PRIVATE pyrowave-shared granite-vulkan)
+     target_compile_options(pyrowave-c-interop-test PRIVATE ${PYROWAVE_CXX_FLAGS})
+diff --git a/pyrowave_encoder.cpp b/pyrowave_encoder.cpp
+index c93114d8015b90506dd16e41b9610d7d5066592c..c21165b4278d45a74905c9efa1774f70b612d1cc 100644
+--- a/pyrowave_encoder.cpp
++++ b/pyrowave_encoder.cpp
+@@ -6,6 +6,7 @@
+ #include "image.hpp"
+ #include "math.hpp"
+ #include "pyrowave_common.hpp"
++#include "pyrowave_rdo_density.hpp"
+ #include <algorithm>
+ #include <cstdlib>
+ #include <cmath>
+@@ -107,35 +108,15 @@ struct Encoder::Impl final : public WaveletBuffers
+ 	void compute_block_active_words(int bands, uint32_t *words, size_t word_count, const void *mapped_meta) const;
+ 
+ 	uint32_t sequence_count = 0;
++	RDODensity rdo_density = {};
+ };
+ 
+ float Encoder::Impl::get_quant_rdo_distortion_scale(int level, int component, int band) const
+ {
+-	// From my Linelet master thesis. Copy paste 11 years later, ah yes :D
+-	float horiz_midpoint = (band & 1) ? 0.75f : 0.25f;
+-	float vert_midpoint = (band & 2) ? 0.75f : 0.25f;
+-
+-	// Normal PC monitors.
+-	constexpr float dpi = 96.0f;
+-	// Compromise between couch gaming and desktop.
+-	constexpr float viewing_distance = 1.0f;
+-	constexpr float cpd_nyquist = 0.34f * viewing_distance * dpi;
+-
+-	float cpd = std::sqrt(horiz_midpoint * horiz_midpoint + vert_midpoint * vert_midpoint) *
+-	                  cpd_nyquist * std::exp2(-float(level));
+-
+-	// Don't allow a situation where we're quantizing LL band hard.
+-	cpd = std::max(cpd, 8.0f);
+-
+-	float csf = 2.6f * (0.0192f + 0.114f * cpd) * std::exp(-std::pow(0.114f * cpd, 1.1f));
+-
+-	// Heavily discount chroma quality.
+-	if (component != 0 && level != DecompositionLevels - 1)
+-	{
+-		// Consider chroma a little more important if we're not subsampling.
+-		if (chroma == ChromaSubsampling::Chroma420)
+-			csf *= 0.6f;
+-	}
++	// From the original Linelet RDO model. The helper preserves its legacy
++	// numeric expression when PYROWAVE_RDO_PX_PER_DEG is unset.
++	float csf = rdo_quant_csf(rdo_density, level, component, band,
++	                         chroma == ChromaSubsampling::Chroma420, DecompositionLevels);
+ 
+ 	// Due to filtering, distortion in lower bands will result in more noise power.
+ 	// By scaling the distortion by this factor, we ensure uniform results.
+@@ -1268,6 +1249,20 @@ Encoder::Encoder()
+ 
+ bool Encoder::init(Device *device, int width_, int height_, ChromaSubsampling chroma_, bool legall53_, bool haar_)
+ {
++	const char *requested_rdo_density = std::getenv("PYROWAVE_RDO_PX_PER_DEG");
++	impl->rdo_density = parse_rdo_pixels_per_degree(requested_rdo_density);
++	if (!impl->rdo_density.valid)
++	{
++		LOGE("PYROWAVE_RDO_PX_PER_DEG must be a finite value in (0, 10000], got '%s'.\n",
++		     requested_rdo_density ? requested_rdo_density : "");
++		return false;
++	}
++	LOGI("PyroWave RDO viewing density: requested %s, effective %.9g px/deg, Nyquist %.9g cycles/deg%s.\n",
++	     requested_rdo_density && *requested_rdo_density ? requested_rdo_density : "(legacy 96 DPI @ 1m)",
++	     impl->rdo_density.pixels_per_degree,
++	     rdo_cpd_nyquist(impl->rdo_density),
++	     impl->rdo_density.legacy_equivalent ? " (legacy-equivalent)" : "");
++
+ 	auto ops = device->get_device_features().vk11_props.subgroupSupportedOperations;
+ 	constexpr VkSubgroupFeatureFlags required_features =
+ 			VK_SUBGROUP_FEATURE_ARITHMETIC_BIT |
+diff --git a/pyrowave_rdo_density.hpp b/pyrowave_rdo_density.hpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..774a1150cefafbd5a5e6e46fe35f8c611194b143
+--- /dev/null
++++ b/pyrowave_rdo_density.hpp
+@@ -0,0 +1,76 @@
++// Copyright (c) 2026 ljk1291
++// SPDX-License-Identifier: MIT
++#pragma once
++
++#include <cerrno>
++#include <algorithm>
++#include <cmath>
++#include <cstdlib>
++#include <cstring>
++
++namespace PyroWave
++{
++// The original encoder used 96 DPI at one metre. Its 0.34 cycles-per-pixel
++// Nyquist model corresponds to 65.28 pixels per degree, not 96 pixels per
++// degree. Keep its expression on the unset path bit-for-bit.
++static constexpr float LegacyRDODpi = 96.0f;
++static constexpr float LegacyRDOViewingDistanceMeters = 1.0f;
++static constexpr float LegacyRDOCyclesPerPixelNyquist = 0.34f;
++static constexpr float LegacyRDOPixelsPerDegree =
++	2.0f * LegacyRDOCyclesPerPixelNyquist * LegacyRDOViewingDistanceMeters * LegacyRDODpi;
++
++struct RDODensity
++{
++	float pixels_per_degree = LegacyRDOPixelsPerDegree;
++	bool valid = true;
++	bool legacy_equivalent = true;
++};
++
++inline RDODensity parse_rdo_pixels_per_degree(const char *requested)
++{
++	RDODensity density = {};
++	if (!requested || !*requested)
++		return density;
++
++	errno = 0;
++	char *end = nullptr;
++	float parsed = std::strtof(requested, &end);
++	if (errno == ERANGE || end == requested || !end || *end != '\0' ||
++	    !std::isfinite(parsed) || parsed <= 0.0f || parsed > 10000.0f)
++	{
++		density.valid = false;
++		return density;
++	}
++
++	density.pixels_per_degree = parsed;
++	// The explicit PPD knob is deliberately not a DPI alias. 96 PPD therefore
++	// means a 48 cycles/degree Nyquist limit, whereas the legacy default is
++	// 65.28 PPD / 32.64 cycles per degree.
++	density.legacy_equivalent = parsed == LegacyRDOPixelsPerDegree;
++	return density;
++}
++
++inline float rdo_cpd_nyquist(const RDODensity &density)
++{
++	if (density.legacy_equivalent)
++	{
++		return LegacyRDOCyclesPerPixelNyquist * LegacyRDOViewingDistanceMeters * LegacyRDODpi;
++	}
++
++	return 0.5f * density.pixels_per_degree;
++}
++
++inline float rdo_quant_csf(const RDODensity &density, int level, int component, int band,
++				  bool chroma420, int decomposition_levels)
++{
++	float horiz_midpoint = (band & 1) ? 0.75f : 0.25f;
++	float vert_midpoint = (band & 2) ? 0.75f : 0.25f;
++	float cpd = std::sqrt(horiz_midpoint * horiz_midpoint + vert_midpoint * vert_midpoint) *
++	            rdo_cpd_nyquist(density) * std::exp2(-float(level));
++	cpd = std::max(cpd, 8.0f);
++	float csf = 2.6f * (0.0192f + 0.114f * cpd) * std::exp(-std::pow(0.114f * cpd, 1.1f));
++	if (component != 0 && level != decomposition_levels - 1 && chroma420)
++		csf *= 0.6f;
++	return csf;
++}
++}
+diff --git a/pyrowave_rdo_density_test.cpp b/pyrowave_rdo_density_test.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..0bd64660cdbcb335507be9e0684e6fea50714f1a
+--- /dev/null
++++ b/pyrowave_rdo_density_test.cpp
+@@ -0,0 +1,64 @@
++// Copyright (c) 2026 ljk1291
++// SPDX-License-Identifier: MIT
++#include "pyrowave_rdo_density.hpp"
++#include <cstdint>
++#include <cstdio>
++#include <cstring>
++
++#define ASSERT_THAT(expr) do { \
++	if (!(expr)) { std::fprintf(stderr, "Assertion failed: %s at line %d.\n", #expr, __LINE__); return 1; } \
++} while (false)
++
++static uint32_t float_bits(float value)
++{
++	uint32_t bits = 0;
++	static_assert(sizeof(bits) == sizeof(value), "Unexpected float size.");
++	std::memcpy(&bits, &value, sizeof(bits));
++	return bits;
++}
++
++int main()
++{
++	using namespace PyroWave;
++	constexpr float legacy = 0.34f * 1.0f * 96.0f;
++
++	const auto unset = parse_rdo_pixels_per_degree(nullptr);
++	const auto explicit96 = parse_rdo_pixels_per_degree("96");
++	const auto explicit_legacy_ppd = parse_rdo_pixels_per_degree("65.28");
++	ASSERT_THAT(unset.valid && unset.legacy_equivalent);
++	ASSERT_THAT(explicit_legacy_ppd.valid && explicit_legacy_ppd.legacy_equivalent);
++	ASSERT_THAT(explicit96.valid && !explicit96.legacy_equivalent);
++	ASSERT_THAT(float_bits(rdo_cpd_nyquist(unset)) == float_bits(legacy));
++	ASSERT_THAT(float_bits(rdo_cpd_nyquist(explicit_legacy_ppd)) == float_bits(legacy));
++	ASSERT_THAT(float_bits(rdo_cpd_nyquist(explicit96)) == float_bits(48.0f));
++	ASSERT_THAT(float_bits(unset.pixels_per_degree) == float_bits(2.0f * legacy));
++
++	const auto rdo24 = parse_rdo_pixels_per_degree("24");
++	const auto rdo36 = parse_rdo_pixels_per_degree("36");
++	ASSERT_THAT(rdo24.valid && !rdo24.legacy_equivalent && rdo24.pixels_per_degree == 24.0f);
++	ASSERT_THAT(rdo36.valid && !rdo36.legacy_equivalent && rdo36.pixels_per_degree == 36.0f);
++	ASSERT_THAT(float_bits(rdo_cpd_nyquist(rdo24)) == float_bits(12.0f));
++	ASSERT_THAT(float_bits(rdo_cpd_nyquist(rdo36)) == float_bits(18.0f));
++
++	// The encoder's original distortion-CSF calculation must be exactly
++	// preserved at every band/component/level on the default path.
++	for (int level = 0; level < 5; level++)
++		for (int component = 0; component < 3; component++)
++			for (int band = 0; band < 4; band++)
++			{
++				float horiz = (band & 1) ? 0.75f : 0.25f;
++				float vert = (band & 2) ? 0.75f : 0.25f;
++				float cpd = std::sqrt(horiz * horiz + vert * vert) * legacy * std::exp2(-float(level));
++				cpd = std::max(cpd, 8.0f);
++				float old_csf = 2.6f * (0.0192f + 0.114f * cpd) * std::exp(-std::pow(0.114f * cpd, 1.1f));
++				if (component != 0 && level != 4)
++					old_csf *= 0.6f;
++				ASSERT_THAT(float_bits(rdo_quant_csf(unset, level, component, band, true, 5)) == float_bits(old_csf));
++			}
++
++	for (const char *invalid : { "0", "-1", "nan", "inf", "36x", "10001" })
++		ASSERT_THAT(!parse_rdo_pixels_per_degree(invalid).valid);
++
++	std::puts("PYROWAVE_RDO_PX_PER_DEG default parity and validation passed.");
++	return 0;
++}

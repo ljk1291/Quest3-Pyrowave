@@ -4,6 +4,12 @@
   "pyrowave": {"url": "https://github.com/Themaister/pyrowave", "commit": "d2997ac172bdc00e29c58e3f2938acb7e94580bf"},
   "granite": {"url": "https://github.com/Themaister/Granite", "commit": "842d9d5686ba8c799a7d34a78a68f98d6aeb5a68"},
   "cargo_apk": {"url": "https://github.com/zarik5/cargo-apk", "commit": "0fd3126dad5aa1c5f0f26cdae3410f2e5af62c60"},
+  "patches": {
+    "pyrowave_rdo_density": {
+      "path": "patches/pyrowave-rdo-density.patch",
+      "sha256": "1641a9456dd9d9e5811a110016cfe673587e7de56d9a76d709a3ea7599f3a4cc"
+    }
+  },
   "rust": "1.97.1",
   "android_ndk": "27.2.12479018",
   "openxr_loader": {
