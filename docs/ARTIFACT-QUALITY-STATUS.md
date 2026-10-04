@@ -186,6 +186,24 @@ Take the first unblocked item. Items marked ∥ are independent.
 
 <!-- Codex appends entries here: date, checkpoint, verified (links), remaining, blocked? -->
 
+- 2026-10-04, CPU-only mapping preflight for the pending Q3b geometries:
+  at source revision `e61621ddd4f4e8b38c392e481f22e677446f8d54`, the allocation
+  and mapping algebra in `tools/xrbench/foveation.py:48–85` puts the entire
+  primary left-eye fence (1462,1036,240,274) inside the aligned central band
+  for both Medium and H264Fit. Medium's source bands are X [526,2098] and
+  Y [556,2220]; H264Fit's are X [656,1968] and Y [694,2082]. Representative
+  encoded pixel centres (1319.5,895.5) for Medium and (1254.5,826.5) for
+  H264Fit map to source (1582.5,1173.5). Both predict texel-centred sampling,
+  local squeeze 1, zero softness ramp and a 1×1 footprint on this fence.
+  Blur-only Light uses the identity map and likewise predicts no geometric
+  filtering within this ROI. These float64 calculations have roundoff of
+  approximately 2.3e-13 pixels; they are not GPU pixel measurements.
+  This differs from the reduced Light path's central horizontal half-sample
+  phase. Do not transfer its measured loss to these pending profiles or infer
+  a winner from algebra. No frames were transformed/scored, no GPU work was
+  added and the frozen matrix is unchanged. Private calculation SHA256:
+  `1f08355d1122ba0da7aa9716a1512488cd4af8ebaeb7249ea5e04e42022ffb89`.
+
 - 2026-10-04 05:48 UTC, Light wavelet comparison completed: CDF 5/3 and CDF 9/7
   at 1000 Mbps / softness 0.5 use identical transformed inputs, reference frame
   identities, geometry, projection, corpus and scorer. The reduced-source SHA256

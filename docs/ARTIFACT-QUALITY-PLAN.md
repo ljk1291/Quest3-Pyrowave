@@ -115,6 +115,15 @@ at softness 0. This follows the current shader mapping rather than indicating
 a CPU/shader mismatch. Retain the frozen matrix; texel-centre alignment needs
 review before accepting Light, and no profile is promoted by these results.
 
+CPU-only geometry preflight at source `e61621d` predicts a different central
+sampling phase for the pending Medium and H264Fit cells: the complete primary
+fence lies inside each aligned 1:1 centre, with texel-centred sampling, zero
+softness ramp and a 1×1 local footprint (float64 roundoff only). Blur-only
+Light is identity in this ROI. This is mapping algebra, not measured GPU pixels
+or a quality result. Do not extrapolate reduced Light's measured fence loss to
+these profiles; use the frozen upcoming scores. Exact bands, representative
+coordinates and the private calculation hash are in the status log.
+
 ## 1. Owner input (2026-10-03 21:44)
 
 - **Live decoder caps on Quest 3.** These come from the owner's experience; verify them on
