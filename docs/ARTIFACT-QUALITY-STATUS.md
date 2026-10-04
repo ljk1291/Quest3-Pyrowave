@@ -36,12 +36,12 @@ Read with Get-NetAdapter; no network changes. Negotiated link speed is not goodp
 
 ## Queue (current owner goal)
 
-**Owner-dependent stop, 2026-10-04:** Q3a's fresh preflight found ComfyUI running
-one job and only **603 MiB free VRAM**, below the **2048 MiB** safety margin.
-No Q3a lease or encode was started. Per the current owner goal, source and GPU
-work are stopped for the owner to finish/pause ComfyUI, free VRAM and confirm.
-Keep the ten-cell frozen plan and completed evidence; resume with a fresh preflight.
-[Sanitized preflight](../results/q3a-preflight-blocked-2026-10-04.json).
+**Resumed, 2026-10-04:** Fresh preflight after the goal resumed confirms ComfyUI
+idle (zero running/pending), 13275 MiB free VRAM and no quality safety stops.
+The ten-cell frozen Q3a NVENC matrix is running under a new finite two-hour
+owner-supervised PC-only lease. All source work has resumed on its own branches.
+The earlier [preflight stop](../results/q3a-preflight-blocked-2026-10-04.json) remains
+historical evidence; no arm, headset, installed-pair or settings changes occurred.
 
 1. Fence metrics and three-cell backfill are complete: [ranked report](../results/fence-backfill-2026-10-04.md).
    Tight left-eye rectangle (1740,1310,240,274); all 270 regenerated decode hashes
