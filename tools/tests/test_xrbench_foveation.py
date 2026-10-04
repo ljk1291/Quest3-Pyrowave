@@ -188,6 +188,17 @@ class FoveationTests(unittest.TestCase):
         self.assertEqual(encoded_size(2624,2776,FoveationConfig('light')),(2464,2592))
         self.assertEqual(encoded_size(2624,2776,FoveationConfig('medium')),(2112,2240))
         self.assertEqual(encoded_size(2624,2776,FoveationConfig('h264fit')),(1984,2112))
+    def test_width_only_h264_pads_vertical_allocation_without_vertical_resampling(self):
+        cfg=FoveationConfig('h264width',.5)
+        self.assertEqual(encoded_size(2624,2784,cfg),(1984,2784))
+        y=np.arange(240*640,dtype=np.uint8).reshape(240,640)
+        planes=[y,np.full((120,320),128,np.uint8),np.full((120,320),128,np.uint8)]
+        encoded=encode_planes(planes,cfg)
+        self.assertEqual(encoded.source_eye,(320,240))
+        self.assertEqual(encoded.expanded_eye,(320,256))
+        self.assertEqual(encoded.encoded_eye,(256,256))
+        rebuilt=reconstruct_planes(encoded.planes,encoded)
+        self.assertEqual(rebuilt[0].shape,y.shape)
     def test_forward_inverse_are_numeric_inverses(self):
         uv=np.array([[[.03,.14],[.31,.72],[.5,.5],[.91,.87]]])
         cfg=FoveationConfig('medium',center_shift=(.1,-.2)); got=inverse_map_uv(forward_map_uv(uv,(2624,2784),(2112,2240),cfg),(2624,2784),(2112,2240),cfg)

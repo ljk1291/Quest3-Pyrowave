@@ -46,7 +46,7 @@ def foveation_transform_descriptor(*, profile: str, softness: float, blur_only: 
                                     implementation_revision: str | None = None,
                                     implementation_source_sha256: str | None = None) -> dict:
     """Frozen Q3b source-transform descriptor; WO-8 owns its implementation."""
-    if profile not in ("light", "medium", "h264fit"):
+    if profile not in ("light", "medium", "h264fit", "h264width"):
         raise ValueError("unknown foveation profile")
     if not isinstance(softness, (int, float)) or not math.isfinite(softness) or not 0 <= softness <= 1:
         raise ValueError("foveation softness must be in [0, 1]")
@@ -441,6 +441,41 @@ def build_q3_extension_nvenc_plan(source: Path, vertical_pixels_per_degree: floa
     return base
 
 
+def build_width_only_h264_plan(source: Path, vertical_pixels_per_degree: float, **kwargs) -> dict:
+    """Plan one opt-in H.264 P7 width-only WO-8 comparison.
+
+    The source crop stays 2624x2776. Eight bottom-edge rows are replicated
+    solely to reach a 2784-pixel allocation boundary; the inverse drops those
+    rows before scoring. Vertical resampling is therefore not part of this
+    candidate. The encoded SBS raster is 3968x2784, below H.264's 4096 width.
+    """
+    base = build_revised_q3a_plan(source, vertical_pixels_per_degree, **kwargs)
+    crop = next(row for row in base["cells"] if row["label"] == "h264-dual-p7-400")
+    from .foveation import FoveationConfig, encoded_size
+    transform = foveation_transform_descriptor(profile="h264width", softness=.5, blur_only=False)
+    source_eye = (2624, 2776); expanded_eye = (2624, 2784)
+    width, height = encoded_size(*expanded_eye, FoveationConfig("h264width", .5, False))
+    if width * 2 > 4096 or height != expanded_eye[1]:
+        raise ValueError("width-only H264 geometry does not meet its allocation contract")
+    encoded_base = dict(crop, eye_width=width, eye_height=height, stereo_width=width * 2,
+                        cap_bytes=fb.cap_bytes(700, fb.FPS), bits_per_pixel=fb.bpp(fb.cap_bytes(700, fb.FPS), width, height))
+    row = _revised_cell(encoded_base, codec="h264", rate_mbps=700, preset="p7", layout="stereo_sbs",
+                        spatial_aq=False, label="h264-width-only-s05-700", source_geometry="crop")
+    row.update(experiment_id="wo8_width_only_h264_p7_700", source_transform=transform,
+               source_eye=source_eye, expanded_source_eye=expanded_eye,
+               vertical_allocation_padding_rows=expanded_eye[1] - source_eye[1],
+               vertical_resampling=False, score_vertical_pixels_per_degree=float(vertical_pixels_per_degree))
+    base.update(cells=[row], q3_revision="2026-10-05-wo8-width-only-h264",
+                width_only_contract={"source_eye":list(source_eye), "expanded_source_eye":list(expanded_eye),
+                                     "encoded_eye":[width,height], "encoded_sbs_width":width*2,
+                                     "h264_sbs_width_limit":4096, "vertical_resampling":False})
+    full_height = kwargs.get("full_eye", fb.DISPLAY_EYE)[1]
+    base["hvs_calibration"]["codec_cells"] = [fb.hvs_calibration_for_vertical_ppd(
+        vertical_pixels_per_degree * height / full_height, height)]
+    validate_plan(base)
+    return base
+
+
 def _validate_source_adapter(plan: dict) -> None:
     adapter = plan.get("source_adapter")
     if adapter is None:  # schema-1 compatibility only
@@ -515,7 +550,7 @@ def validate_plan(plan: dict) -> dict:
             raise ValueError("cropped score PPD is invalid")
         transform = cell.get("source_transform")
         if transform is not None:
-            if plan.get("q3_revision") not in ("2026-10-04-q3b", "2026-10-04-q3-extension"):
+            if plan.get("q3_revision") not in ("2026-10-04-q3b", "2026-10-04-q3-extension", "2026-10-05-wo8-width-only-h264"):
                 raise ValueError("WO-8 transform is only valid for Q3b or the Q3 extension")
             try:
                 if transform != foveation_transform_descriptor(profile=transform.get("profile"),
@@ -969,7 +1004,7 @@ def _stream_q3b_sources(source: Path, source_info: fb.Y4MInfo, geometry: dict, t
                     # owner guard after completion and before it has any durable
                     # output effect or we queue another source frame.
                     if guard is not None: guard.status()
-                    if encoded.expanded_eye != expanded or encoded.chroma420 is not True:
+                    if (encoded.source_eye or encoded.expanded_eye) != expanded or encoded.chroma420 is not True:
                         raise ValueError("Q3b WO-8 expanded geometry/chroma drifted")
                     if first is None:
                         first = encoded; small = encoded.encoded_eye
@@ -1013,8 +1048,10 @@ def _reconstruct_q3b_decoded(decoded_small: Path, encoded_info: fb.Y4MInfo, scor
     except ImportError as exc:
         raise ValueError("Q3b reconstruction module is unavailable") from exc
     config = _q3b_config(transform)
+    source_eye = (score_info.width // 2, score_info.height)
+    expanded_eye = (source_eye[0], int(math.ceil(source_eye[1] / 32.0) * 32)) if config.profile == "h264width" else source_eye
     template = EncodedPlanes((np.empty((0, 0), np.uint8),) * 3,
-        (score_info.width // 2, score_info.height), (encoded_info.width // 2, encoded_info.height), True, config)
+        expanded_eye, (encoded_info.width // 2, encoded_info.height), True, config, source_eye)
     with fb._open_writer(score_path, score_info) as out:
         for _, planes, _ in fb.iter_y4m(decoded_small, encoded_info):
             fb._write_frame(out, score_info, reconstruct_planes(planes, template))
