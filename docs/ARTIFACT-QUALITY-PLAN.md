@@ -152,6 +152,20 @@ Continue the four remaining frozen cells, then combined publication and the
 verified stable pair/checklist. The report identity and detailed table are in
 the status log.
 
+Measured follow-up, 2026-10-04 07:38 UTC: H264Fit / PyroWave 9/7 / 1000 /
+softness 0.5 completes all 90 frames with verified provenance and clean lease
+closure. Its 1984×2112/eye encoded image is scored in the common expanded
+2624×2776/eye domain. Fence edge PSNR is 38.367520 dB, temporal mean 2.371167
+and p99 14 (10–89), improving over Medium 9/7 by 0.824150 dB / −0.233996 /
+−1.32. Whole-image HVS falls by 0.506331 dB all-90 / 0.510373 dB trimmed,
+and rail-crop trimmed HVS falls by 0.667202 dB, despite UI/tunnel gains.
+Centre/peripheral regions differ from Medium; preserve those as separate
+diagnostics, not matched gains. H264Fit here is a geometry profile with the
+PyroWave codec, not an H.264 result. No timing or default promotion.
+Q3b is seven of ten complete (22 of 25 overall). Blur-only Light / 9/7 is
+running, followed by both NVENC H.264 cells. Combined publication, the verified
+stable pair and owner checklist remain outstanding.
+
 ## 1. Owner input (2026-10-03 21:44)
 
 - **Live decoder caps on Quest 3.** These come from the owner's experience; verify them on

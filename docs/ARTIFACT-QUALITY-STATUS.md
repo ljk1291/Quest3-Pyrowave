@@ -70,9 +70,10 @@ It merged as `7302a25` after 55 focused tests, independent review and
 The reduced and matching-blur first-frame hashes match both retained attempts.
 The finite r5 controller is running Q3b with three preparation workers and fresh
 r3 Pyro attempt paths. Its three Light / 9/7 / 1000 Mbps softness cells (0, 0.5,
-1), Light / 5/3 / 1000 Mbps / softness 0.5 and both Medium / 5/3 and 9/7 /
-1000 Mbps / softness 0.5 are complete with clean lease closure; four Q3b
-cells remain. H264Fit / 9/7 / 1000 Mbps / softness 0.5 is active.
+1), Light / 5/3 / 1000 Mbps / softness 0.5, both Medium / 5/3 and 9/7 /
+1000 Mbps / softness 0.5 and H264Fit / 9/7 / 1000 Mbps / softness 0.5 are
+complete with clean lease closure; three Q3b cells remain. Blur-only Light /
+9/7 / 1000 Mbps / softness 0.5 is active; both NVENC H.264 cells follow.
 Do not repeat completed cells. The first result is worse
 than cropped 9/7 without foveation on the primary fence: 30.832 versus 35.754 dB
 edge PSNR, temporal residual p99 32 versus 19 luma codes (both frames 10–89).
@@ -186,6 +187,41 @@ Take the first unblocked item. Items marked ∥ are independent.
 ## Log
 
 <!-- Codex appends entries here: date, checkpoint, verified (links), remaining, blocked? -->
+
+- 2026-10-04 07:38 UTC, H264Fit / PyroWave CDF 9/7 / 1000 Mbps / softness
+  0.5 completed. H264Fit names the transform profile here; this is not an H.264
+  codec result. All 90 ordered decoded/Q3b identity records, both score windows,
+  source/corpus/projection/scorer provenance and clean lease closures pass
+  publisher validation. Encoded geometry is 1984×2112/eye; expanded scoring
+  remains 2624×2776/eye. Its reduced input intentionally differs from Medium.
+
+  | CDF 9/7 / 1000 Mbps profile | Fence edge PSNR-Y, 10–89 | Temporal mean | Temporal p99 | Whole-image HVS, all-90 |
+  |---|---:|---:|---:|---:|
+  | Cropped, no foveation | 35.753751 dB | 3.300473 | 19 | 39.904984 dB |
+  | Medium, softness 0.5 | 37.543370 dB | 2.605163 | 15.32 | 36.261744 dB |
+  | H264Fit, softness 0.5 | 38.367520 dB | 2.371167 | 14 | 35.755413 dB |
+
+  In the same fence domain, H264Fit gains 0.824150 dB versus Medium and
+  2.613769 dB versus unfoveated cropped 9/7, while whole-image all-90 HVS
+  falls by 0.506331 / 4.149572 dB respectively. Trimmed whole-image HVS is
+  35.568106 dB. Fixed-crop trimmed HVS: UI 43.181572, tunnel 42.476398,
+  rail 35.617941 dB. Versus Medium these change by +1.577465, +1.316449,
+  −0.667202 dB; versus unfoveated 9/7, +5.533141, +4.447747, −4.206740 dB.
+  This remains a fence/detail tradeoff, not an overall promotion or timing pass.
+
+  H264Fit's centre ROI (660,700,1322×1408) and peripheral mask (5,418,794
+  pixels) differ from Medium's (528,560,1582×1678; 4,624,784 pixels). Their
+  diagnostics therefore are not matched-domain cross-profile gains. Separately,
+  H264Fit centre sharp/matching-blur HVS is 42.877135 / 42.978041 dB in
+  10–89; peripheral sharp edge PSNR/temporal mean/p99 is 30.808949 /
+  5.211691 / 33, and matching-blur is 42.954350 / 1.397708 / 8. Temporal
+  metrics remain file-order luma residuals, not optical shimmer.
+  Private controller report SHA256:
+  `30b2115c30536a50ca0d15941d349d26a15279ab7f69655374a6b91630e429c9`.
+  Twenty-two of 25 Q3 rows are complete. The existing controller advanced to
+  blur-only Light / 9/7 / 1000 / softness 0.5; that cell and two NVENC H.264
+  rows remain before combined publication, the verified stable pair and final
+  owner checklist. No owner blocker or headset/settings/arm/installed-pair change.
 
 - 2026-10-04 07:05 UTC, Medium wavelet comparison completed: the 5/3 and 9/7
   cells use identical reduced input, all 90 source/encoded-reference/sharp/blur
