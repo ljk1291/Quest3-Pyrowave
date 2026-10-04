@@ -350,6 +350,36 @@ class NvencFramebankTests(unittest.TestCase):
                                             decoded, info, reference, info, 1, True)
             self.assertEqual(score.call_count, 4)
             self.assertNotIn("displayed_reused_from_codec_only", row)
+
+    def test_q3_crop_calibration_mismatch_keeps_independent_display_scores(self):
+        with tempfile.TemporaryDirectory() as root:
+            info, reference, decoded, plan, cell = self._cropped_same_score_fixture(root)
+            def identity_display(source, source_info, output, display_eye):
+                shutil.copyfile(source, output); return source_info
+            # This exercises the actual scorer orchestration: identical files
+            # still must not reuse when HVS calibration drifts.
+            with mock.patch.object(fb, "_write_display", side_effect=identity_display), \
+                 mock.patch.object(fb, "hvs_calibration_for_vertical_ppd", side_effect=[{"p":1}, {"p":2}]), \
+                 mock.patch.object(fb, "score_pair", return_value={"metric":"score"}) as score:
+                row = nf._same_frame_scores(plan, 0, cell, {}, None, Path(root), reference, info,
+                                            decoded, info, reference, info, 1, True)
+            self.assertEqual(score.call_count, 4)
+            self.assertNotIn("displayed_reused_from_codec_only", row)
+
+    def test_full_fov_never_reuses_display_scores(self):
+        with tempfile.TemporaryDirectory() as root:
+            info, reference, decoded, plan, cell = self._cropped_same_score_fixture(root)
+            plan["presentation_eye"] = [2, 4]
+            plan["hvs_calibration"]["display"] = {"vertical_pixels_per_degree":23.5}
+            cell["source_geometry"] = "full_fov"
+            def identity_display(source, source_info, output, display_eye):
+                shutil.copyfile(source, output); return source_info
+            with mock.patch.object(fb, "_write_display", side_effect=identity_display), \
+                 mock.patch.object(fb, "score_pair", return_value={"metric":"score"}) as score:
+                row = nf._same_frame_scores(plan, 0, cell, {}, None, Path(root), reference, info,
+                                            decoded, info, reference, info, 1, True)
+            self.assertEqual(score.call_count, 4)
+            self.assertNotIn("displayed_reused_from_codec_only", row)
             display_ref, display_dec = Path(root) / "display-ref.y4m", Path(root) / "display-dec.y4m"
             shutil.copyfile(reference, display_ref); shutil.copyfile(decoded, display_dec)
             with mock.patch.object(fb, "hvs_calibration_for_vertical_ppd", side_effect=[{"p":1}, {"p":2}]):
