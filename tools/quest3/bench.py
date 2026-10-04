@@ -327,18 +327,19 @@ def adb_run(adb, *args):
     if p.returncode: raise RuntimeError(p.stderr.strip() or p.stdout.strip())
     return p.stdout
 
-def snapshot(adb):
+def snapshot(adb, serial=None):
     # No root or clock overrides. Inaccessible counters remain explicit errors.
     result={}
+    prefix = ('-s', serial) if serial else ()
     for key,cmd in {'battery':'dumpsys battery','thermals':'dumpsys thermalservice',
         'gpu_clock_hz':'cat /sys/class/kgsl/kgsl-3d0/gpuclk',
         'gpu_busy':'cat /sys/class/kgsl/kgsl-3d0/gpubusy',
         'gpu_available_frequencies':'cat /sys/class/kgsl/kgsl-3d0/devfreq/available_frequencies'}.items():
-        try: result[key]={'value':adb_run(adb,'shell',cmd),'error':None}
+        try: result[key]={'value':adb_run(adb,*prefix,'shell',cmd),'error':None}
         except (RuntimeError,subprocess.TimeoutExpired) as e: result[key]={'value':None,'error':str(e)}
     for name in EXPERIMENT_PROPERTIES:
         key='property:' + name
-        try: result[key]={'value':adb_run(adb,'shell','getprop',name).strip(),'error':None}
+        try: result[key]={'value':adb_run(adb,*prefix,'shell','getprop',name).strip(),'error':None}
         except (RuntimeError,subprocess.TimeoutExpired) as e: result[key]={'value':None,'error':str(e)}
     return result
 
