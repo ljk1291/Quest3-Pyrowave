@@ -219,6 +219,10 @@ def _revised_cell(base: dict, *, codec: str, rate_mbps: int, preset: str,
     if source_geometry not in ("crop", "full_fov"):
         raise ValueError("source geometry must be crop or full_fov")
     row = dict(base)
+    # A Q3b reduced cell starts from the Q3a dual-eye crop row.  Stream-rate
+    # provenance belongs to the requested layout, not to that geometry, so do
+    # not retain a stale split when the new row is a single SBS stream.
+    row.pop("per_stream_mbps", None)
     row.update({"codec": codec, "rate_mbps": rate_mbps, "label": label,
                 "source_geometry": source_geometry,
                 "nvenc_profile": profile(codec, rate_mbps, base["fps"], preset=preset,
@@ -381,8 +385,13 @@ def build_revised_q3b_nvenc_plan(source: Path, vertical_pixels_per_degree: float
         row["score_vertical_pixels_per_degree"] = float(vertical_pixels_per_degree)
         cells.append(row)
     base.update(cells=cells, q3_revision="2026-10-04-q3b")
+    # The shared manifest validator binds this legacy codec calibration to the
+    # *encoded* geometry. Q3b's expanded score domain is intentionally pinned
+    # separately by score_vertical_pixels_per_degree above.
+    full_height = kwargs.get("full_eye", fb.DISPLAY_EYE)[1]
     base["hvs_calibration"]["codec_cells"] = [fb.hvs_calibration_for_vertical_ppd(
-        vertical_pixels_per_degree * 2776 / kwargs.get("full_eye", fb.DISPLAY_EYE)[1], 2776) for _ in cells]
+        vertical_pixels_per_degree * cell["eye_height"] / full_height, cell["eye_height"])
+        for cell in cells]
     return base
 
 
