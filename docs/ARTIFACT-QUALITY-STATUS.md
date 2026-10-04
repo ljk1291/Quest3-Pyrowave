@@ -1060,3 +1060,26 @@ Take the first unblocked item. Items marked ∥ are independent.
   and contract test; patch regeneration, CI and qualified binaries are still
   needed. Q3b adapter has no new edits. Q3a/Q3b results and final signed pair
   remain incomplete; no optimization or default has been promoted.
+
+### 2026-10-04 18:25 CEST — H264Fit complete; extension branches in CI
+
+The owner-authorized single-stream H264Fit / 700 Mbps / P7 / softness 0.5 cell
+completed all 90 frames with a clean lease closure, zero owned jobs and unchanged
+source/harness hashes. Trimmed fence edge PSNR is 47.837276 dB, temporal residual
+p99 4 and mean 0.908247; all-90 full-crop HVS is 36.976144 dB. This is a strong
+fence candidate with a substantial peripheral/full-crop quality trade-off, not a
+live decoder or 90 Hz result. Its 90 recorded encoded-reference frame hashes match
+the retained PyroWave H264Fit input exactly; the final publisher is qualifying
+that explicit cross-record provenance without repeating the encode.
+
+WO-7 is [PR #43](https://github.com/ljk1291/Quest3-Pyrowave/pull/43); the Light phase
+fix and its source-lock pin are [PR #42](https://github.com/ljk1291/Quest3-Pyrowave/pull/42).
+Both have green CPU/Android jobs; full native CI is still in progress. The new
+matrix plus exact retained-HVS compatibility is [PR #44](https://github.com/ljk1291/Quest3-Pyrowave/pull/44),
+head `761afb5`, with green [CPU CI](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37216124693).
+Independent review and focused CPU checks cover the two new native overlays and
+the Python provenance path. The original HVS executable/source/shader/imports
+remain fixed; current codec and historical scorer lock identities stay separate.
+Eight new cells, the combined 32-row report, stable-signed pair verification and
+final owner checklist remain pending. No headset, settings or installed-pair
+operation occurred. The baseline remains unchanged.
