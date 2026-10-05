@@ -1,6 +1,6 @@
 # NVENC dimension preflight: prepared inactive overlay
 
-Status: **prepared on `codex/nvenc-dimension-preflight-proposal`, inactive by default, not merged, and not included in any build pair.** The source/CPU proof is PR [#56](https://github.com/ljk1291/Quest3-Pyrowave/pull/56), head `9a65d57367a7ee81e2ad7624fe1d5f4e74578b52`; its manual CPU-only CI run [37265993194](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37265993194) passed. That run skipped client, streamer, and matching-pair jobs. It did not compile the Windows native overlay, query a GPU, create a pair, install, or stream.
+Status: **prepared on `codex/nvenc-dimension-preflight-proposal`, inactive by default, not merged, and not included in any build pair.** The source/CPU proof is PR [#56](https://github.com/ljk1291/Quest3-Pyrowave/pull/56), source head `0e45e06bacd20255c3706fdfb14c48a4a159988f`; its manual CPU-only CI run [37266489403](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37266489403) passed. This documentation commit follows that source proof. That run skipped client, streamer, and matching-pair jobs. It did not compile the Windows native overlay, query a GPU, create a pair, install, or stream.
 
 The verified `80a1635` / `0f07f05` pair remains unchanged. This overlay does not requalify historical artifacts.
 
