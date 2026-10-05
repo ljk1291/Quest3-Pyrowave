@@ -24,7 +24,7 @@
     {"path": "patches.alvr_pyrowave_rdo_live_readback.path", "old": null, "new": "patches/alvr-pyrowave-rdo-live-readback.patch", "role": "observability_only"},
     {"path": "patches.alvr_pyrowave_rdo_live_readback.sha256", "old": null, "new": "d32a96c6456f13ace911db9298800f1c7da9ebf9f75296b3b3c668489a2bb94d", "role": "observability_only"},
     {"path": "patches.alvr_pyrowave_rdo_session_setting.path", "old": null, "new": "patches/alvr-pyrowave-rdo-session-setting.patch", "role": "session_rdo_setting_only"},
-    {"path": "patches.alvr_pyrowave_rdo_session_setting.sha256", "old": null, "new": "0b334f0d1a2efd75a6c5178a9cb0401240d5f85fcd512fee07ada83f39e9943a", "role": "session_rdo_setting_only"}
+    {"path": "patches.alvr_pyrowave_rdo_session_setting.sha256", "old": null, "new": "b8bb0419e94312471576ecdfccb1c26604cd1f1b3f0028379593b33bae25d5d3", "role": "session_rdo_setting_only"}
   ]
 }
 

@@ -42,7 +42,7 @@
     },
     "alvr_pyrowave_rdo_session_setting": {
       "path": "patches/alvr-pyrowave-rdo-session-setting.patch",
-      "sha256": "0b334f0d1a2efd75a6c5178a9cb0401240d5f85fcd512fee07ada83f39e9943a"
+      "sha256": "b8bb0419e94312471576ecdfccb1c26604cd1f1b3f0028379593b33bae25d5d3"
     }
   },
   "rust": "1.97.1",

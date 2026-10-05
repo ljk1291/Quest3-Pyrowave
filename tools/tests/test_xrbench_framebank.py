@@ -485,7 +485,7 @@ class FrameBankTests(unittest.TestCase):
                               {'path': 'patches.alvr_pyrowave_rdo_session_setting.path', 'old': None,
                                'new': 'patches/alvr-pyrowave-rdo-session-setting.patch', 'role': 'session_rdo_setting_only'},
                               {'path': 'patches.alvr_pyrowave_rdo_session_setting.sha256', 'old': None,
-                               'new': '0b334f0d1a2efd75a6c5178a9cb0401240d5f85fcd512fee07ada83f39e9943a', 'role': 'session_rdo_setting_only'}]}
+                               'new': 'b8bb0419e94312471576ecdfccb1c26604cd1f1b3f0028379593b33bae25d5d3', 'role': 'session_rdo_setting_only'}]}
             descriptor_path = folder / 'compatibility.json'; descriptor_path.write_text(json.dumps(descriptor))
             with self.assertRaisesRegex(ValueError, 'not the reviewed tracked proof'):
                 fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)

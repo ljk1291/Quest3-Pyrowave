@@ -109,10 +109,25 @@ index 11ea6fddaf8c20e5a04f2223f368f2ce03f46613..d36edf7f76370c3bd51471f2d880caeb
              if self.overrides.is_empty() {
                  "none".to_owned()
 diff --git a/alvr/session/src/beta_tests.rs b/alvr/session/src/beta_tests.rs
-index ccf28875de672740519e13af3cef6af714a03796..95c9ca18608e56b0693ad586358666535b3c5443 100644
+index ccf28875de672740519e13af3cef6af714a03796..123e0fa9fa63a99e8958158d10f75ef248f77ba4 100644
 --- a/alvr/session/src/beta_tests.rs
 +++ b/alvr/session/src/beta_tests.rs
-@@ -252,6 +252,7 @@ fn effective_config_follows_settings_without_env() {
+@@ -58,7 +58,13 @@ fn pyrowave_section_exposes_chroma_transport_wavelet_and_decode_path() {
+     let entries = visible_children(&schema(), &["video", "pyrowave"]).unwrap();
+     assert_eq!(
+         names(entries, Visibility::Experiment),
+-        sorted(&["chroma_444", "transport", "wavelet", "decode_path"])
++        sorted(&[
++            "chroma_444",
++            "transport",
++            "wavelet",
++            "decode_path",
++            "rdo_pixels_per_degree",
++        ])
+     );
+     assert_eq!(
+         visible_variants(&schema(), &["video", "pyrowave", "decode_path"]).unwrap(),
+@@ -252,6 +258,7 @@ fn effective_config_follows_settings_without_env() {
      assert!(!e.udp);
      assert!(!e.wavelet_53);
      assert_eq!(e.decode_path, PyroWaveDecodePath::Auto);
@@ -120,7 +135,7 @@ index ccf28875de672740519e13af3cef6af714a03796..95c9ca18608e56b0693ad58635866653
      assert!(!e.follow_gaze);
      assert!(e.overrides.is_empty());
  }
-@@ -262,10 +263,12 @@ fn effective_config_follows_a_non_default_setting() {
+@@ -262,10 +269,12 @@ fn effective_config_follows_a_non_default_setting() {
      s.video.pyrowave.transport = PyroWaveTransport::Udp;
      s.video.pyrowave.wavelet = PyroWaveWavelet::Cdf53;
      s.video.pyrowave.decode_path = PyroWaveDecodePath::Fragment;
@@ -133,7 +148,7 @@ index ccf28875de672740519e13af3cef6af714a03796..95c9ca18608e56b0693ad58635866653
  }
  
  #[test]
-@@ -309,7 +312,7 @@ fn effective_config_log_line_names_chroma_and_every_knob() {
+@@ -309,7 +318,7 @@ fn effective_config_log_line_names_chroma_and_every_knob() {
      assert_eq!(
          line,
          "PyroWave effective config: chroma=4:2:0 transport=TCP wavelet=CDF 9/7 \
