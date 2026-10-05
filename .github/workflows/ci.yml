@@ -27,7 +27,7 @@ jobs:
       - name: Reproducible-build contract checks
         run: |
           python3 -m pip install --disable-pip-version-check -r tools/quest3/requirements-cpu.txt pytest==9.1.1
-          python3 -m pytest tools/tests/test_ci_pins.py tools/tests/test_build_metadata.py tools/tests/test_unattended.py tools/tests/test_unattended_atomic.py tools/tests/test_unattended_duration.py tools/tests/test_unattended_concurrency.py tools/tests/test_unattended_monitor.py tools/tests/test_unattended_restore.py tools/tests/test_unattended_preflight.py -q
+          python3 -m pytest tools/tests/test_ci_pins.py tools/tests/test_build_metadata.py tools/tests/test_dequant_reconstruction_offset.py tools/tests/test_dequant_decode_parity.py tools/tests/test_unattended.py tools/tests/test_unattended_atomic.py tools/tests/test_unattended_duration.py tools/tests/test_unattended_concurrency.py tools/tests/test_unattended_monitor.py tools/tests/test_unattended_restore.py tools/tests/test_unattended_preflight.py -q
       - name: Install CPU chart-test dependencies
         run: python3 -m pip install --disable-pip-version-check -r tools/quest3/requirements-cpu.txt
       - run: python3 -m unittest discover -s tests -v
@@ -57,10 +57,32 @@ jobs:
           sudo apt-get install -y --no-install-recommends libegl-dev libgles-dev libegl-mesa0 libgl1-mesa-dri
           g++ -std=c++17 -O2 -Wall -Wextra -Werror tools/pyroclient/gpu_readback_gles.cpp tools/pyroclient/gpu_readback_test.cpp -lEGL -lGLESv2 -o /tmp/readback-test
           /tmp/readback-test
-  offline-dequant-reconstruction-offset:
-    runs-on: windows-2022
+  dequant-reconstruction-offset-shaders:
+    runs-on: ubuntu-24.04
     needs: tests
     if: ${{ inputs.offline_dequant_reconstruction_offset && always() && needs.tests.result == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh tools/ci/fetch_sources.sh "$GITHUB_WORKSPACE/ws/research"
+      - name: Regenerate pinned shader header on Linux
+        run: |
+          p="$GITHUB_WORKSPACE/ws/research/pyrowave"
+          cmake -S "$p/Granite" -B /tmp/dequant-offset-shader-tools -G Ninja -DCMAKE_BUILD_TYPE=Release -DGRANITE_TOOLS=ON -DGRANITE_RENDERER=OFF -DGRANITE_PLATFORM=null -DGRANITE_VULKAN_FOSSILIZE=OFF -DGRANITE_VULKAN_SPIRV_CROSS=ON -DGRANITE_VULKAN_SHADER_MANAGER_RUNTIME_COMPILER=ON -DGRANITE_VULKAN_SYSTEM_HANDLES=OFF
+          cmake --build /tmp/dequant-offset-shader-tools --target slangmosh -j 4
+          compiler=$(find /tmp/dequant-offset-shader-tools -type f -name slangmosh | head -n 1)
+          "$compiler" "$p/shaders/slangmosh.json" --namespace PyroWave --output "$p/shaders/slangmosh.hpp" -O --strip
+          python3 tools/ci/check_shader_manifest.py "$p" --write
+          mkdir out
+          cp "$p/shaders/slangmosh.hpp" "$p/shaders/quest3-manifest.json" out/
+          sha256sum "$p/shaders/slangmosh.hpp" "$p/shaders/quest3-manifest.json" > out/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dequant-reconstruction-offset-generated-shaders
+          path: out/
+  offline-dequant-reconstruction-offset:
+    runs-on: windows-2022
+    needs: [tests, dequant-reconstruction-offset-shaders]
+    if: ${{ inputs.offline_dequant_reconstruction_offset && always() && needs.tests.result == 'success' && needs.dequant-reconstruction-offset-shaders.result == 'success' }}
     steps:
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
@@ -70,12 +92,16 @@ jobs:
       - name: Reconstruct locked PyroWave source
         shell: bash
         run: sh tools/ci/fetch_sources.sh "$XRWIRED_INPUTS/research"
-      - name: Regenerate embedded shader before the native build
-        shell: cmd
+      - uses: actions/download-artifact@v4
+        with:
+          name: dequant-reconstruction-offset-generated-shaders
+          path: generated-shaders
+      - name: Install Linux-regenerated shader evidence
+        shell: pwsh
         run: |
-          call tools\windows\build_pyrowave_pc.cmd tools || exit /b 1
-          ws\research\pyrowave\build-tools\Release\slangmosh.exe ws\research\pyrowave\shaders\slangmosh.json --namespace PyroWave --output ws\research\pyrowave\shaders\slangmosh.hpp -O --strip || exit /b 1
-          python tools\ci\check_shader_manifest.py ws\research\pyrowave --write || exit /b 1
+          Copy-Item generated-shaders/slangmosh.hpp "$env:XRWIRED_INPUTS/research/pyrowave/shaders/"
+          Copy-Item generated-shaders/quest3-manifest.json "$env:XRWIRED_INPUTS/research/pyrowave/shaders/"
+          python tools/ci/check_shader_manifest.py "$env:XRWIRED_INPUTS/research/pyrowave"
       - name: Build offline decoder tools and CPU parity tests
         shell: cmd
         run: call tools\windows\build_pyrowave_pc.cmd pc rdo-test || exit /b 1
@@ -85,10 +111,30 @@ jobs:
           New-Item -ItemType Directory -Force out | Out-Null
           Copy-Item "$env:XRWIRED_INPUTS/research/pyrowave/shaders/slangmosh.hpp" out/
           Copy-Item "$env:XRWIRED_INPUTS/research/pyrowave/shaders/quest3-manifest.json" out/
-          Copy-Item "$env:XRWIRED_INPUTS/research/pyrowave/build-pc/Release/pyrowave-encode.exe" out/
           Copy-Item "$env:XRWIRED_INPUTS/research/pyrowave/build-pc/Release/pyrowave-decode.exe" out/
           Copy-Item "$env:XRWIRED_INPUTS/research/pyrowave/build-pc/Release/pyrowave-dequant-reconstruction-offset-test.exe" out/
-          python tools/ci/build_metadata.py write --platform windows --output out --pyrowave "$env:XRWIRED_INPUTS/research/pyrowave" --required-native out/pyrowave-encode.exe out/pyrowave-decode.exe out/pyrowave-dequant-reconstruction-offset-test.exe
+          Copy-Item tools/xrbench/dequant_decode_parity.py out/
+          $dumpbin = Get-ChildItem 'C:/Program Files/Microsoft Visual Studio/2022/*/VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe' | Sort-Object FullName -Descending | Select-Object -First 1
+          if (!$dumpbin) { throw 'PE dependency inspection tool missing' }
+          $imports = @{}
+          foreach ($exe in Get-ChildItem out/*.exe) {
+            $dump = (& $dumpbin.FullName /dependents $exe.FullName) -join "`n"
+            if ($LASTEXITCODE -ne 0) { throw 'offline PE dependency inspection failed' }
+            $names = [regex]::Matches($dump, '(?im)^\s+([A-Za-z0-9_.+-]+\.dll)\s*$') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+            if (!$names) { throw 'offline executable has no verified import list' }
+            $imports[$exe.Name] = @($names | ForEach-Object {
+              if ($_ -match '^(api-ms-win-|ext-ms-win-)') { @{ name=$_; provider='api_set' } }
+              elseif (Test-Path "out/$_") { @{ name=$_; provider='bundle'; sha256=(Get-FileHash "out/$_").Hash.ToLower() } }
+              elseif (Test-Path "$env:WINDIR/System32/$_") { @{ name=$_; provider='windows_system' } }
+              else { throw "missing offline dependency: $_" }
+            })
+          }
+          @{ schema=1; kind='dequant_reconstruction_offset_windows_imports'; tools=$imports } | ConvertTo-Json -Depth 5 | Set-Content out/DEQUANT-OFFSET-IMPORTS.json
+          $lockHash = python -c "import sys; from pathlib import Path; sys.path.insert(0,'tools/ci'); from build_metadata import source_lock_sha256; print(source_lock_sha256(Path('sources.lock.json')))"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $meta = @{ schema=1; kind='pyrowave_dequant_reconstruction_offset_decode_tools'; repository_commit=$env:GITHUB_SHA; source_lock_sha256=$lockHash.Trim(); overlay_patch_sha256=$env:PYROWAVE_DEQUANT_RECONSTRUCTION_OFFSET_PATCH_SHA256; embedded_header_sha256=(Get-FileHash out/slangmosh.hpp).Hash.ToLower(); shader_manifest_sha256=(Get-FileHash out/quest3-manifest.json).Hash.ToLower(); imports_manifest_sha256=(Get-FileHash out/DEQUANT-OFFSET-IMPORTS.json).Hash.ToLower(); decoder_sha256=(Get-FileHash out/pyrowave-decode.exe).Hash.ToLower(); parity_helper_sha256=(Get-FileHash out/dequant_decode_parity.py).Hash.ToLower(); zero_offset_gate=@{ required_frames=90; retained_label='crop97-rdo24-1000'; required_before_nonzero_sweep=$true } } | ConvertTo-Json -Depth 4
+          Set-Content out/DEQUANT-OFFSET-TOOLS-METADATA.json $meta
+          python tools/ci/build_metadata.py write --platform windows --output out --pyrowave "$env:XRWIRED_INPUTS/research/pyrowave" --required-native out/pyrowave-decode.exe out/pyrowave-dequant-reconstruction-offset-test.exe
           Get-FileHash out/* -Algorithm SHA256 | Format-Table -AutoSize | Out-File -Encoding ascii out/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
