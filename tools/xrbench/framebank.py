@@ -290,12 +290,30 @@ class WindowGuard:
             from tools.quest3.supervised import JobRegistry
             self.command=[sys.executable,'-m','tools.quest3.supervised','status']
             self.job_registry=job_registry or JobRegistry()
+    def _status_diagnostic(self, cmd, result=None, exc=None):
+        if os.environ.get('XRBENCH_LEASE_STATUS_DIAGNOSTICS') != '1': return
+        try:
+            window=self.window.resolve(); private=_private_root().resolve()
+            if not window.is_relative_to(private) or self.window.is_symlink(): return
+            directory=window/'status-diagnostics'; directory.mkdir(exist_ok=True)
+            if directory.is_symlink(): return
+            stdout='' if result is None else result.stdout; stderr='' if result is None else result.stderr
+            payload={'schema':1,'kind':'lease_status_failure_diagnostic','command':cmd,
+                     'returncode':None if result is None else result.returncode,
+                     'stdout':stdout,'stderr':stderr,'exception':None if exc is None else repr(exc),
+                     'stdout_sha256':hashlib.sha256(stdout.encode()).hexdigest(),
+                     'stderr_sha256':hashlib.sha256(stderr.encode()).hexdigest()}
+            path=directory/f'status-{time.time_ns()}.json'
+            path.write_text(json.dumps(payload,sort_keys=True),encoding='utf-8')
+        except Exception: pass
     def status(self):
         cmd=[*self.command,"--window",str(self.window),"--require-allow","frame_bank_pc"]+([] if self.arm is None else ["--arm",str(self.arm)])
         try: r=subprocess.run(cmd,capture_output=True,text=True,timeout=10,check=False)
-        except (OSError,subprocess.SubprocessError) as exc: raise PermissionError("WO-0 lease status unavailable") from exc
+        except (OSError,subprocess.SubprocessError) as exc:
+            self._status_diagnostic(cmd,exc=exc); raise PermissionError("WO-0 lease status unavailable") from exc
         try: data=json.loads(r.stdout)
-        except ValueError as exc: raise PermissionError("WO-0 lease status is not valid JSON") from exc
+        except ValueError as exc:
+            self._status_diagnostic(cmd,r,exc); raise PermissionError("WO-0 lease status is not valid JSON") from exc
         if r.returncode or data.get("schema")!=1 or data.get("lease",{}).get("active") is not True: raise PermissionError("WO-0 lease is inactive")
         deadline=data["lease"].get("deadline_epoch_s")
         guards=data.get("guards",{}); cancel=data.get("cancellation",{})
