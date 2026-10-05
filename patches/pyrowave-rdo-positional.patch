@@ -80,7 +80,7 @@ index c21165b4278d45a74905c9efa1774f70b612d1cc..5b419c7b11c7445ae2b2b7319fb21c64
  	auto ops = device->get_device_features().vk11_props.subgroupSupportedOperations;
  	constexpr VkSubgroupFeatureFlags required_features =
 diff --git a/pyrowave_rdo_density.hpp b/pyrowave_rdo_density.hpp
-index 774a1150cefafbd5a5e6e46fe35f8c611194b143..57f5dd12a825cfaa8b29e3bbeead6942404d531f 100644
+index 774a1150cefafbd5a5e6e46fe35f8c611194b143..9a67c0c7b1b51c9ba4d9dfbe02d4f1d4bfe41f5c 100644
 --- a/pyrowave_rdo_density.hpp
 +++ b/pyrowave_rdo_density.hpp
 @@ -26,6 +26,52 @@ struct RDODensity
@@ -123,7 +123,7 @@ index 774a1150cefafbd5a5e6e46fe35f8c611194b143..57f5dd12a825cfaa8b29e3bbeead6942
 +
 +inline void rdo_tangent_from_uv(float u, float v, float padded_y_scale, const RDOProjection &p, float &tx, float &ty)
 +{
-+	tx = p.left + (p.right - p.left) * u;
++	tx = p.left + (p.right - p.left) * std::min(1.0f, std::max(0.0f, u));
 +	ty = p.top + (p.bottom - p.top) * std::min(1.0f, v * padded_y_scale);
 +}
 +inline float rdo_postscale_csf_ratio(float raw_cpd, float density_ratio)
@@ -182,7 +182,7 @@ index 0bd64660cdbcb335507be9e0684e6fea50714f1a..ff16c9264bb2909898afe8bd58f3793f
  	return 0;
  }
 diff --git a/shaders/wavelet_quant.comp b/shaders/wavelet_quant.comp
-index 70794e754d478a1accb1198cf06d4c4a8cfe0d7e..d401ec111d954c1c0e4066ee892ca4e66c0498e8 100644
+index 70794e754d478a1accb1198cf06d4c4a8cfe0d7e..cf0b43d55fc57aba8f372d924fb54928c35d0512 100644
 --- a/shaders/wavelet_quant.comp
 +++ b/shaders/wavelet_quant.comp
 @@ -67,8 +67,44 @@ layout(push_constant) uniform Registers
@@ -207,7 +207,7 @@ index 70794e754d478a1accb1198cf06d4c4a8cfe0d7e..d401ec111d954c1c0e4066ee892ca4e6
 +    if (registers.rdo_local_mode == 0) return 1.0;
 +    vec2 uv = (vec2(gl_WorkGroupID.xy) + vec2(0.5)) * 32.0 / vec2(registers.resolution);
 +    bool right = uv.x >= 0.5;
-+    float eye_u = right ? (uv.x - 0.5) * 2.0 : uv.x * 2.0;
++    float eye_u = clamp(right ? (uv.x - 0.5) * 2.0 : uv.x * 2.0, 0.0, 1.0);
 +    float left = right ? registers.rdo_tangent_x.z : registers.rdo_tangent_x.x;
 +    float right_edge = right ? registers.rdo_tangent_x.w : registers.rdo_tangent_x.y;
 +    float tx = mix(left, right_edge, eye_u);
