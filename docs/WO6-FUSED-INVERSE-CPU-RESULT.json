@@ -10,7 +10,12 @@
   "ci": {
     "workflow": ".github/workflows/ci.yml",
     "explicit_steps": ["CDF 5/3 pair-local inverse model parity", "CDF 9/7 fused inverse model parity"],
-    "remote_status": "unverified_in_this_checkout_gcm_credential_unavailable"
+    "event": "workflow_dispatch",
+    "cpu_only": true,
+    "run_id": 37253579925,
+    "head_sha": "9177afccbe3d24ef1642159e8d82c67a4c5d404a",
+    "conclusion": "success",
+    "url": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37253579925"
   },
   "cdf53_proof": [
     "literal inverse update-before-predict loops on an interleaved apron",

@@ -25,9 +25,11 @@ python -m pytest tools/tests/test_wo6_fused_inverse.py -q       # 4 passed
 python -m unittest tools.tests.test_wo6_cdf97_model -v          # 5 passed
 ```
 
-The remote workflow status is recorded separately in the JSON result. This
-checkout cannot read the owner credential from GCM, so it does not infer a
-remote result from the local tests.
+The authoritative manual `cpu_only` workflow ran at
+[run 37253579925](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37253579925)
+for this exact revision and completed successfully. It ran the two explicit
+model-parity steps above. This checkout does not infer that result from the
+local tests; it records the owner-scoped API result.
 
 Open gates remain for both transforms: whole-stage workgroup coverage and
 final-image boundary writeback; retained-stream decoded-frame comparison for
