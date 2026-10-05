@@ -20,4 +20,4 @@ class LeaseStatusDiagnostics(unittest.TestCase):
  def test_timeout_preserves_partial_bytes_and_remains_fatal(self):
   timeout=fb.subprocess.TimeoutExpired(['status'],10,output=b'partial\xff',stderr=b'error\xfe')
   with tempfile.TemporaryDirectory() as t, mock.patch.dict(os.environ,{'XRBENCH_LEASE_STATUS_DIAGNOSTICS':'1'},clear=True), mock.patch.object(fb,'_private_root',return_value=Path(t)), mock.patch.object(fb.subprocess,'run',side_effect=timeout) as run:
-   lease=Path(t)/'lease'; lease.mkdir(); self.assertRaisesRegex(PermissionError,'unavailable',fb.WindowGuard(lease,status_command=['status']).status); rows=list((lease/'status-diagnostics').glob('*.json')); self.assertEqual(run.call_count,1); self.assertEqual(len(rows),1); self.assertIn('partial�',rows[0].read_text())
+   lease=Path(t)/'lease'; lease.mkdir(); self.assertRaisesRegex(PermissionError,'unavailable',fb.WindowGuard(lease,status_command=['status']).status); rows=list((lease/'status-diagnostics').glob('*.json')); self.assertEqual(run.call_count,1); self.assertEqual(len(rows),1); self.assertEqual(__import__('json').loads(rows[0].read_text())['stdout'],'partial�')
