@@ -489,7 +489,7 @@ class FrameBankTests(unittest.TestCase):
                               {'path': 'patches.foveated_staging_correctness.path', 'old': None,
                                'new': 'patches/foveated-staging-correctness.patch', 'role': 'alvr_presentation_and_geometry_only'},
                               {'path': 'patches.foveated_staging_correctness.sha256', 'old': None,
-                               'new': '5979a86c5a3ce5f0bb70166e858731bb2b67a27b67581bdb2c4eb4d07c10e091', 'role': 'alvr_presentation_and_geometry_only'},
+                               'new': '1aa003df64deabacde72b312ba4077c7300d87b2054df6f323d800042ee2e7ae', 'role': 'alvr_presentation_and_geometry_only'},
                               {'path': 'patches.nvenc_dimension_preflight.path', 'old': None,
                                'new': 'patches/nvenc-dimension-preflight.patch', 'role': 'encoder_capability_preflight_inactive_only'},
                               {'path': 'patches.nvenc_dimension_preflight.sha256', 'old': None,
