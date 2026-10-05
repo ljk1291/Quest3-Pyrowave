@@ -9,6 +9,10 @@ on:
         description: 'Run CPU checks only for Python orchestration changes; reuse qualified native tools'
         type: boolean
         default: false
+      offline_dequant_reconstruction_offset:
+        description: 'Build only offline PyroWave decoder-offset tools; no APK, signing, pairing, or runtime actions'
+        type: boolean
+        default: false
 permissions:
   contents: read
 env:
@@ -33,6 +37,7 @@ jobs:
       - run: python3 -m unittest tools.tests.test_fence_metrics -v
       - run: python3 -m unittest tools.tests.test_supervised -v
       - name: Network frame-pacing and live frame-size telemetry tests
+        if: ${{ !inputs.offline_dequant_reconstruction_offset }}
         run: python3 -m pytest tools/tests/test_quest3_network.py tools/tests/test_alvr_events_summary.py -q
       - name: TCP frame receiver protocol build
         run: gcc -std=c11 -Wall -Wextra -Werror tools/udptest/tcpframerecv.c -o /tmp/tcp-frame-receiver
@@ -52,10 +57,47 @@ jobs:
           sudo apt-get install -y --no-install-recommends libegl-dev libgles-dev libegl-mesa0 libgl1-mesa-dri
           g++ -std=c++17 -O2 -Wall -Wextra -Werror tools/pyroclient/gpu_readback_gles.cpp tools/pyroclient/gpu_readback_test.cpp -lEGL -lGLESv2 -o /tmp/readback-test
           /tmp/readback-test
+  offline-dequant-reconstruction-offset:
+    runs-on: windows-2022
+    needs: tests
+    if: ${{ inputs.offline_dequant_reconstruction_offset && always() && needs.tests.result == 'success' }}
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - name: Load locked inputs
+        shell: bash
+        run: python3 tools/ci/source_lock.py --github-env >> "$GITHUB_ENV"
+      - name: Reconstruct locked PyroWave source
+        shell: bash
+        run: sh tools/ci/fetch_sources.sh "$XRWIRED_INPUTS/research"
+      - name: Regenerate embedded shader before the native build
+        shell: cmd
+        run: |
+          call tools\windows\build_pyrowave_pc.cmd tools || exit /b 1
+          ws\research\pyrowave\build-tools\Release\slangmosh.exe ws\research\pyrowave\shaders\slangmosh.json --namespace PyroWave --output ws\research\pyrowave\shaders\slangmosh.hpp -O --strip || exit /b 1
+          python tools\ci\check_shader_manifest.py ws\research\pyrowave --write || exit /b 1
+      - name: Build offline decoder tools and CPU parity tests
+        shell: cmd
+        run: call tools\windows\build_pyrowave_pc.cmd pc rdo-test || exit /b 1
+      - name: Package offline tool evidence
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item "$env:XRWIRED_INPUTS/research/pyrowave/shaders/slangmosh.hpp" out/
+          Copy-Item "$env:XRWIRED_INPUTS/research/pyrowave/shaders/quest3-manifest.json" out/
+          Copy-Item "$env:XRWIRED_INPUTS/research/pyrowave/build-pc/Release/pyrowave-encode.exe" out/
+          Copy-Item "$env:XRWIRED_INPUTS/research/pyrowave/build-pc/Release/pyrowave-decode.exe" out/
+          Copy-Item "$env:XRWIRED_INPUTS/research/pyrowave/build-pc/Release/pyrowave-dequant-reconstruction-offset-test.exe" out/
+          python tools/ci/build_metadata.py write --platform windows --output out --pyrowave "$env:XRWIRED_INPUTS/research/pyrowave" --required-native out/pyrowave-encode.exe out/pyrowave-decode.exe out/pyrowave-dequant-reconstruction-offset-test.exe
+          Get-FileHash out/* -Algorithm SHA256 | Format-Table -AutoSize | Out-File -Encoding ascii out/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dequant-reconstruction-offset-offline-tools
+          path: out/
   client:
     runs-on: ubuntu-24.04
     needs: tests
-    if: ${{ !inputs.cpu_only && always() && (needs.tests.result == 'success' || needs.tests.result == 'skipped') }}
+    if: ${{ !inputs.cpu_only && !inputs.offline_dequant_reconstruction_offset && always() && (needs.tests.result == 'success' || needs.tests.result == 'skipped') }}
     steps:
       - uses: actions/checkout@v4
       - name: Load authoritative build pins
@@ -180,7 +222,7 @@ jobs:
   streamer:
     runs-on: windows-2022
     needs: tests
-    if: ${{ !inputs.cpu_only && always() && (needs.tests.result == 'success' || needs.tests.result == 'skipped') }}
+    if: ${{ !inputs.cpu_only && !inputs.offline_dequant_reconstruction_offset && always() && (needs.tests.result == 'success' || needs.tests.result == 'skipped') }}
     env:
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
     steps:

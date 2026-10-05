@@ -26,7 +26,7 @@
     },
     "pyrowave_dequant_reconstruction_offset": {
       "path": "patches/pyrowave-dequant-reconstruction-offset.patch",
-      "sha256": "e36dc537a242b526b1421e7006bc106c866e80b35b8ae670cf80cb9be50bc94e"
+      "sha256": "74f6b188bcfd98a8b43a318deceab942357ee5be73dd196da929d6522936782d"
     },
     "wo8_light_centre_phase": {
       "path": "patches/wo8-light-centre-phase.patch",

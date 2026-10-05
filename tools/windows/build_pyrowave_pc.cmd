@@ -4,7 +4,7 @@ rem PC has always used:
 rem   build-interop : pyrowave-shared.dll/.lib (-DPYROWAVE_DEVEL=OFF), linked by the ALVR server
 rem   build-pc      : pyrowave-encode.exe / pyrowave-decode.exe (-DPYROWAVE_DEVEL=ON), offline RD
 rem   build-tools   : slangmosh.exe (Granite tools), only needed to regenerate shaders\slangmosh.hpp
-rem   rdo-test      : CPU-only default-density parity and invalid-input test
+rem   rdo-test      : CPU-only encoder-density and decoder-offset parity tests
 rem Usage: build_pyrowave_pc.cmd [interop] [pc] [rdo-test] [tools]   (no arguments = interop pc rdo-test)
 setlocal
 set "WS=%~dp0..\..\.."
@@ -35,8 +35,10 @@ exit /b 0
 
 :rdo-test
 if not exist build-pc\pyrowave-rdo-density-test.vcxproj ( echo build-pc is not configured; run pc first & exit /b 1 )
-cmake --build build-pc --config Release --target pyrowave-rdo-density-test -j 16 || exit /b 1
+if not exist build-pc\pyrowave-dequant-reconstruction-offset-test.vcxproj ( echo decoder offset target is missing; regenerate the source patch & exit /b 1 )
+cmake --build build-pc --config Release --target pyrowave-rdo-density-test pyrowave-dequant-reconstruction-offset-test -j 16 || exit /b 1
 build-pc\Release\pyrowave-rdo-density-test.exe || exit /b 1
+build-pc\Release\pyrowave-dequant-reconstruction-offset-test.exe || exit /b 1
 exit /b 0
 
 :tools
