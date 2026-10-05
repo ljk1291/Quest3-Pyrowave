@@ -485,7 +485,11 @@ class FrameBankTests(unittest.TestCase):
                               {'path': 'patches.alvr_pyrowave_rdo_session_setting.path', 'old': None,
                                'new': 'patches/alvr-pyrowave-rdo-session-setting.patch', 'role': 'session_rdo_setting_only'},
                               {'path': 'patches.alvr_pyrowave_rdo_session_setting.sha256', 'old': None,
-                               'new': 'b8bb0419e94312471576ecdfccb1c26604cd1f1b3f0028379593b33bae25d5d3', 'role': 'session_rdo_setting_only'}]}
+                               'new': 'b8bb0419e94312471576ecdfccb1c26604cd1f1b3f0028379593b33bae25d5d3', 'role': 'session_rdo_setting_only'},
+                              {'path': 'patches.nvenc_dimension_preflight.path', 'old': None,
+                               'new': 'patches/nvenc-dimension-preflight.patch', 'role': 'encoder_capability_preflight_inactive_only'},
+                              {'path': 'patches.nvenc_dimension_preflight.sha256', 'old': None,
+                               'new': '10087a15c4a936028ccf5bf4668d482e84adbb03eced7631ad63e5ac4ae1438f', 'role': 'encoder_capability_preflight_inactive_only'}]}
             descriptor_path = folder / 'compatibility.json'; descriptor_path.write_text(json.dumps(descriptor))
             with self.assertRaisesRegex(ValueError, 'not the reviewed tracked proof'):
                 fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)
