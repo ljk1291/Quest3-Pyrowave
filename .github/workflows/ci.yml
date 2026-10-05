@@ -113,7 +113,19 @@ jobs:
           Copy-Item "$env:XRWIRED_INPUTS/research/pyrowave/build-pc/Release/pyrowave-encode.exe" out/
           Copy-Item "$env:XRWIRED_INPUTS/research/pyrowave/build-pc/Release/pyrowave-decode.exe" out/
           Copy-Item "$env:XRWIRED_INPUTS/research/pyrowave/build-pc/Release/pyrowave-rdo-density-test.exe" out/
+          $dumpbin = Get-ChildItem 'C:/Program Files/Microsoft Visual Studio/2022/*/VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe' | Sort-Object FullName -Descending | Select-Object -First 1
+          if (!$dumpbin) { throw 'PE dependency inspection tool missing' }
+          $imports = @{}
+          Get-ChildItem out/*.exe | ForEach-Object {
+            $dump = (& $dumpbin.FullName /dependents $_.FullName) -join "`n"
+            $names = [regex]::Matches($dump, '(?m)^\s+([^\s]+\.dll)\s*$') | ForEach-Object { $_.Groups[1].Value }
+            if (!$names) { throw "no PE dependents for $($_.Name)" }
+            $imports[$_.Name] = @($names)
+          }
+          @{ schema=1; kind='position_rdo_windows_imports'; tools=$imports } | ConvertTo-Json -Depth 5 | Set-Content out/POSITION-RDO-IMPORTS.json
           python tools/ci/build_metadata.py write --platform windows --output out --pyrowave "$env:XRWIRED_INPUTS/research/pyrowave" --required-native out/pyrowave-encode.exe out/pyrowave-decode.exe out/pyrowave-rdo-density-test.exe
+          $lockHash = (Get-FileHash sources.lock.json).Hash.ToLower()
+          @{ schema=1; kind='position_rdo_offline_tools'; repository_commit=$env:GITHUB_SHA; source_lock_sha256=$lockHash; position_patch_sha256=$env:PYROWAVE_RDO_POSITIONAL_PATCH_SHA256; embedded_header_sha256=(Get-FileHash out/slangmosh.hpp).Hash.ToLower(); shader_manifest_sha256=(Get-FileHash out/quest3-manifest.json).Hash.ToLower(); imports_manifest_sha256=(Get-FileHash out/POSITION-RDO-IMPORTS.json).Hash.ToLower(); encoder_sha256=(Get-FileHash out/pyrowave-encode.exe).Hash.ToLower(); decoder_sha256=(Get-FileHash out/pyrowave-decode.exe).Hash.ToLower(); cpu_helper_sha256=(Get-FileHash out/pyrowave-rdo-density-test.exe).Hash.ToLower() } | ConvertTo-Json -Depth 4 | Set-Content out/POSITION-RDO-TOOL-PROVENANCE.json
           Get-FileHash out/* -Algorithm SHA256 | Format-Table -AutoSize | Out-File -Encoding ascii out/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
