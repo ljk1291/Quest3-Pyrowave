@@ -55,5 +55,8 @@ expected_rdo_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value pyrowav
 actual_rdo_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/pyrowave-rdo-density.patch")
 [ "$actual_rdo_patch" = "$expected_rdo_patch" ] || { echo "WO-7 PyroWave RDO patch hash does not match sources.lock.json" >&2; exit 1; }
 apply_patch "$dest/pyrowave" "$repo/patches/pyrowave-rdo-density.patch"
+actual_dequant_offset_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/pyrowave-dequant-reconstruction-offset.patch")
+[ "$actual_dequant_offset_patch" = "$PYROWAVE_DEQUANT_RECONSTRUCTION_OFFSET_PATCH_SHA256" ] || die "PyroWave dequant-offset patch hash mismatch"
+apply_patch "$dest/pyrowave" "$repo/patches/pyrowave-dequant-reconstruction-offset.patch"
 
 echo "sources ready in $dest: ALVR ${ALVR_BASE%${ALVR_BASE#???????}}, pyrowave ${PYROWAVE_BASE%${PYROWAVE_BASE#???????}}, Granite ${GRANITE_COMMIT%${GRANITE_COMMIT#???????}}"

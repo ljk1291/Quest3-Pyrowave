@@ -1,0 +1,83 @@
+diff --git a/pyrowave_decoder.cpp b/pyrowave_decoder.cpp
+index f2fa70d513eab2293a8b968d75af7fc2f3cf5714..f3379eef97844db651defc30e9422cc4be75ec2c 100644
+--- a/pyrowave_decoder.cpp
++++ b/pyrowave_decoder.cpp
+@@ -7,6 +7,8 @@
+ #include "math.hpp"
+ #include "pyrowave_common.hpp"
+ #include <algorithm>
++#include <cerrno>
++#include <cmath>
+ #include <cstdlib>
+ #include <cstring>
+ 
+@@ -22,8 +24,26 @@ struct DequantizerPushData
+ 	int32_t block_offset_32x32;
+ 	int32_t block_stride_32x32;
+ 	int32_t block_count_32x32;
++	float reconstruction_offset;
+ };
+ 
++static float bounded_reconstruction_offset()
++{
++	// Opt-in decoder experiment. Zero is deliberately the exact legacy value.
++	const char *value = getenv("PYROWAVE_DEQUANT_RECONSTRUCTION_OFFSET");
++	if (!value || !*value)
++		return 0.0f;
++	char *end = nullptr;
++	errno = 0;
++	float offset = strtof(value, &end);
++	if (errno || end == value || *end || !std::isfinite(offset) || offset < -0.25f || offset > 0.25f)
++	{
++		LOGW("Ignoring invalid PYROWAVE_DEQUANT_RECONSTRUCTION_OFFSET. Allowed interval is [-0.25, 0.25].\n");
++		return 0.0f;
++	}
++	return offset;
++}
++
+ struct Decoder::Impl final : public WaveletBuffers
+ {
+ 	bool fused_haar = getenv("PYROWAVE_FUSED_HAAR") && strcmp(getenv("PYROWAVE_FUSED_HAAR"), "1") == 0;
+@@ -304,6 +324,7 @@ void Decoder::Impl::init_block_meta()
+ bool Decoder::Impl::dequant(CommandBuffer &cmd)
+ {
+ 	DequantizerPushData push = {};
++	push.reconstruction_offset = bounded_reconstruction_offset();
+ 
+ 	cmd.set_specialization_constant_mask(0);
+ 	cmd.enable_subgroup_size_control(true);
+@@ -330,6 +351,8 @@ bool Decoder::Impl::dequant(CommandBuffer &cmd)
+ 		cmd.set_program(shaders.wavelet_dequant[0]);
+ 
+ 	cmd.begin_region("DWT dequant");
++	if (push.reconstruction_offset != 0.0f)
++		LOGI("DWT dequant reconstruction magnitude offset: %.6f\n", push.reconstruction_offset);
+ 	auto start_dequant = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+ 
+ 	cmd.image_barrier(*wavelet_img_high_res, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+diff --git a/shaders/wavelet_dequant.comp b/shaders/wavelet_dequant.comp
+index 42fa7821997ead9c7964f4d1f3d53b9dff3722e0..779db6d7268a70f4f3b4c7602a121dbdc40d3065 100644
+--- a/shaders/wavelet_dequant.comp
++++ b/shaders/wavelet_dequant.comp
+@@ -58,6 +58,7 @@ layout(push_constant) uniform Registers
+     int block_offset_32x32;
+     int block_stride_32x32;
+     int block_count_32x32;
++    float reconstruction_offset;
+ } registers;
+ 
+ #if STORAGE_MODE == 1
+@@ -315,6 +316,13 @@ void main()
+         float q = decode_quant(q_code);
+         float inv_scale = q * decode_quant_scale(bitfieldExtract(control_word2, QUANT_SCALE_OFFSET - 16, QUANT_SCALE_BITS));
+ 
++        // v is an unsigned magnitude here. The sign is applied below, so the
++        // optional offset stays symmetric and never turns an encoded zero into
++        // a nonzero coefficient. Offset=0 is bit-identical to the legacy path.
++        for (int j = 0; j < 2; j++)
++            for (int i = 0; i < 4; i++)
++                if (v[j][i] != 0.0)
++                    v[j][i] += registers.reconstruction_offset;
+         v *= inv_scale;
+     }
+     else

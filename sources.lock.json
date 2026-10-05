@@ -24,6 +24,10 @@
       "path": "patches/pyrowave-rdo-density.patch",
       "sha256": "1641a9456dd9d9e5811a110016cfe673587e7de56d9a76d709a3ea7599f3a4cc"
     },
+    "pyrowave_dequant_reconstruction_offset": {
+      "path": "patches/pyrowave-dequant-reconstruction-offset.patch",
+      "sha256": "e36dc537a242b526b1421e7006bc106c866e80b35b8ae670cf80cb9be50bc94e"
+    },
     "wo8_light_centre_phase": {
       "path": "patches/wo8-light-centre-phase.patch",
       "sha256": "4f4ce22430f810c78195d749425f35f77ffdb1a14c844b927dff485c3c91e7f3"
