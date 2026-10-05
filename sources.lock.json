@@ -43,6 +43,10 @@
     "alvr_pyrowave_rdo_session_setting": {
       "path": "patches/alvr-pyrowave-rdo-session-setting.patch",
       "sha256": "b8bb0419e94312471576ecdfccb1c26604cd1f1b3f0028379593b33bae25d5d3"
+    },
+    "nvenc_dimension_preflight": {
+      "path": "patches/nvenc-dimension-preflight.patch",
+      "sha256": "10087a15c4a936028ccf5bf4668d482e84adbb03eced7631ad63e5ac4ae1438f"
     }
   },
   "rust": "1.97.1",

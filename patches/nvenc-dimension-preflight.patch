@@ -1,0 +1,164 @@
+diff --git a/alvr/server_openvr/cpp/platform/win32/NvEncoder.cpp b/alvr/server_openvr/cpp/platform/win32/NvEncoder.cpp
+index 522091d40688882a7928063c84c97f49396baf95..d2498aa068afb4a53c883fca1ca265f4a731a9de 100644
+--- a/alvr/server_openvr/cpp/platform/win32/NvEncoder.cpp
++++ b/alvr/server_openvr/cpp/platform/win32/NvEncoder.cpp
+@@ -10,6 +10,7 @@
+ */
+ 
+ #include "NvEncoder.h"
++#include "NvencDimensionPolicy.h"
+ 
+ #ifndef _WIN32
+ #include <cstring>
+@@ -959,6 +960,62 @@ int NvEncoder::GetCapabilityValue(GUID guidCodec, NV_ENC_CAPS capsToQuery)
+     return v;
+ }
+ 
++bool NvEncoder::TryGetCapabilityValue(GUID codec, NV_ENC_CAPS cap, int* value) const {
++    if (!value) {
++        return false;
++    }
++
++    *value = 0;
++    if (!m_hEncoder || !m_nvenc.nvEncGetEncodeCaps) {
++        return false;
++    }
++
++    NV_ENC_CAPS_PARAM params = { NV_ENC_CAPS_PARAM_VER };
++    params.capsToQuery = cap;
++    return m_nvenc.nvEncGetEncodeCaps(m_hEncoder, codec, &params, value) == NV_ENC_SUCCESS;
++}
++
++bool NvEncoder::ValidateEncodeDimensions(
++    const NV_ENC_INITIALIZE_PARAMS& params, std::string* reason
++) const {
++    using namespace alvr_nvenc_dimension;
++
++    Codec codec = Codec::Unknown;
++    if (params.encodeGUID == NV_ENC_CODEC_H264_GUID) {
++        codec = Codec::H264;
++    } else if (params.encodeGUID == NV_ENC_CODEC_HEVC_GUID) {
++        codec = Codec::HEVC;
++    } else if (params.encodeGUID == NV_ENC_CODEC_AV1_GUID) {
++        codec = Codec::AV1;
++    }
++
++    int width_max = 0;
++    int height_max = 0;
++    Caps caps = { false, 0, false, 0 };
++    if (codec != Codec::Unknown) {
++        caps = {
++            TryGetCapabilityValue(params.encodeGUID, NV_ENC_CAPS_WIDTH_MAX, &width_max),
++            width_max,
++            TryGetCapabilityValue(params.encodeGUID, NV_ENC_CAPS_HEIGHT_MAX, &height_max),
++            height_max,
++        };
++    }
++
++    const bool valid = Validate(
++        codec,
++        static_cast<int>(params.encodeWidth),
++        static_cast<int>(params.encodeHeight),
++        caps,
++        reason
++    );
++    if (reason) {
++        *reason += " requested=" + std::to_string(params.encodeWidth) + "x"
++            + std::to_string(params.encodeHeight) + " caps=" + std::to_string(width_max) + "x"
++            + std::to_string(height_max);
++    }
++    return valid;
++}
++
+ int NvEncoder::GetFrameSize() const
+ {
+     switch (GetPixelFormat())
+diff --git a/alvr/server_openvr/cpp/platform/win32/NvEncoder.h b/alvr/server_openvr/cpp/platform/win32/NvEncoder.h
+index 447531fbd5810b904ec967b938f3505573995833..bc32e0abc1e89ea32f1f06f77c0ddfd66f7e36cf 100644
+--- a/alvr/server_openvr/cpp/platform/win32/NvEncoder.h
++++ b/alvr/server_openvr/cpp/platform/win32/NvEncoder.h
+@@ -142,6 +142,9 @@ public:
+     */
+     int GetCapabilityValue(GUID guidCodec, NV_ENC_CAPS capsToQuery);
+ 
++    bool TryGetCapabilityValue(GUID guidCodec, NV_ENC_CAPS capsToQuery, int* value) const;
++    bool ValidateEncodeDimensions(const NV_ENC_INITIALIZE_PARAMS& params, std::string* reason) const;
++
+     /**
+     *  @brief  This function is used to get the current device on which encoder is running.
+     */
+diff --git a/alvr/server_openvr/cpp/platform/win32/NvencDimensionPolicy.h b/alvr/server_openvr/cpp/platform/win32/NvencDimensionPolicy.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..62d070283929821765896945cad804423eb3b434
+--- /dev/null
++++ b/alvr/server_openvr/cpp/platform/win32/NvencDimensionPolicy.h
+@@ -0,0 +1,41 @@
++#pragma once
++
++#include <string>
++
++namespace alvr_nvenc_dimension {
++
++enum class Codec { H264, HEVC, AV1, Unknown };
++
++struct Caps {
++    bool width_query_ok;
++    int width_max;
++    bool height_query_ok;
++    int height_max;
++};
++
++inline const char* CodecName(Codec codec) {
++    switch (codec) {
++    case Codec::H264: return "H.264";
++    case Codec::HEVC: return "HEVC";
++    case Codec::AV1: return "AV1";
++    default: return "unknown";
++    }
++}
++
++inline bool Validate(Codec codec, int width, int height, const Caps& caps, std::string* reason) {
++    const auto fail = [reason](const std::string& value) {
++        if (reason) {
++            *reason = value;
++        }
++        return false;
++    };
++    if (codec == Codec::Unknown) return fail("unsupported NVENC codec");
++    if (width <= 0 || height <= 0) return fail("invalid requested dimensions");
++    if (!caps.width_query_ok || caps.width_max <= 0) return fail("WIDTH_MAX query failed or returned a nonpositive cap");
++    if (!caps.height_query_ok || caps.height_max <= 0) return fail("HEIGHT_MAX query failed or returned a nonpositive cap");
++    if (width > caps.width_max) return fail(std::string(CodecName(codec)) + " requested width exceeds WIDTH_MAX");
++    if (height > caps.height_max) return fail(std::string(CodecName(codec)) + " requested height exceeds HEIGHT_MAX");
++    return true;
++}
++
++} // namespace alvr_nvenc_dimension
+diff --git a/alvr/server_openvr/cpp/platform/win32/VideoEncoderNVENC.cpp b/alvr/server_openvr/cpp/platform/win32/VideoEncoderNVENC.cpp
+index 2776e76359305614157fcc5bb6edff6fa401daa0..9042f948682872c2b183b97417321c149991773e 100644
+--- a/alvr/server_openvr/cpp/platform/win32/VideoEncoderNVENC.cpp
++++ b/alvr/server_openvr/cpp/platform/win32/VideoEncoderNVENC.cpp
+@@ -1,5 +1,7 @@
+ #include "VideoEncoderNVENC.h"
+ #include "NvCodecUtils.h"
++#include <cstdlib>
++#include <cstring>
+ 
+ #include "alvr_server/BitstreamTap.h"
+ #include "alvr_server/Logger.h"
+@@ -57,6 +59,15 @@ void VideoEncoderNVENC::Initialize() {
+         m_renderHeight,
+         m_bitrateInMBits * 1'000'000L
+     );
++    const char* preflight = std::getenv("ALVR_NVENC_DIMENSION_PREFLIGHT");
++    if (preflight && std::strcmp(preflight, "1") == 0) {
++        std::string reason;
++        if (!m_NvNecoder->ValidateEncodeDimensions(initializeParams, &reason)) {
++            throw MakeException("NVENC dimension preflight failed: %s", reason.c_str());
++        }
++        Warn("NVENC dimension preflight passed: %s\n", reason.c_str());
++    }
++
+     try {
+         m_NvNecoder->CreateEncoder(&initializeParams);
+     } catch (NVENCException e) {
