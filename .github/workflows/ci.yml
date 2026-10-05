@@ -37,6 +37,12 @@ jobs:
       - name: TCP frame receiver protocol build
         run: gcc -std=c11 -Wall -Wextra -Werror tools/udptest/tcpframerecv.c -o /tmp/tcp-frame-receiver
       - run: python3 -m unittest tools.tests.test_stock_codec_audit -v
+      - name: Opt-in NVENC dimension-preflight source-wiring and policy tests
+        run: |
+          python3 -m unittest tools.tests.test_nvenc_dimension_preflight -v
+          sh tools/ci/fetch_sources.sh "$XRWIRED_INPUTS/research"
+          g++ -std=c++17 -Wall -Wextra -Werror tools/nvenc_dimension_preflight_test.cpp -I "$XRWIRED_INPUTS/research/ALVR-20.13.0/alvr/server_openvr/cpp/platform/win32" -o /tmp/nvenc-dimension-preflight
+          /tmp/nvenc-dimension-preflight
       - run: python3 -m unittest tools.tests.test_dualstream_h264_design -v
       - run: g++ -std=c++17 -Wall -Werror tools/pyroclient/decode_path_test.cpp -o /tmp/decode-path && /tmp/decode-path
       - run: g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/pass_profile_test.cpp -o /tmp/pass-profile && /tmp/pass-profile
