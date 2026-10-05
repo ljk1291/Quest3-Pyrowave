@@ -34,7 +34,7 @@ if (preflight && std::strcmp(preflight, "1") == 0) {
 
 When the variable is absent or differs from `1`, this overlay makes no capability query and does not change encoder setup or bitstream handling. When it is `1`, it fails before `CreateEncoder()` if validation fails.
 
-The pass marker is currently `Debug(...)`, not `Warn(...)`. In pinned ALVR `alvr/server_openvr/cpp/alvr_server/Logger.cpp:53-61`, `Debug` is compiled out unless `ALVR_DEBUG_LOG` is defined; it also does not forward to `DriverLog`. Therefore this marker is **not release-visible proof**. A future native build must establish its compile-time behavior and use an independently observable marker before it can prove activation.
+The pass marker is `Warn(...)`. In pinned ALVR `alvr/server_openvr/cpp/alvr_server/Logger.cpp:36-42`, `Warn` always calls `_log(..., LogWarn, true)`: it reaches the ALVR `LogWarn` callback and, when OpenVR has initialized `s_pLogFile`, also calls `DriverLog`. This source path does not prove a particular `vrserver.txt` destination or runtime initialization state. A future native build must still retain the ALVR warning/event evidence and establish actual activation.
 
 ## CPU proof and remaining gates
 

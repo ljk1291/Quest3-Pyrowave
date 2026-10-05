@@ -13,6 +13,8 @@ class NvencDimensionPreflightWiringTests(unittest.TestCase):
         self.assertLess(env, create)
         self.assertIn('std::strcmp(preflight, "1") == 0', PATCH)
         self.assertIn('NVENC dimension preflight failed:', PATCH)
+        self.assertIn('Warn(\"NVENC dimension preflight passed:', PATCH)
+        self.assertNotIn('Debug(\"NVENC dimension preflight passed:', PATCH)
 
     def test_overlay_fails_closed_on_unavailable_or_invalid_capability_values(self):
         self.assertIn('*value = 0;', PATCH)

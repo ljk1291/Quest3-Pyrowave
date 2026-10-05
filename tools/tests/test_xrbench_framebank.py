@@ -473,7 +473,7 @@ class FrameBankTests(unittest.TestCase):
                               {'path': 'patches.nvenc_dimension_preflight.path', 'old': None,
                                'new': 'patches/nvenc-dimension-preflight.patch', 'role': 'encoder_capability_preflight_inactive_only'},
                               {'path': 'patches.nvenc_dimension_preflight.sha256', 'old': None,
-                               'new': '19a31859e798f8eba0c3d29f183970b1d6d2e608e18a359a2bee0fd71a686fde', 'role': 'encoder_capability_preflight_inactive_only'}]}
+                               'new': '10087a15c4a936028ccf5bf4668d482e84adbb03eced7631ad63e5ac4ae1438f', 'role': 'encoder_capability_preflight_inactive_only'}]}
             descriptor_path = folder / 'compatibility.json'; descriptor_path.write_text(json.dumps(descriptor))
             with self.assertRaisesRegex(ValueError, 'not the reviewed tracked proof'):
                 fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)

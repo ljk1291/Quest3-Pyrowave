@@ -135,7 +135,7 @@ index 0000000000000000000000000000000000000000..62d070283929821765896945cad80442
 +
 +} // namespace alvr_nvenc_dimension
 diff --git a/alvr/server_openvr/cpp/platform/win32/VideoEncoderNVENC.cpp b/alvr/server_openvr/cpp/platform/win32/VideoEncoderNVENC.cpp
-index 2776e76359305614157fcc5bb6edff6fa401daa0..8174949f37fd5c5fa5b231c12bc828ee7298e39b 100644
+index 2776e76359305614157fcc5bb6edff6fa401daa0..9042f948682872c2b183b97417321c149991773e 100644
 --- a/alvr/server_openvr/cpp/platform/win32/VideoEncoderNVENC.cpp
 +++ b/alvr/server_openvr/cpp/platform/win32/VideoEncoderNVENC.cpp
 @@ -1,5 +1,7 @@
@@ -156,7 +156,7 @@ index 2776e76359305614157fcc5bb6edff6fa401daa0..8174949f37fd5c5fa5b231c12bc828ee
 +        if (!m_NvNecoder->ValidateEncodeDimensions(initializeParams, &reason)) {
 +            throw MakeException("NVENC dimension preflight failed: %s", reason.c_str());
 +        }
-+        Debug("NVENC dimension preflight passed: %s\n", reason.c_str());
++        Warn("NVENC dimension preflight passed: %s\n", reason.c_str());
 +    }
 +
      try {
