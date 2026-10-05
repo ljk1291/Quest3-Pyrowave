@@ -26,7 +26,7 @@
     },
     "pyrowave_rdo_positional": {
       "path": "patches/pyrowave-rdo-positional.patch",
-      "sha256": "b5828125cb308fad68612f34603ac2b258f14596b4b3af8d7bb3150bb0529ddc"
+      "sha256": "9d075b9a91bb1340bad12ff2ba24c58ed63b13dc75e99e8efda883d8c03bc8a0"
     },
     "wo8_light_centre_phase": {
       "path": "patches/wo8-light-centre-phase.patch",

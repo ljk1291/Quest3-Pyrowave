@@ -176,9 +176,9 @@ index 70794e7..da87e47 100644
 +    float right_edge = right ? registers.rdo_tangent_x.w : registers.rdo_tangent_x.y;
 +    float tx = mix(left, right_edge, eye_u);
 +    float ty = mix(registers.rdo_tangent_y.x, registers.rdo_tangent_y.y, uv.y);
-+    float common = 1.0 + tx * tx + ty * ty;
-+    float ppdx = 2624.0 / (right_edge - left) * common / sqrt(1.0 + ty * ty) * 0.017453292519943295;
-+    float ppdy = 2776.0 / (registers.rdo_tangent_y.y - registers.rdo_tangent_y.x) * common / sqrt(1.0 + tx * tx) * 0.017453292519943295;
++    float rdo_tangent_factor = 1.0 + tx * tx + ty * ty;
++    float ppdx = 2624.0 / (right_edge - left) * rdo_tangent_factor / sqrt(1.0 + ty * ty) * 0.017453292519943295;
++    float ppdy = 2776.0 / (registers.rdo_tangent_y.y - registers.rdo_tangent_y.x) * rdo_tangent_factor / sqrt(1.0 + tx * tx) * 0.017453292519943295;
 +    float axis_ppdx = 2624.0 / (right_edge - left) * 0.017453292519943295;
 +    float axis_ppdy = 2776.0 / (registers.rdo_tangent_y.y - registers.rdo_tangent_y.x) * 0.017453292519943295;
 +    float density = registers.rdo_requested_ppd * sqrt(ppdx * ppdy) / sqrt(axis_ppdx * axis_ppdy);
