@@ -2,7 +2,7 @@ diff --git a/pyrowave_encoder.cpp b/pyrowave_encoder.cpp
 index c21165b..2b2d60a 100644
 --- a/pyrowave_encoder.cpp
 +++ b/pyrowave_encoder.cpp
-@@ -37,6 +37,12 @@ struct QuantizerPushData
+@@ -37,6 +37,13 @@ struct QuantizerPushData
  	int32_t block_offset;
  	int32_t block_stride;
  	float rdo_distortion_scale;
@@ -10,9 +10,10 @@ index c21165b..2b2d60a 100644
 +	float rdo_requested_ppd;
 +	float rdo_uniform_cpd;
 +	float rdo_reserved;
-+	vec4 rdo_tangent_x;
++	alignas(16) vec4 rdo_tangent_x;
 +	vec4 rdo_tangent_y;
  };
++static_assert(offsetof(QuantizerPushData, rdo_tangent_x) == 64 && offsetof(QuantizerPushData, rdo_tangent_y) == 80 && sizeof(QuantizerPushData) == 96, "Quantizer push layout must match GLSL.");
  
  struct BlockPackingPushData
 @@ -109,6 +115,7 @@ struct Encoder::Impl final : public WaveletBuffers
@@ -31,7 +32,7 @@ index c21165b..2b2d60a 100644
 +				push.rdo_requested_ppd = rdo_density.pixels_per_degree;
 +				float horiz = (band & 1) ? 0.75f : 0.25f;
 +				float vert = (band & 2) ? 0.75f : 0.25f;
-+				push.rdo_uniform_cpd = std::max(8.0f, std::sqrt(horiz * horiz + vert * vert) * rdo_cpd_nyquist(rdo_density) * std::exp2(-float(level)));
++				push.rdo_uniform_cpd = std::sqrt(horiz * horiz + vert * vert) * rdo_cpd_nyquist(rdo_density) * std::exp2(-float(level));
 +				push.rdo_reserved = 0.0f;
 +				push.rdo_tangent_x = vec4(-1.17589234f, 0.71649807f, -0.71649807f, 1.17589234f);
 +				push.rdo_tangent_y = vec4(-1.22520507f, 0.83088732f, -1.22520507f, 0.83088732f);
@@ -175,7 +176,7 @@ index 70794e7..da87e47 100644
 +    float left = right ? registers.rdo_tangent_x.z : registers.rdo_tangent_x.x;
 +    float right_edge = right ? registers.rdo_tangent_x.w : registers.rdo_tangent_x.y;
 +    float tx = mix(left, right_edge, eye_u);
-+    float ty = mix(registers.rdo_tangent_y.x, registers.rdo_tangent_y.y, uv.y);
++    float ty = mix(registers.rdo_tangent_y.y, registers.rdo_tangent_y.x, uv.y);
 +    float rdo_tangent_factor = 1.0 + tx * tx + ty * ty;
 +    float ppdx = 2624.0 / (right_edge - left) * rdo_tangent_factor / sqrt(1.0 + ty * ty) * 0.017453292519943295;
 +    float ppdy = 2776.0 / (registers.rdo_tangent_y.y - registers.rdo_tangent_y.x) * rdo_tangent_factor / sqrt(1.0 + tx * tx) * 0.017453292519943295;
@@ -187,7 +188,7 @@ index 70794e7..da87e47 100644
 +        density /= 1.0 + min(1.0, length(vec2(tx, ty)) / edge);
 +    }
 +    float local_cpd = max(8.0, registers.rdo_uniform_cpd * density / registers.rdo_requested_ppd);
-+    float ratio = rdo_csf(local_cpd) / rdo_csf(registers.rdo_uniform_cpd);
++    float ratio = rdo_csf(local_cpd) / rdo_csf(max(8.0, registers.rdo_uniform_cpd));
 +    return ratio * ratio;
 +}
 +
