@@ -23,6 +23,15 @@ The optional last-level YCbCr conversion is also excluded. It would change
 rounding, chroma sampling and range handling at the last inverse level. It needs
 an independent byte-for-byte CPU reference and a per-plane range proof first.
 
+The current CPU model proves the literal one-dimensional 5/3 lifting loops on
+an already gathered apron, including the pair-local ±1 calculation. It does
+not yet establish the complete two-dimensional shader replacement: the exact
+mapping from `load_image_with_apron()`'s transposed gathers and four texture
+layers to LL/HL/LH/HH, and the intermediate shared-memory layout between the
+horizontal and vertical transforms, still need an independently checked model.
+That missing mapping blocks an `idwt53` shader, header regeneration, or any
+claim that a candidate reproduces retained frames.
+
 Qualification gates before any production activation are:
 
 1. A scalar CPU reference mirrors the current 5/3 inverse loops, gathered
