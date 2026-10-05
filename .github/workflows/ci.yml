@@ -56,10 +56,32 @@ jobs:
           sudo apt-get install -y --no-install-recommends libegl-dev libgles-dev libegl-mesa0 libgl1-mesa-dri
           g++ -std=c++17 -O2 -Wall -Wextra -Werror tools/pyroclient/gpu_readback_gles.cpp tools/pyroclient/gpu_readback_test.cpp -lEGL -lGLESv2 -o /tmp/readback-test
           /tmp/readback-test
-  offline-position-rdo:
-    runs-on: windows-2022
+  position-rdo-shaders:
+    runs-on: ubuntu-24.04
     needs: tests
     if: ${{ inputs.offline_position_rdo && always() && needs.tests.result == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh tools/ci/fetch_sources.sh "$GITHUB_WORKSPACE/ws/research"
+      - name: Regenerate pinned shader header on Linux
+        run: |
+          p="$GITHUB_WORKSPACE/ws/research/pyrowave"
+          cmake -S "$p/Granite" -B /tmp/position-rdo-shader-tools -G Ninja -DCMAKE_BUILD_TYPE=Release -DGRANITE_TOOLS=ON -DGRANITE_RENDERER=OFF -DGRANITE_PLATFORM=null -DGRANITE_VULKAN_FOSSILIZE=OFF -DGRANITE_VULKAN_SPIRV_CROSS=ON -DGRANITE_VULKAN_SHADER_MANAGER_RUNTIME_COMPILER=ON -DGRANITE_VULKAN_SYSTEM_HANDLES=OFF
+          cmake --build /tmp/position-rdo-shader-tools --target slangmosh -j 4
+          compiler=$(find /tmp/position-rdo-shader-tools -type f -name slangmosh | head -n 1)
+          "$compiler" "$p/shaders/slangmosh.json" --namespace PyroWave --output "$p/shaders/slangmosh.hpp" -O --strip
+          python3 tools/ci/check_shader_manifest.py "$p" --write
+          mkdir out
+          cp "$p/shaders/slangmosh.hpp" "$p/shaders/quest3-manifest.json" out/
+          sha256sum "$p/shaders/slangmosh.hpp" "$p/shaders/quest3-manifest.json" > out/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: position-rdo-generated-shaders
+          path: out/
+  offline-position-rdo:
+    runs-on: windows-2022
+    needs: [tests, position-rdo-shaders]
+    if: ${{ inputs.offline_position_rdo && always() && needs.tests.result == 'success' && needs.position-rdo-shaders.result == 'success' }}
     steps:
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
@@ -69,12 +91,16 @@ jobs:
       - name: Reconstruct locked PyroWave source
         shell: bash
         run: sh tools/ci/fetch_sources.sh "$XRWIRED_INPUTS/research"
-      - name: Build offline shader tool and regenerate the embedded shader
-        shell: cmd
+      - uses: actions/download-artifact@v4
+        with:
+          name: position-rdo-generated-shaders
+          path: generated-shaders
+      - name: Install regenerated shader evidence
+        shell: pwsh
         run: |
-          call tools\windows\build_pyrowave_pc.cmd tools || exit /b 1
-          ws\research\pyrowave\build-tools\Release\slangmosh.exe ws\research\pyrowave\shaders\slangmosh.json --namespace PyroWave --output ws\research\pyrowave\shaders\slangmosh.hpp -O --strip || exit /b 1
-          python tools\ci\check_shader_manifest.py ws\research\pyrowave --write || exit /b 1
+          Copy-Item generated-shaders/slangmosh.hpp "$env:XRWIRED_INPUTS/research/pyrowave/shaders/"
+          Copy-Item generated-shaders/quest3-manifest.json "$env:XRWIRED_INPUTS/research/pyrowave/shaders/"
+          python tools/ci/check_shader_manifest.py "$env:XRWIRED_INPUTS/research/pyrowave"
       - name: Build offline encoder and CPU RDO tests
         shell: cmd
         run: call tools\windows\build_pyrowave_pc.cmd pc rdo-test || exit /b 1
