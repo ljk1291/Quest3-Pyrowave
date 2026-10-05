@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "kind": "wo6_fused_inverse_cpu_design_result",
+  "repository_commit": "9177afccbe3d24ef1642159e8d82c67a4c5d404a",
+  "scope": "CPU equivalence-model proof only; no shader, runtime, device, timing, or quality activation",
+  "local_validation": {
+    "cdf53": {"command": "python -m pytest tools/tests/test_wo6_fused_inverse.py -q", "tests_passed": 4},
+    "cdf97": {"command": "python -m unittest tools.tests.test_wo6_cdf97_model -v", "tests_passed": 5}
+  },
+  "ci": {
+    "workflow": ".github/workflows/ci.yml",
+    "explicit_steps": ["CDF 5/3 pair-local inverse model parity", "CDF 9/7 fused inverse model parity"],
+    "event": "workflow_dispatch",
+    "cpu_only": true,
+    "run_id": 37253579925,
+    "head_sha": "9177afccbe3d24ef1642159e8d82c67a4c5d404a",
+    "conclusion": "success",
+    "url": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37253579925"
+  },
+  "cdf53_proof": [
+    "literal inverse update-before-predict loops on an interleaved apron",
+    "pair-local current plus adjacent coefficient neighbourhood",
+    "randomized, impulse, endpoint, invalid-shape and FP16 shared-store/load cases"
+  ],
+  "cdf97_proof": [
+    "16-sample apron with K/inverse-K scaling and Delta/Gamma/Beta/Alpha order",
+    "float32 lifting and FP16 writeback",
+    "LL=0, x-high=2, y-high=1, HH=3 layer convention",
+    "generate_mirror_uv/gather .wxzy interior and near-edge mapping",
+    "two-dimensional horizontal then vertical model"
+  ],
+  "mapping_source": {
+    "source_lock_sha256": "53c2a98fab05403745aeba2ee1dee10f4300fc8652daa241806e89d890e24da4",
+    "pyrowave": {
+      "repository": "https://github.com/Themaister/pyrowave",
+      "commit": "d2997ac172bdc00e29c58e3f2938acb7e94580bf",
+      "shader_path": "shaders/idwt.comp",
+      "retained_shader_sha256": "e3bb1b44e1e0cb0c2137c44dc50c42f0de4b625f8505f26e96b89ea210c2c3af"
+    },
+    "integration": {
+      "repository": "https://github.com/Terminal-ennui/galaxy-xr-alvr-pyrowave-444",
+      "commit": "54cc8519bddceff57e159e6f39914e373b512809",
+      "candidate_shader_path": "tools/pyrowave_android/idwt97_fused.comp",
+      "candidate_shader_sha256": "6d0ec2eba7d26f4ede917ed1aa62dc6a79529351fd004af1519c029a94f4aefe",
+      "cpu_model_path": "tools/xrbench/wo6_cdf97_model.py",
+      "cpu_model_sha256": "3e272845cb2c18b61536bc93dbf28617bb0ed97c9252f54912996323fa662250"
+    },
+    "statement": "The CPU model independently records observed arithmetic and mapping facts; it does not copy shader source or establish shader equivalence."
+  },
+  "attribution": {
+    "license": "MIT",
+    "notice": "LICENSE and NOTICE retain Quest3-Pyrowave, PyroWave, Granite, and ALVR attribution.",
+    "pyrowave_copyright_holder": "Hans-Kristian Arntzen (Themaister)",
+    "source_model_status": "Independently written CPU model; no vendor shader code is reproduced here."
+  },
+  "open_shader_gates": [
+    "whole-stage workgroup coverage and final-image boundary writeback",
+    "retained 5/3 and 9/7 decoded-frame comparison for Y, Cb and Cr",
+    "shader compilation and regenerated slangmosh header plus manifest binding",
+    "opt-in-only decoder integration and default all-90-frame regression",
+    "separate armed device measurement after correctness qualification"
+  ],
+  "not_claimed": ["shader equivalence", "decoded-stream parity", "quality gain", "GPU timing", "runtime activation"]
+}

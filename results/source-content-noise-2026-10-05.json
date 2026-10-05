@@ -1,0 +1,165 @@
+{
+  "schema": 1,
+  "kind": "retained_source_noise_cpu_diagnostic",
+  "complete": true,
+  "source_sha256": "e61163143ec9e75634fc89fcc06b3bb007667a53d94a0cbf97a39c09b452a0c2",
+  "source_frames": 90,
+  "distinct_frame_payloads": 89,
+  "nominal_header_hz": 90,
+  "sampling_is_live_fps_measurement": false,
+  "script_sha256": "04bbc245993d89caf97579d5401b469ec0c4e1a47e37a6c266fc1a23924e95ff",
+  "numpy_version": "2.3.5",
+  "opencv_version": "4.13.0",
+  "method": "Phase correlation of high-passed adjacent source ROIs; only response >=0.3 and shift <=4 px qualify. Align previous with bilinear interpolation, exclude 8-pixel border, select current gradient <=2 codes/pixel. MAD(diff)/0.67449/sqrt(2) is a noise diagnostic, not an identified film-grain amplitude.",
+  "limitations": [
+    "Regions are candidate static regions, not verified static scene surfaces. Movement, lighting, disocclusion, antialiasing, sharpening and interpolation remain confounders.",
+    "No clean game-render reference or toggled-setting comparison exists; these pixels cannot identify a game feature causally.",
+    "Captured 90 frames include 89 distinct payloads and irregular capture times. Nominal F90 normalizes codec budget only."
+  ],
+  "settings_to_try_if_exposed": [
+    "Film grain: compare off at the identical checkpoint; random high-frequency content consumes intra-codec bytes.",
+    "Motion blur: compare off for the moving-line/clarity test; it changes the source and must be a separate comparison.",
+    "Sharpening or DLSS sharpening: compare zero/default strength; halos and amplified noise are candidate contributors.",
+    "Dynamic resolution: hold a fixed render scale for comparisons.",
+    "Do not treat renderer dithering or temporal AA as a known user toggle. If exposed, test separately; disabling temporal AA may worsen the reported aliasing."
+  ],
+  "regions": [
+    {
+      "name": "fence",
+      "roi_left_eye_xywh": [
+        1740,
+        1310,
+        240,
+        274
+      ],
+      "raw_adjacent_absolute_luma_difference": {
+        "n": 5852640,
+        "mean": 12.45722409032505,
+        "p50": 4.0,
+        "p95": 59.0,
+        "p99": 117.0,
+        "max": 233.0
+      },
+      "aligned_low_gradient_absolute_difference": {
+        "n": 1207279,
+        "mean": 0.5768337666510807,
+        "p50": 0.3125,
+        "p95": 1.6875,
+        "p99": 4.86328125,
+        "max": 95.21484375
+      },
+      "pairwise_sigma_diagnostic": {
+        "n": 27,
+        "mean": 0.39286885909004315,
+        "p50": 0.3839201949453729,
+        "p95": 0.7891351609652022,
+        "p99": 0.9290664035722914,
+        "max": 0.956217246596733
+      },
+      "qualified_pair_count": 27
+    },
+    {
+      "name": "fog",
+      "roi_left_eye_xywh": [
+        1610,
+        1100,
+        256,
+        256
+      ],
+      "raw_adjacent_absolute_luma_difference": {
+        "n": 5832704,
+        "mean": 9.775833644224017,
+        "p50": 2.0,
+        "p95": 50.0,
+        "p99": 106.0,
+        "max": 219.0
+      },
+      "aligned_low_gradient_absolute_difference": {
+        "n": 1481958,
+        "mean": 0.38050381248679954,
+        "p50": 0.2373046875,
+        "p95": 1.0,
+        "p99": 1.66796875,
+        "max": 39.587890625
+      },
+      "pairwise_sigma_diagnostic": {
+        "n": 27,
+        "mean": 0.30042466752596075,
+        "p50": 0.30406479287944876,
+        "p95": 0.4946939729551733,
+        "p99": 0.6499410827543708,
+        "max": 0.6941277434813147
+      },
+      "qualified_pair_count": 27
+    },
+    {
+      "name": "dark_wall",
+      "roi_left_eye_xywh": [
+        1280,
+        1260,
+        256,
+        256
+      ],
+      "raw_adjacent_absolute_luma_difference": {
+        "n": 5832704,
+        "mean": 11.741113384118242,
+        "p50": 4.0,
+        "p95": 48.0,
+        "p99": 104.0,
+        "max": 249.0
+      },
+      "aligned_low_gradient_absolute_difference": {
+        "n": 1105749,
+        "mean": 0.5310901509477399,
+        "p50": 0.322265625,
+        "p95": 1.384765625,
+        "p99": 3.373046875,
+        "max": 77.515625
+      },
+      "pairwise_sigma_diagnostic": {
+        "n": 24,
+        "mean": 0.3663025277765917,
+        "p50": 0.3491114288615893,
+        "p95": 0.8027515390989318,
+        "p99": 0.9349122211940337,
+        "max": 0.9695264627132002
+      },
+      "qualified_pair_count": 24
+    },
+    {
+      "name": "wood_gravel",
+      "roi_left_eye_xywh": [
+        360,
+        2540,
+        256,
+        256
+      ],
+      "raw_adjacent_absolute_luma_difference": {
+        "n": 5832704,
+        "mean": 4.390282105863764,
+        "p50": 2.0,
+        "p95": 19.0,
+        "p99": 45.0,
+        "max": 103.0
+      },
+      "aligned_low_gradient_absolute_difference": {
+        "n": 784485,
+        "mean": 0.35957113534277263,
+        "p50": 0.28125,
+        "p95": 1.0,
+        "p99": 1.416015625,
+        "max": 9.125
+      },
+      "pairwise_sigma_diagnostic": {
+        "n": 15,
+        "mean": 0.3327990924404866,
+        "p50": 0.3276118999676972,
+        "p95": 0.5407644064638617,
+        "p99": 0.560257303669663,
+        "max": 0.5651305279711133
+      },
+      "qualified_pair_count": 15
+    }
+  ],
+  "scope": "CPU diagnostic on retained Metro source frames and candidate static regions; no toggled-setting, live-FPS or causal film-grain measurement"
+}

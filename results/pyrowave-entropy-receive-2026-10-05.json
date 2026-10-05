@@ -1,0 +1,98 @@
+{
+  "schema": 2,
+  "kind": "pyrowave_entropy_receive_cpu_analysis",
+  "complete": true,
+  "scope": "parser accounting and byte-prefix arithmetic only",
+  "input_sha256": "3136947417471628466e3b082bdb5dc834195a62063712475d425f3ec043c3d4",
+  "frames": 90,
+  "method": {
+    "parser": "tools/xrbench/pyrowave_bitplanes.py",
+    "harness_revision": "cd55b93cd34f8fae782e259d86162e0775d9f42a",
+    "native_revision": "d2997ac172bdc00e29c58e3f2938acb7e94580bf",
+    "native_locations": [
+      "pyrowave_common.hpp: BitstreamHeader/BitstreamSequenceHeader",
+      "pyrowave_encoder.cpp:1034 validate_bitstream",
+      "pyrowave_encoder.cpp:1122 packetize",
+      "pyrowave_common.cpp:213 init_block_meta"
+    ]
+  },
+  "source_attribution": {
+    "provenance_corrected": true,
+    "scope": "parser-validated retained CDF 9/7 bitstream only; no Haar or CDF 5/3 source-equivalence claim",
+    "locked_pyrowave_base": {
+      "repository": "https://github.com/Themaister/pyrowave",
+      "commit": "d2997ac172bdc00e29c58e3f2938acb7e94580bf"
+    },
+    "matching_pair_build": {
+      "repository_commit": "80a16353ca127508fec745dec53dc790ceb77fb2",
+      "sources_lock_sha256": "f8510aa72b713ca658475bab0956c98f3adf98b1962b553c781bdc62e5e7bbb0",
+      "build_metadata_sha256": "53cbcfdeb0ef4f379a2d5a89190794213618c3aa7deeb15090a5655e916a6064",
+      "tools_build_metadata_sha256": "602bce856cd45b0efac49a112e6e49f5ff2fdde204536270d14b60fb5f5577d1",
+      "source_manifest_sha256": "1a595cb750741e51725b9b6e6afd536d4814bac79dce57322b2e0a6feb1fe0c7",
+      "overlays": {
+        "pyrowave_rdo_density": "1641a9456dd9d9e5811a110016cfe673587e7de56d9a76d709a3ea7599f3a4cc",
+        "wo8_light_centre_phase": "4f4ce22430f810c78195d749425f35f77ffdb1a14c844b927dff485c3c91e7f3"
+      }
+    },
+    "cdf97_block_order_review": {
+      "validated_against": "locked base and matching-pair overlay list",
+      "init_block_meta": "level 4 through 0, component, then band; unchanged by the reviewed overlays",
+      "packetize": "non-empty block metadata in increasing block index; CDF 9/7 retains the base start-of-frame code",
+      "result": "supports parser prefix mapping for the retained CDF 9/7 bitstream only"
+    }
+  },
+  "payload_bytes": 124995088,
+  "byte_classes": {
+    "bitplanes": 83689797,
+    "signs": 18887600,
+    "controls": 17284161,
+    "block_headers": 4315880,
+    "sequence_headers": 720,
+    "alignment": 816930
+  },
+  "restricted_h0": {
+    "context": "serialized q_bits plus plane ordinal",
+    "bytes": 72190793.76761791,
+    "whole_payload_difference_percent": 9.2,
+    "coded_stream_measured": false,
+    "decode_cost_measured": false
+  },
+  "prefix": {
+    "order": "level 4..0, component, band; ascending active block index",
+    "top_level_luma_ll_bytes": 2017636,
+    "fraction": 0.0161,
+    "ideal_1000mbps_ms": 0.179,
+    "ideal_mean_frame_ms": 11.111,
+    "luma_level_4_prefixes": [
+      {
+        "through_band": 0,
+        "bytes_over_90_frames": 2017636,
+        "payload_fraction": 0.0161417223051197,
+        "ideal_1000mbps_ms_per_frame": 0.17934542222222222
+      },
+      {
+        "through_band": 1,
+        "bytes_over_90_frames": 3116048,
+        "payload_fraction": 0.02492936362427298,
+        "ideal_1000mbps_ms_per_frame": 0.27698204444444446
+      },
+      {
+        "through_band": 2,
+        "bytes_over_90_frames": 4220024,
+        "payload_fraction": 0.03376151869263855,
+        "ideal_1000mbps_ms_per_frame": 0.37511324444444444
+      },
+      {
+        "through_band": 3,
+        "bytes_over_90_frames": 5123060,
+        "payload_fraction": 0.040986090589415804,
+        "ideal_1000mbps_ms_per_frame": 0.4553831111111111
+      }
+    ]
+  },
+  "limits": {
+    "wire_arrivals_matched": false,
+    "decoder_per_range_work_measured": false,
+    "complete_frame_overlap_ms": 0
+  }
+}

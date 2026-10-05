@@ -1,0 +1,972 @@
+{
+  "schema": 1,
+  "kind": "retained_log_latency_audit",
+  "complete": true,
+  "script_sha256": "eabd1068587284efd5213baed5ea683b30b1c154f30a726104469a52d09dcfcb",
+  "scope": "CPU audit of retained Session05 Godlike-sized Haar/300Mbps/90Hz off/on/off/on allocation diagnostics; no new hardware timing.",
+  "definition": "ALVR estimated input-acquisition-to-predicted-display interval; network is residual by construction. Not optical motion-to-photon.",
+  "rows": [
+    {
+      "label": "optimal-off-a",
+      "events_sha256": "dcdc54ea80dffefc7c1d93925f7f53b74d595098e0e9a8309792669058eeb9d6",
+      "event_count": 2799,
+      "build": {
+        "verified": true,
+        "application_version": "20.13.0-ljk1291.2+f2e9df5704cc",
+        "server_version": "20.13.0-ljk1291.2+f2e9df5704cc",
+        "protocol_version": "20.13.0-ljk1291.2",
+        "repository_commit": "f2e9df5704cc679513848bf6ffb63ef1695479f9",
+        "client_package_id": "io.github.ljk1291.quest3pyrowave",
+        "shader_hashes": {
+          "shaders/constants.h": "3bc9555f8399bad2bd6960536125588fd7dbc7936a7147755fc497241f04e062",
+          "shaders/dwt.comp": "f58c3f95d68a90f4621fc1999bcf9a95e1a263b80d20355b0ac20002828a90b1",
+          "shaders/dwt_common.h": "591f529143fce7efad00c0f5a5e6d9be0a714fb2d5098ac5e89242c0041ada26",
+          "shaders/dwt_quant_scale.h": "4a5e60c22785075341afa29211275857a4f3922999e0f5799131c5f4acf2c4be",
+          "shaders/dwt_swizzle.h": "0283e54d268f25375866274dd3728384c75d9783cab12787d8914588b80f0f30",
+          "shaders/idwt.comp": "e3bb1b44e1e0cb0c2137c44dc50c42f0de4b625f8505f26e96b89ea210c2c3af",
+          "shaders/idwt_haar_fused.comp": "a85ffbeb0966e22855d8c76690a7283fb6a2a5967ae5028feac81663c99be629",
+          "shaders/slangmosh.hpp": "4f84897f9d7fbb07cbc5ccba6d98bc83b85f697ca170578ba959118c84032995",
+          "shaders/slangmosh.json": "d5ea9829b89ee2ac5d16c12b34561971cfeaef5e97eec5ac47ec9a4baa3d06d5",
+          "shaders/wavelet_dequant.comp": "e588ddfdd7c3d1873b758a9d8511b80a946fccf384a7aab0b3368d4212aa1a44"
+        },
+        "native_library_sha256": {
+          "libpyroclient.so": "bd33b0fa2ac6eb600c16806f645b4704afa4144a501fed08835efa39bc6c246d",
+          "libpyrowave-shared.so": "9c5ba02ba372745f23289a5ebd9555a6b2a21a9672a3ad545143c26889c09848"
+        }
+      },
+      "settings": {
+        "codec": "PyroWave",
+        "bitrate_mode": "ConstantMbps",
+        "target_mbps": 300,
+        "requested_hz": 90.0,
+        "negotiated_hz": 90,
+        "decode_path": "Compute",
+        "wavelet": "Haar",
+        "chroma": "420",
+        "transport": "Tcp",
+        "stream_protocol": "Tcp",
+        "hdr_enabled": false,
+        "hdr_server_override": true,
+        "enforce_server_frame_pacing": true,
+        "foveated_encoding_enabled": false,
+        "clientside_foveation_enabled": false,
+        "render_resolution": {
+          "width": 3072,
+          "height": 3232
+        },
+        "encoded_resolution": {
+          "width": 3072,
+          "height": 3232
+        },
+        "negotiated_render_resolution": {
+          "width": 3072,
+          "height": 3232
+        },
+        "negotiated_encoded_resolution": {
+          "width": 3072,
+          "height": 3232
+        }
+      },
+      "alvr_estimated_stages_ms": {
+        "total_ms": {
+          "mean": 81.05561128152911,
+          "p50": 84.787205,
+          "p95": 88.65128800000001,
+          "p99": 96.00639439999999,
+          "min": 62.616690000000006,
+          "max": 162.66389
+        },
+        "game_time_ms": {
+          "mean": 3.6837585551982848,
+          "p50": 3.3208,
+          "p95": 5.370009999999999,
+          "p99": 15.612936,
+          "min": 0.9301,
+          "max": 105.602
+        },
+        "server_compositor_ms": {
+          "mean": 0.15330943193997856,
+          "p50": 0.1482,
+          "p95": 0.21262999999999996,
+          "p99": 0.27965999999999996,
+          "min": 0.0949,
+          "max": 1.0434
+        },
+        "encoder_ms": {
+          "mean": 1.885272704537335,
+          "p50": 1.7914999999999999,
+          "p95": 2.1206799999999997,
+          "p99": 3.7610359999999994,
+          "min": 1.6103,
+          "max": 12.117299999999998
+        },
+        "network_ms": {
+          "mean": 6.150358187209719,
+          "p50": 5.931118,
+          "p95": 7.855006299999999,
+          "p99": 8.768235879999999,
+          "min": 3.7226160000000004,
+          "max": 49.615327
+        },
+        "decoder_ms": {
+          "mean": 23.474897548052876,
+          "p50": 23.403283000000002,
+          "p95": 28.897513099999998,
+          "p99": 30.323546779999997,
+          "min": 11.137970000000001,
+          "max": 35.41297
+        },
+        "decoder_queue_ms": {
+          "mean": 4.700220609146124,
+          "p50": 4.693751000000001,
+          "p95": 5.2748441,
+          "p99": 5.78835386,
+          "min": 1.254219,
+          "max": 14.453804
+        },
+        "vsync_queue_ms": {
+          "mean": 23.89283178063594,
+          "p50": 24.210539999999998,
+          "p95": 29.197263200000002,
+          "p99": 30.04046036,
+          "min": 14.651161,
+          "max": 38.952447
+        },
+        "client_compositor_ms": {
+          "mean": 17.11496244801715,
+          "p50": 17.144168,
+          "p95": 18.0215485,
+          "p99": 19.13186904,
+          "min": 0.0,
+          "max": 20.09271
+        }
+      },
+      "mean_partition_residual_ms": 1.679171132159309e-08,
+      "max_abs_partition_residual_ms": 1.3000000007035162e-05,
+      "negative_residual_network_clamped_sample_count": 0,
+      "largest_three_alvr_partition_means": [
+        {
+          "stage": "vsync_queue_ms",
+          "mean_ms": 23.89283178063594
+        },
+        {
+          "stage": "decoder_ms",
+          "mean_ms": 23.474897548052876
+        },
+        {
+          "stage": "client_compositor_ms",
+          "mean_ms": 17.11496244801715
+        }
+      ],
+      "native_intervals_ms": {
+        "gpu_decode_ms": {
+          "p01": 8.18572484,
+          "p50": 8.997603999999999,
+          "p95": 9.297709999999999,
+          "p99": 9.562508919999999,
+          "max": 10.095156,
+          "n": 2824
+        },
+        "native_convert_ms": {
+          "p01": 4.23409395,
+          "p50": 4.9072395,
+          "p95": 5.378971,
+          "p99": 5.860823421,
+          "max": 6.425885,
+          "n": 2824
+        },
+        "decode_to_fence_ms": {
+          "p01": 16.27691631,
+          "p50": 17.471382,
+          "p95": 18.321824550000002,
+          "p99": 19.467261869999998,
+          "max": 20.3612,
+          "n": 2824
+        },
+        "native_record_ms": {
+          "p01": 0.51949454,
+          "p50": 0.6583855000000001,
+          "p95": 1.00148485,
+          "p99": 1.19396738,
+          "max": 1.530989,
+          "n": 2824
+        },
+        "native_wait_ms": {
+          "p01": 15.56707475,
+          "p50": 16.7017725,
+          "p95": 17.582923349999998,
+          "p99": 18.718694539999998,
+          "max": 19.60271,
+          "n": 2824
+        },
+        "eye_acquire_wait_ms": {
+          "p01": 0.0026560002,
+          "p50": 0.003385,
+          "p95": 0.00567785,
+          "p99": 0.013569849999999998,
+          "max": 0.208073,
+          "n": 2824
+        },
+        "eye_render_ms": {
+          "p01": 15.77191526,
+          "p50": 17.12422,
+          "p95": 17.99535935,
+          "p99": 19.10370336,
+          "max": 20.075157,
+          "n": 2824
+        },
+        "eye_release_ms": {
+          "p01": 0.002083,
+          "p50": 0.004011,
+          "p95": 0.006927,
+          "p99": 0.011727610884999979,
+          "max": 0.16234401,
+          "n": 2824
+        },
+        "eye_completion_observed_ms": null
+      },
+      "fresh_submissions_s": 55.99794233348547,
+      "runtime_hz": 90.0,
+      "sustained_90hz_pass": false
+    },
+    {
+      "label": "optimal-on",
+      "events_sha256": "44bdf2728f9079619917cb7c397df8582c25503c2ead665a0a3a00affb2ed88f",
+      "event_count": 4134,
+      "build": {
+        "verified": true,
+        "application_version": "20.13.0-ljk1291.2+f2e9df5704cc",
+        "server_version": "20.13.0-ljk1291.2+f2e9df5704cc",
+        "protocol_version": "20.13.0-ljk1291.2",
+        "repository_commit": "f2e9df5704cc679513848bf6ffb63ef1695479f9",
+        "client_package_id": "io.github.ljk1291.quest3pyrowave",
+        "shader_hashes": {
+          "shaders/constants.h": "3bc9555f8399bad2bd6960536125588fd7dbc7936a7147755fc497241f04e062",
+          "shaders/dwt.comp": "f58c3f95d68a90f4621fc1999bcf9a95e1a263b80d20355b0ac20002828a90b1",
+          "shaders/dwt_common.h": "591f529143fce7efad00c0f5a5e6d9be0a714fb2d5098ac5e89242c0041ada26",
+          "shaders/dwt_quant_scale.h": "4a5e60c22785075341afa29211275857a4f3922999e0f5799131c5f4acf2c4be",
+          "shaders/dwt_swizzle.h": "0283e54d268f25375866274dd3728384c75d9783cab12787d8914588b80f0f30",
+          "shaders/idwt.comp": "e3bb1b44e1e0cb0c2137c44dc50c42f0de4b625f8505f26e96b89ea210c2c3af",
+          "shaders/idwt_haar_fused.comp": "a85ffbeb0966e22855d8c76690a7283fb6a2a5967ae5028feac81663c99be629",
+          "shaders/slangmosh.hpp": "4f84897f9d7fbb07cbc5ccba6d98bc83b85f697ca170578ba959118c84032995",
+          "shaders/slangmosh.json": "d5ea9829b89ee2ac5d16c12b34561971cfeaef5e97eec5ac47ec9a4baa3d06d5",
+          "shaders/wavelet_dequant.comp": "e588ddfdd7c3d1873b758a9d8511b80a946fccf384a7aab0b3368d4212aa1a44"
+        },
+        "native_library_sha256": {
+          "libpyroclient.so": "bd33b0fa2ac6eb600c16806f645b4704afa4144a501fed08835efa39bc6c246d",
+          "libpyrowave-shared.so": "9c5ba02ba372745f23289a5ebd9555a6b2a21a9672a3ad545143c26889c09848"
+        }
+      },
+      "settings": {
+        "codec": "PyroWave",
+        "bitrate_mode": "ConstantMbps",
+        "target_mbps": 300,
+        "requested_hz": 90.0,
+        "negotiated_hz": 90,
+        "decode_path": "Compute",
+        "wavelet": "Haar",
+        "chroma": "420",
+        "transport": "Tcp",
+        "stream_protocol": "Tcp",
+        "hdr_enabled": false,
+        "hdr_server_override": true,
+        "enforce_server_frame_pacing": true,
+        "foveated_encoding_enabled": false,
+        "clientside_foveation_enabled": false,
+        "render_resolution": {
+          "width": 3072,
+          "height": 3232
+        },
+        "encoded_resolution": {
+          "width": 3072,
+          "height": 3232
+        },
+        "negotiated_render_resolution": {
+          "width": 3072,
+          "height": 3232
+        },
+        "negotiated_encoded_resolution": {
+          "width": 3072,
+          "height": 3232
+        }
+      },
+      "alvr_estimated_stages_ms": {
+        "total_ms": {
+          "mean": 70.66058265505563,
+          "p50": 69.581457,
+          "p95": 76.78062249999999,
+          "p99": 84.2514689,
+          "min": 47.184303,
+          "max": 214.04754
+        },
+        "game_time_ms": {
+          "mean": 13.480558153362361,
+          "p50": 13.447,
+          "p95": 16.758435000000002,
+          "p99": 26.236383000000036,
+          "min": 1.0876,
+          "max": 152.85710999999998
+        },
+        "server_compositor_ms": {
+          "mean": 0.14712496371552974,
+          "p50": 0.1388,
+          "p95": 0.20407499999999995,
+          "p99": 0.26893600000000006,
+          "min": 0.1008,
+          "max": 0.42939999999999995
+        },
+        "encoder_ms": {
+          "mean": 1.7983794388001937,
+          "p50": 1.7236500000000001,
+          "p95": 1.984345,
+          "p99": 2.9710150000000053,
+          "min": 1.52,
+          "max": 12.5084
+        },
+        "network_ms": {
+          "mean": 5.9652801153846156,
+          "p50": 5.7924515,
+          "p95": 7.538866849999999,
+          "p99": 8.493447570000003,
+          "min": 0.0,
+          "max": 39.104905
+        },
+        "decoder_ms": {
+          "mean": 17.1770419109821,
+          "p50": 17.175417500000002,
+          "p95": 22.45516585,
+          "p99": 23.14585981,
+          "min": 5.10198,
+          "max": 25.827868
+        },
+        "decoder_queue_ms": {
+          "mean": 2.3291435643444607,
+          "p50": 2.0508855,
+          "p95": 3.150352,
+          "p99": 6.672056340000004,
+          "min": 0.053384999999999995,
+          "max": 19.87297
+        },
+        "vsync_queue_ms": {
+          "mean": 18.633717721335266,
+          "p50": 18.411789,
+          "p95": 24.12066045,
+          "p99": 24.79491506,
+          "min": 8.159961000000001,
+          "max": 32.923333
+        },
+        "client_compositor_ms": {
+          "mean": 11.12980092670537,
+          "p50": 11.2616415,
+          "p95": 12.102675549999999,
+          "p99": 12.554245790000001,
+          "min": 0.0,
+          "max": 16.023021
+        }
+      },
+      "mean_partition_residual_ms": -0.000464139574262124,
+      "max_abs_partition_residual_ms": 1.9185490000000054,
+      "negative_residual_network_clamped_sample_count": 1,
+      "largest_three_alvr_partition_means": [
+        {
+          "stage": "vsync_queue_ms",
+          "mean_ms": 18.633717721335266
+        },
+        {
+          "stage": "decoder_ms",
+          "mean_ms": 17.1770419109821
+        },
+        {
+          "stage": "game_time_ms",
+          "mean_ms": 13.480558153362361
+        }
+      ],
+      "native_intervals_ms": {
+        "gpu_decode_ms": {
+          "p01": 7.311004044000001,
+          "p50": 9.017708,
+          "p95": 9.3541822,
+          "p99": 9.626573599999999,
+          "max": 10.993176,
+          "n": 4215
+        },
+        "native_convert_ms": {
+          "p01": 1.166875,
+          "p50": 1.3055208,
+          "p95": 2.21429678,
+          "p99": 2.3843300579999975,
+          "max": 4.1427083,
+          "n": 4215
+        },
+        "decode_to_fence_ms": {
+          "p01": 11.05601684,
+          "p50": 11.543231,
+          "p95": 12.359491,
+          "p99": 12.793798399999998,
+          "max": 16.589897,
+          "n": 4215
+        },
+        "native_record_ms": {
+          "p01": 0.44392798,
+          "p50": 0.573698,
+          "p95": 0.8348901,
+          "p99": 1.0144794399999992,
+          "max": 1.427656,
+          "n": 4215
+        },
+        "native_wait_ms": {
+          "p01": 10.428090019999999,
+          "p50": 10.944793,
+          "p95": 11.8025793,
+          "p99": 12.14838006,
+          "max": 15.964273,
+          "n": 4215
+        },
+        "eye_acquire_wait_ms": {
+          "p01": 0.0026560002,
+          "p50": 0.003386,
+          "p95": 0.0057870999999999955,
+          "p99": 0.014116019999999977,
+          "max": 0.214948,
+          "n": 4199
+        },
+        "eye_render_ms": {
+          "p01": 4.639118580000002,
+          "p50": 11.243074,
+          "p95": 12.0780586,
+          "p99": 12.518696999999998,
+          "max": 15.999794,
+          "n": 4199
+        },
+        "eye_release_ms": {
+          "p01": 0.0021870001,
+          "p50": 0.0042189998,
+          "p95": 0.00677,
+          "p99": 0.009693259999999851,
+          "max": 0.185364,
+          "n": 4199
+        },
+        "eye_completion_observed_ms": null
+      },
+      "fresh_submissions_s": 82.68997092203954,
+      "runtime_hz": 90.0,
+      "sustained_90hz_pass": false
+    },
+    {
+      "label": "optimal-off-b",
+      "events_sha256": "bd8e008ba74c24e382ee7ed9a7942652d52995addbcb1b0c608b8aee735e4cf2",
+      "event_count": 2760,
+      "build": {
+        "verified": true,
+        "application_version": "20.13.0-ljk1291.2+f2e9df5704cc",
+        "server_version": "20.13.0-ljk1291.2+f2e9df5704cc",
+        "protocol_version": "20.13.0-ljk1291.2",
+        "repository_commit": "f2e9df5704cc679513848bf6ffb63ef1695479f9",
+        "client_package_id": "io.github.ljk1291.quest3pyrowave",
+        "shader_hashes": {
+          "shaders/constants.h": "3bc9555f8399bad2bd6960536125588fd7dbc7936a7147755fc497241f04e062",
+          "shaders/dwt.comp": "f58c3f95d68a90f4621fc1999bcf9a95e1a263b80d20355b0ac20002828a90b1",
+          "shaders/dwt_common.h": "591f529143fce7efad00c0f5a5e6d9be0a714fb2d5098ac5e89242c0041ada26",
+          "shaders/dwt_quant_scale.h": "4a5e60c22785075341afa29211275857a4f3922999e0f5799131c5f4acf2c4be",
+          "shaders/dwt_swizzle.h": "0283e54d268f25375866274dd3728384c75d9783cab12787d8914588b80f0f30",
+          "shaders/idwt.comp": "e3bb1b44e1e0cb0c2137c44dc50c42f0de4b625f8505f26e96b89ea210c2c3af",
+          "shaders/idwt_haar_fused.comp": "a85ffbeb0966e22855d8c76690a7283fb6a2a5967ae5028feac81663c99be629",
+          "shaders/slangmosh.hpp": "4f84897f9d7fbb07cbc5ccba6d98bc83b85f697ca170578ba959118c84032995",
+          "shaders/slangmosh.json": "d5ea9829b89ee2ac5d16c12b34561971cfeaef5e97eec5ac47ec9a4baa3d06d5",
+          "shaders/wavelet_dequant.comp": "e588ddfdd7c3d1873b758a9d8511b80a946fccf384a7aab0b3368d4212aa1a44"
+        },
+        "native_library_sha256": {
+          "libpyroclient.so": "bd33b0fa2ac6eb600c16806f645b4704afa4144a501fed08835efa39bc6c246d",
+          "libpyrowave-shared.so": "9c5ba02ba372745f23289a5ebd9555a6b2a21a9672a3ad545143c26889c09848"
+        }
+      },
+      "settings": {
+        "codec": "PyroWave",
+        "bitrate_mode": "ConstantMbps",
+        "target_mbps": 300,
+        "requested_hz": 90.0,
+        "negotiated_hz": 90,
+        "decode_path": "Compute",
+        "wavelet": "Haar",
+        "chroma": "420",
+        "transport": "Tcp",
+        "stream_protocol": "Tcp",
+        "hdr_enabled": false,
+        "hdr_server_override": true,
+        "enforce_server_frame_pacing": true,
+        "foveated_encoding_enabled": false,
+        "clientside_foveation_enabled": false,
+        "render_resolution": {
+          "width": 3072,
+          "height": 3232
+        },
+        "encoded_resolution": {
+          "width": 3072,
+          "height": 3232
+        },
+        "negotiated_render_resolution": {
+          "width": 3072,
+          "height": 3232
+        },
+        "negotiated_encoded_resolution": {
+          "width": 3072,
+          "height": 3232
+        }
+      },
+      "alvr_estimated_stages_ms": {
+        "total_ms": {
+          "mean": 81.20857560398551,
+          "p50": 82.85758000000001,
+          "p95": 86.66864650000001,
+          "p99": 94.04665899999999,
+          "min": 60.788309999999996,
+          "max": 105.23154
+        },
+        "game_time_ms": {
+          "mean": 3.460287644927536,
+          "p50": 3.14285,
+          "p95": 5.366765000000002,
+          "p99": 14.824656999999988,
+          "min": 0.9435,
+          "max": 21.612099999999998
+        },
+        "server_compositor_ms": {
+          "mean": 0.15771623188405798,
+          "p50": 0.15184999999999998,
+          "p95": 0.21601000000000004,
+          "p99": 0.2966219999999994,
+          "min": 0.0902,
+          "max": 1.8395
+        },
+        "encoder_ms": {
+          "mean": 1.8162660507246378,
+          "p50": 1.75455,
+          "p95": 1.98986,
+          "p99": 2.9031599999999993,
+          "min": 1.5846,
+          "max": 11.9969
+        },
+        "network_ms": {
+          "mean": 6.144182992753624,
+          "p50": 5.994836,
+          "p95": 7.861451450000001,
+          "p99": 8.708083549999992,
+          "min": 3.7501119999999997,
+          "max": 39.971285
+        },
+        "decoder_ms": {
+          "mean": 23.35763370652174,
+          "p50": 23.638466,
+          "p95": 28.606119850000002,
+          "p99": 29.747720599999997,
+          "min": 11.144376,
+          "max": 36.413703
+        },
+        "decoder_queue_ms": {
+          "mean": 4.7959748068840575,
+          "p50": 4.826693499999999,
+          "p95": 5.421823250000001,
+          "p99": 6.090950119999993,
+          "min": 0.087448,
+          "max": 10.671563
+        },
+        "vsync_queue_ms": {
+          "mean": 24.080089010869568,
+          "p50": 24.3219855,
+          "p95": 29.490360050000003,
+          "p99": 30.21052317,
+          "min": 8.895805999999999,
+          "max": 36.859732
+        },
+        "client_compositor_ms": {
+          "mean": 17.39642518804348,
+          "p50": 17.3785705,
+          "p95": 18.617009950000003,
+          "p99": 19.632268299999996,
+          "min": 0.0,
+          "max": 20.896459999999998
+        }
+      },
+      "mean_partition_residual_ms": -2.862318845609751e-08,
+      "max_abs_partition_residual_ms": 1.4000000006508806e-05,
+      "negative_residual_network_clamped_sample_count": 0,
+      "largest_three_alvr_partition_means": [
+        {
+          "stage": "vsync_queue_ms",
+          "mean_ms": 24.080089010869568
+        },
+        {
+          "stage": "decoder_ms",
+          "mean_ms": 23.35763370652174
+        },
+        {
+          "stage": "client_compositor_ms",
+          "mean_ms": 17.39642518804348
+        }
+      ],
+      "native_intervals_ms": {
+        "gpu_decode_ms": {
+          "p01": 8.0917815,
+          "p50": 9.041458,
+          "p95": 9.308802,
+          "p99": 9.6094684,
+          "max": 10.230312,
+          "n": 2721
+        },
+        "native_convert_ms": {
+          "p01": 4.1671979,
+          "p50": 5.093177,
+          "p95": 5.5479164,
+          "p99": 6.0776042000000015,
+          "max": 7.4090624,
+          "n": 2721
+        },
+        "decode_to_fence_ms": {
+          "p01": 16.8358776,
+          "p50": 17.620106,
+          "p95": 18.754221,
+          "p99": 19.902502200000004,
+          "max": 21.083803,
+          "n": 2721
+        },
+        "native_record_ms": {
+          "p01": 0.5273024,
+          "p50": 0.663385,
+          "p95": 1.040469,
+          "p99": 1.2908230000000003,
+          "max": 2.059376,
+          "n": 2721
+        },
+        "native_wait_ms": {
+          "p01": 16.1099596,
+          "p50": 16.925262,
+          "p95": 18.029585,
+          "p99": 19.082699400000003,
+          "max": 20.279482,
+          "n": 2721
+        },
+        "eye_acquire_wait_ms": {
+          "p01": 0.002708,
+          "p50": 0.003437,
+          "p95": 0.005729,
+          "p99": 0.016693559999999986,
+          "max": 0.231354,
+          "n": 2722
+        },
+        "eye_render_ms": {
+          "p01": 16.59006501,
+          "p50": 17.355914,
+          "p95": 18.536994449999998,
+          "p99": 19.59928468,
+          "max": 20.87646,
+          "n": 2722
+        },
+        "eye_release_ms": {
+          "p01": 0.002344,
+          "p50": 0.004166,
+          "p95": 0.006302,
+          "p99": 0.008906,
+          "max": 0.16119799,
+          "n": 2722
+        },
+        "eye_completion_observed_ms": null
+      },
+      "fresh_submissions_s": 55.252896380951064,
+      "runtime_hz": 90.0,
+      "sustained_90hz_pass": false
+    },
+    {
+      "label": "optimal-on-repeat",
+      "events_sha256": "3c9d1d8691e8d3dd081e383cc271b515a7dd5372306dd9dd1631c4b197e11f4c",
+      "event_count": 4103,
+      "build": {
+        "verified": true,
+        "application_version": "20.13.0-ljk1291.2+f2e9df5704cc",
+        "server_version": "20.13.0-ljk1291.2+f2e9df5704cc",
+        "protocol_version": "20.13.0-ljk1291.2",
+        "repository_commit": "f2e9df5704cc679513848bf6ffb63ef1695479f9",
+        "client_package_id": "io.github.ljk1291.quest3pyrowave",
+        "shader_hashes": {
+          "shaders/constants.h": "3bc9555f8399bad2bd6960536125588fd7dbc7936a7147755fc497241f04e062",
+          "shaders/dwt.comp": "f58c3f95d68a90f4621fc1999bcf9a95e1a263b80d20355b0ac20002828a90b1",
+          "shaders/dwt_common.h": "591f529143fce7efad00c0f5a5e6d9be0a714fb2d5098ac5e89242c0041ada26",
+          "shaders/dwt_quant_scale.h": "4a5e60c22785075341afa29211275857a4f3922999e0f5799131c5f4acf2c4be",
+          "shaders/dwt_swizzle.h": "0283e54d268f25375866274dd3728384c75d9783cab12787d8914588b80f0f30",
+          "shaders/idwt.comp": "e3bb1b44e1e0cb0c2137c44dc50c42f0de4b625f8505f26e96b89ea210c2c3af",
+          "shaders/idwt_haar_fused.comp": "a85ffbeb0966e22855d8c76690a7283fb6a2a5967ae5028feac81663c99be629",
+          "shaders/slangmosh.hpp": "4f84897f9d7fbb07cbc5ccba6d98bc83b85f697ca170578ba959118c84032995",
+          "shaders/slangmosh.json": "d5ea9829b89ee2ac5d16c12b34561971cfeaef5e97eec5ac47ec9a4baa3d06d5",
+          "shaders/wavelet_dequant.comp": "e588ddfdd7c3d1873b758a9d8511b80a946fccf384a7aab0b3368d4212aa1a44"
+        },
+        "native_library_sha256": {
+          "libpyroclient.so": "bd33b0fa2ac6eb600c16806f645b4704afa4144a501fed08835efa39bc6c246d",
+          "libpyrowave-shared.so": "9c5ba02ba372745f23289a5ebd9555a6b2a21a9672a3ad545143c26889c09848"
+        }
+      },
+      "settings": {
+        "codec": "PyroWave",
+        "bitrate_mode": "ConstantMbps",
+        "target_mbps": 300,
+        "requested_hz": 90.0,
+        "negotiated_hz": 90,
+        "decode_path": "Compute",
+        "wavelet": "Haar",
+        "chroma": "420",
+        "transport": "Tcp",
+        "stream_protocol": "Tcp",
+        "hdr_enabled": false,
+        "hdr_server_override": true,
+        "enforce_server_frame_pacing": true,
+        "foveated_encoding_enabled": false,
+        "clientside_foveation_enabled": false,
+        "render_resolution": {
+          "width": 3072,
+          "height": 3232
+        },
+        "encoded_resolution": {
+          "width": 3072,
+          "height": 3232
+        },
+        "negotiated_render_resolution": {
+          "width": 3072,
+          "height": 3232
+        },
+        "negotiated_encoded_resolution": {
+          "width": 3072,
+          "height": 3232
+        }
+      },
+      "alvr_estimated_stages_ms": {
+        "total_ms": {
+          "mean": 61.75144978917865,
+          "p50": 62.15573,
+          "p95": 73.1577699,
+          "p99": 77.05476720000001,
+          "min": 47.29984,
+          "max": 110.3567
+        },
+        "game_time_ms": {
+          "mean": 4.150610041433098,
+          "p50": 4.2368,
+          "p95": 7.511710000000014,
+          "p99": 16.081000000000003,
+          "min": 0.8805,
+          "max": 41.8252
+        },
+        "server_compositor_ms": {
+          "mean": 0.15557835729953692,
+          "p50": 0.15,
+          "p95": 0.22074000000000005,
+          "p99": 0.287588,
+          "min": 0.09050000000000001,
+          "max": 1.181
+        },
+        "encoder_ms": {
+          "mean": 1.8494669753838655,
+          "p50": 1.7544,
+          "p95": 2.03496,
+          "p99": 3.6878400000000005,
+          "min": 1.503,
+          "max": 11.751
+        },
+        "network_ms": {
+          "mean": 6.260965784791615,
+          "p50": 5.7773449999999995,
+          "p95": 8.368997,
+          "p99": 17.348746780000003,
+          "min": 0.0,
+          "max": 47.661383
+        },
+        "decoder_ms": {
+          "mean": 17.296095535705582,
+          "p50": 17.336199999999998,
+          "p95": 22.6037673,
+          "p99": 23.26567134,
+          "min": 7.966094,
+          "max": 24.704587
+        },
+        "decoder_queue_ms": {
+          "mean": 2.3242900577626124,
+          "p50": 2.075833,
+          "p95": 3.0268229000000004,
+          "p99": 5.966056100000002,
+          "min": 0.0,
+          "max": 13.836772
+        },
+        "vsync_queue_ms": {
+          "mean": 18.58772278454789,
+          "p50": 18.241529999999997,
+          "p95": 24.249259100000003,
+          "p99": 28.659681220000003,
+          "min": 6.7506900000000005,
+          "max": 32.58776
+        },
+        "client_compositor_ms": {
+          "mean": 11.129602256641482,
+          "p50": 11.315053,
+          "p95": 12.278558400000001,
+          "p99": 12.927020319999999,
+          "min": 0.0,
+          "max": 15.711200000000002
+        }
+      },
+      "mean_partition_residual_ms": -0.0028820043870339163,
+      "max_abs_partition_residual_ms": 4.918636000000004,
+      "negative_residual_network_clamped_sample_count": 4,
+      "largest_three_alvr_partition_means": [
+        {
+          "stage": "vsync_queue_ms",
+          "mean_ms": 18.58772278454789
+        },
+        {
+          "stage": "decoder_ms",
+          "mean_ms": 17.296095535705582
+        },
+        {
+          "stage": "client_compositor_ms",
+          "mean_ms": 11.129602256641482
+        }
+      ],
+      "native_intervals_ms": {
+        "gpu_decode_ms": {
+          "p01": 7.34354175,
+          "p50": 9.006406,
+          "p95": 9.2767445,
+          "p99": 9.5904685,
+          "max": 9.995104,
+          "n": 4151
+        },
+        "native_convert_ms": {
+          "p01": 1.20778645,
+          "p50": 1.3623437,
+          "p95": 2.1787758999999998,
+          "p99": 2.30429675,
+          "max": 2.892604,
+          "n": 4151
+        },
+        "decode_to_fence_ms": {
+          "p01": 10.9043765,
+          "p50": 11.628439,
+          "p95": 12.4388815,
+          "p99": 12.9319025,
+          "max": 14.31547,
+          "n": 4151
+        },
+        "native_record_ms": {
+          "p01": 0.4038535,
+          "p50": 0.571094,
+          "p95": 0.854375,
+          "p99": 1.029948,
+          "max": 1.352239,
+          "n": 4151
+        },
+        "native_wait_ms": {
+          "p01": 10.427526499999999,
+          "p50": 11.020991,
+          "p95": 11.893177999999999,
+          "p99": 12.2866415,
+          "max": 13.396668,
+          "n": 4151
+        },
+        "eye_acquire_wait_ms": {
+          "p01": 0.0026560002,
+          "p50": 0.003489,
+          "p95": 0.005833949999999999,
+          "p99": 0.016222959999999977,
+          "max": 0.229322,
+          "n": 4122
+        },
+        "eye_render_ms": {
+          "p01": 3.39373146,
+          "p50": 11.2969545,
+          "p95": 12.2568005,
+          "p99": 12.90091368,
+          "max": 15.678961,
+          "n": 4122
+        },
+        "eye_release_ms": {
+          "p01": 0.002354709958,
+          "p50": 0.0047919997,
+          "p95": 0.007448,
+          "p99": 0.009945399999999991,
+          "max": 0.452136,
+          "n": 4122
+        },
+        "eye_completion_observed_ms": null
+      },
+      "fresh_submissions_s": 82.0165813125478,
+      "runtime_hz": 90.0,
+      "sustained_90hz_pass": false
+    }
+  ],
+  "separate_older_pass_profile": {
+    "source": "results/decoder-profile-2026-10-02.json",
+    "sha256": "85a6c02ab578e5e2355a3b15f08f80aa0477e8edc23b7b04e52f53e6ef8b6058",
+    "optimal_ahb_enabled": false,
+    "scope": "Each value is a delayed Granite frame-context window mean. Ninety completed submissions trigger reporting, but do not imply exactly ninety retired timestamp samples. It is not exact-frame latency, a p95 frame time, display FPS, or optical latency.",
+    "phases": {
+      "Dequant": {
+        "windows": 21,
+        "mean_avg_ms": 3.7499047619047623,
+        "p50_avg_ms": 3.74,
+        "min_avg_ms": 3.703,
+        "max_avg_ms": 3.896
+      },
+      "iDWT": {
+        "windows": 21,
+        "mean_avg_ms": 4.997190476190476,
+        "p50_avg_ms": 4.974,
+        "min_avg_ms": 4.93,
+        "max_avg_ms": 5.201
+      }
+    }
+  },
+  "requested_stage_coverage": {
+    "render": "game_time_s retained",
+    "server_convert": "not independently instrumented; contained in server compositor/encoder scopes",
+    "encode": "encoder_s wall scope, not GPU timestamp",
+    "send": "not separately retained",
+    "receive": "not separately retained; network_s is residual, not independent send/receive timing",
+    "dequant": "only separate old allocation-off delayed Granite window means; do not substitute for allocation-on",
+    "idwt": "same limitation as dequant",
+    "client_conversion": "native_convert_ms Vulkan timestamps in each allocation cell",
+    "eye_copy": "eye_render_ms CPU wall includes GPU wait; no isolated eye-copy GPU interval",
+    "compositor": "server_compositor_s and client_compositor_s ALVR partitions; client wall can include GPU waits",
+    "queue_waits": "decoder_queue_s and vsync_queue_s; native_wait_ms overlaps native GPU work and must not be added"
+  },
+  "reduction_hypotheses": {
+    "vsync_queue_ms": "Runtime predicted-display lead. Faster decode can merely move time into this interval. Later pose acquisition/production scheduling needs controlled live evidence; do not shorten runtime safety lead blindly.",
+    "decoder_ms": "Receive-to-decoded notification wall scope includes native completion/queueing. Profile dequant/iDWT on fast allocation; then final-level fusion/direct YUV may remove work. Already-rejected whole-Haar fusion, batch and async trials are not new hypotheses.",
+    "game_time_ms": "Separate game rendering from SteamVR composition; source scene, render dimensions and graphics settings govern this stage. No codec patch can remove game rendering.",
+    "client_compositor_ms": "Investigate direct presentation/copy and contention with next decode. The eye wall interval includes waiting; GPU timestamps are needed before assigning it to pure copy."
+  },
+  "upstream_comparison": {
+    "source": "https://github.com/JMS1717/Quest3-Pyrowave/blob/fd54780483a709140ed31b50e2ee0724d1b75e5c/docs/DECODE-PIPELINE.md",
+    "reviewed_repository_commit": "fd54780483a709140ed31b50e2ee0724d1b75e5c",
+    "source_file_sha256": "694272469755b56524205b56b5449168f669a1e9f1dad9cdb3045a79150d8de0",
+    "retrieved_date": "2026-10-05",
+    "published_short_direct_copy": {
+      "eye_pixels": [
+        2080,
+        2208
+      ],
+      "target_mbps": 1000,
+      "requested_hz": 120,
+      "decode_p50_ms": 4.81,
+      "completion_p50_ms": 8.74,
+      "eye_render_cpu_p50_ms": 8.69,
+      "fresh_submissions_s": 103.63
+    },
+    "limits": "Different dimensions, bitrate, clocks, builds and presentation/allocation path; short stationary screen only. Completion and eye wall intervals overlap; do not sum. Upstream does not supply a matched full stage partition for our Godlike setup.",
+    "themaister_readme": "https://github.com/Themaister/pyrowave/blob/89f7e47d4abbf650c91fae766728af866c5e32a0/README.md",
+    "themaister_limit": "Generic desktop compute encode/decode claim is not a Quest mobile/presentation breakdown. The inherited 3328x1472 Adreno740 table is other retained research, not a verified Quest3 upstream result."
+  },
+  "gpu_execution_and_completion_distinct": true,
+  "optical_fps": null,
+  "optical_latency_ms": null,
+  "limitations": [
+    "Network residual is clamped nonnegative; record the few negative-residual exceptions rather than pretending perfect partition. Per-stage percentiles cannot be summed to reconstruct total percentiles.",
+    "Allocation-on ~82\u201383 fresh submissions/s remains below a stable90 pass.",
+    "Per-pass dequant/iDWT profile is older allocation-off evidence. No fabricated allocation-on per-pass decomposition."
+  ]
+}

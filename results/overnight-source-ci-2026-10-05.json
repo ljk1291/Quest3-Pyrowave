@@ -1,0 +1,105 @@
+{
+  "schema": 1,
+  "kind": "manual_cpu_only_source_ci_receipt",
+  "measurement_qualified": false,
+  "gpu_or_runtime_work": false,
+  "runs": [
+    {
+      "branch": "codex/position-aware-rdo",
+      "head_sha": "a39a4d0f1c58b82919c20836bf365b95ac75f324",
+      "run_id": 37250558139,
+      "conclusion": "success",
+      "tests_job": "success",
+      "native_pair_jobs": "skipped",
+      "run_url": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37250558139",
+      "review_pr": "https://github.com/ljk1291/Quest3-Pyrowave/pull/51"
+    },
+    {
+      "branch": "codex/dequant-reconstruction-offset",
+      "head_sha": "2358f463482b28638701dd958bc1b6c979ed975a",
+      "run_id": 37252296162,
+      "conclusion": "success",
+      "tests_job": "success",
+      "native_pair_jobs": "skipped",
+      "run_url": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37252296162",
+      "review_pr": "https://github.com/ljk1291/Quest3-Pyrowave/pull/53"
+    },
+    {
+      "branch": "codex/wo6-fused-inverse",
+      "head_sha": "9177afccbe3d24ef1642159e8d82c67a4c5d404a",
+      "run_id": 37253579925,
+      "conclusion": "success",
+      "tests_job": "success",
+      "native_pair_jobs": "skipped",
+      "run_url": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37253579925",
+      "review_pr": "https://github.com/ljk1291/Quest3-Pyrowave/pull/54",
+      "scope": "CPU models only; later branch commit is documentation"
+    },
+    {
+      "branch": "codex/stock-decoder-telemetry-audit",
+      "head_sha": "a4b97a4189930b7783dfb738860233179373e652",
+      "run_id": 37244195981,
+      "conclusion": "success",
+      "tests_job": "success",
+      "native_pair_jobs": "skipped",
+      "run_url": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37244195981",
+      "review_pr": "https://github.com/ljk1291/Quest3-Pyrowave/pull/49"
+    },
+    {
+      "branch": "codex/wo8-width-only-h264",
+      "head_sha": "e970655648e3d10b5e5d11aaaa1ccd6c187941cb",
+      "run_id": 37256639544,
+      "conclusion": "success",
+      "tests_job": "success",
+      "native_pair_jobs": "skipped",
+      "run_url": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37256639544",
+      "review_pr": "https://github.com/ljk1291/Quest3-Pyrowave/pull/52"
+    },
+    {
+      "branch": "codex/lease-status-diagnostics",
+      "head_sha": "303074705d7456c3a7825b299eb1de1649202a09",
+      "run_id": 37256644064,
+      "conclusion": "success",
+      "tests_job": "success",
+      "native_pair_jobs": "skipped",
+      "explicit_diagnostic_step": "success",
+      "run_url": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37256644064",
+      "review_pr": "https://github.com/ljk1291/Quest3-Pyrowave/pull/55"
+    },
+    {
+      "branch": "codex/nvenc-dimension-preflight-proposal",
+      "head_sha": "0e45e06bacd20255c3706fdfb14c48a4a159988f",
+      "run_id": 37266489403,
+      "conclusion": "success",
+      "tests_job": "success",
+      "native_pair_jobs": "skipped",
+      "run_url": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37266489403",
+      "review_pr": "https://github.com/ljk1291/Quest3-Pyrowave/pull/56",
+      "scope": "inactive opt-in geometry preflight and release Warn marker, pure CPU tests; later branch commit is documentation; no native compilation/runtime activation",
+      "later_docs_head_sha": "27aa5bda07f72a92ec05ceb758c5fb92f3a508ad"
+    }
+  ],
+  "unqualified_attempts": [
+    {
+      "head_sha": "cd227a8f0fbb3316736ec15aa8c54b1de72e1b15",
+      "run_id": 37265745442,
+      "conclusion": "failure",
+      "native_pair_jobs": "skipped",
+      "reason": "strict historical-source compatibility allowlist rejected the newly introduced inactive NVENC role before its policy tests; final branch adds the exact constrained role, without requalifying old artifacts"
+    }
+  ],
+  "superseded_source_runs": [
+    {
+      "branch": "codex/nvenc-dimension-preflight-proposal",
+      "head_sha": "9a65d57367a7ee81e2ad7624fe1d5f4e74578b52",
+      "run_id": 37265993194,
+      "conclusion": "success",
+      "tests_job": "success",
+      "native_pair_jobs": "skipped",
+      "run_url": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37265993194",
+      "review_pr": "https://github.com/ljk1291/Quest3-Pyrowave/pull/56",
+      "scope": "inactive opt-in NVENC geometry preflight source and pure CPU policy tests; no Windows native compilation or runtime activation",
+      "reason": "CPU-green source used Debug marker, which release compiles out; superseded by Warn-marker source and regression"
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "kind": "overnight_pc_caps_hvs",
+  "complete": true,
+  "gpu_model": "NVIDIA GeForce RTX 5080",
+  "nvenc_api": "API 12.0",
+  "caps": {
+    "H264": {
+      "width_max": 4096,
+      "height_max": 4096
+    },
+    "HEVC": {
+      "width_max": 8192,
+      "height_max": 8192
+    },
+    "AV1": {
+      "width_max": 8192,
+      "height_max": 8192
+    }
+  },
+  "h264fit": {
+    "encoded_width": 3968,
+    "encoded_height": 2080,
+    "dimensions_supported": true,
+    "scope": "dimension capability only, not decoder/runtime/timing qualification"
+  },
+  "hvs_gpu_sanity": {
+    "passed": true,
+    "frames_per_case": 3,
+    "geometry": [
+      64,
+      64
+    ],
+    "identity_psnr_db": "Infinity",
+    "uniform_shift_scores_db": {
+      "shift32": 19.331255581,
+      "shift64": 13.310655668
+    },
+    "amplitude_ratio_delta_db": 6.020599913,
+    "expected_delta_db": 6.020599913279624,
+    "tolerance_db": 0.03
+  },
+  "lease_cleanup": {
+    "closed": true,
+    "owned_jobs_remaining": 0,
+    "cleanup_errors": []
+  },
+  "probe_source_sha256": "bd261f547413ae05b3258743156d42f7d4c7ba48455eb5c5a25c93c02bd61baa",
+  "probe_executable_sha256": "a9cb45c72f92399573266a235257a4e5f0dcdabf94d9886f92bd256fe5b01266",
+  "driver_api_header_sha256": "c6e4b0df8c52011ad2a292d4c173da59b35e7868cfa1171047d2ef254bb34624",
+  "optical_fps": null,
+  "headset_work": false,
+  "encoder_preflight_activated": false,
+  "operation": "DirectX session + NV_ENC_CAPS_WIDTH_MAX/HEIGHT_MAX; no InitializeEncoder/encode",
+  "authorization": "Owner-authorized finite offline frame_bank_pc lease while away; 15-minute delay honored; every safety stop retained.",
+  "note": "Limits are driver capability readbacks, not a Quest decoder or live performance result.",
+  "prepared_encoder_preflight": {
+    "head_sha": "0e45e06bacd20255c3706fdfb14c48a4a159988f",
+    "branch": "codex/nvenc-dimension-preflight-proposal",
+    "review_pr": "https://github.com/ljk1291/Quest3-Pyrowave/pull/56",
+    "cpu_ci_run_id": 37266489403,
+    "cpu_ci_conclusion": "success",
+    "activation": "ALVR_NVENC_DIMENSION_PREFLIGHT exactly 1; default performs no capability call",
+    "placement": "VideoEncoderNVENC::Initialize after FillEncodeConfig, before CreateEncoder",
+    "source_locations": [
+      "patches/nvenc-dimension-preflight.patch",
+      "alvr/server_openvr/cpp/platform/win32/NvEncoder.h",
+      "alvr/server_openvr/cpp/platform/win32/NvEncoder.cpp",
+      "alvr/server_openvr/cpp/platform/win32/VideoEncoderNVENC.cpp"
+    ],
+    "native_pass_marker": "NVENC dimension preflight passed:",
+    "marker_logger": "Warn: ALVR warning callback/event, plus conditional IVRDriverLog when initialized; no guaranteed file sink",
+    "native_compile_verified": false,
+    "runtime_activated": false,
+    "included_in_corrected_pair": false,
+    "provenance_role": "encoder_capability_preflight_inactive_only; exact path/hash/role; no requalification of historical artifacts",
+    "later_docs_head_sha": "27aa5bda07f72a92ec05ceb758c5fb92f3a508ad",
+    "overlay_sha256": "10087a15c4a936028ccf5bf4668d482e84adbb03eced7631ad63e5ac4ae1438f"
+  }
+}

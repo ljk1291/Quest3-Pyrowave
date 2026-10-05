@@ -5,6 +5,124 @@ agent (Codex). Codex reads it at every checkpoint and appends to **Log**. The ow
 Claude may reorder **Queue** or add **Notes for Codex** between checkpoints. Keep
 entries short and link to evidence.
 
+## Morning offline checkpoint — 2026-10-05 07:14 CEST
+
+The finite PC-only overnight queue is stopped for owner review. The
+[combined Markdown report](../results/metro-overnight-quality-2026-10-05.md) and
+[JSON evidence](../results/metro-overnight-quality-2026-10-05.json) publish
+19 qualified new quality rows, plus hash-bound retained Q3 controls. Fence
+metrics use frames 10–89 and HVS uses all 90. Temporal p99 is a luma-code
+reconstruction residual, not milliseconds or optical shimmer. Exact qualified
+duplicates were reused rather than repeated; failed attempts remain unranked.
+The final Light row and Medium 5/3 row passed their own ordered 90-frame,
+source/tool/protected-hash and clean closed-lease gates. No owned jobs or cleanup
+errors remain in their completed leases. Quality GPU load samples are retained;
+they do not qualify timing.
+
+The original motion request has one explicit gap: no pre-encode full-FOV
+Haar/500 head-turn stress row was run. Its retained moving-window pack extracts
+after decoding and remains diagnostic only. H264Fit and Medium 9/7 have actual
+90-frame synthetic pre-encode moving-crop comparisons. AV1 motion was withdrawn;
+the private review pack retains only previously completed native AV1 evidence.
+The private pack includes standardized full-range BT.709 fence panels and
+lossless 90-frame looping clips; it is not committed or a headset judgement.
+
+H264Fit/700/P7 remains the strongest fence result; width-only H.264 recovers
+whole-crop and peripheral HVS while trading fence accuracy. Retained stock
+AV1 Main10/200/P4 has stronger whole-crop HVS than those reduced H.264 profiles.
+Medium 9/7/RDO24 remains the selected PyroWave Medium quality candidate.
+Position-aware RDO, lower uniform densities and reconstruction offsets have
+trade-offs and are not promoted. Both specified 8-bit residual temporal models
+failed quality against intra; entropy and receive-overlap results remain bounded
+CPU/design studies.
+
+[7 separate source branches passed manual CPU-only CI](../results/overnight-source-ci-2026-10-05.json).
+The optional WO-6 work proves CPU model arithmetic/mapping only; shader activation,
+retained decoder parity and speed remain open. The local publication, reference
+reuse, private clip identity and closed-output compression checks pass.
+[The corrected matching signed pair](../results/quality-candidate-build-rdo-session-2026-10-05.json),
+source `0f07f05b4df88f8fa08ea034f794cda4be9eaf38`, is verified and staged,
+not installed. Original 80a1635 and d1c3 rollback artifacts remain intact.
+RDO selection has an explicit opt-in session-setting route and native getter;
+future live activation still needs its marker. Position/width/offset/stock-logging
+and inactive NVENC preflight branches are excluded from that pair.
+
+No headset/ADB, VR/VD, network test, settings, arm-file or installation work
+occurred. There were no changed runtime settings to restore; this is not a fresh
+runtime-restoration readback. Live decode cost, fresh rate, pipeline latency and
+optical fields remain unset. Historical approximately 82–83 fresh submissions/s
+is still not stable 90 Hz. The [headset checklist](Q3-HEADSET-CHECKLIST.md)
+retains Q4 then a/a2/b/c/d and f–h, with an owner judgement for every in-headset
+leg. Stop here until the owner reviews the table and confirms a new session.
+
+## Morning ranking — finite offline evidence only
+
+The fewest-artifact PyroWave path remains the already staged **Medium CDF 9/7,
+RDO-24, fixed 1000-Mbps** candidate, subject to its separate matching-build,
+Q4 transport, runtime geometry, native RDO marker, decoder, freshness and
+owner-image gates. Its retained tight fence (frames 10–89) is 42.412796 dB with
+p99 9 luma codes and its all-90 HVS is 37.356360 dB. These are offline quality
+metrics, not a decoder-cost, submission-rate, latency, or 90-Hz result. The
+historical roughly 82–83 fresh submissions/s is still not a stable 90/s pass.
+
+Do not add either position-RDO branch to that runnable candidate. Both used the
+same fixed 1000-Mbps / 1,388,888-byte frame cap and are encoder-only offline
+experiments. Mode 1's tight fence is 40.893292 dB / p99 11 and all-90 HVS
+42.533568 dB; against the retained uniform-RDO24 regional receipt it improves
+the centre by +0.478609 dB PSNR-Y and +0.590397 HVS, while reducing peripheral
+corners by −1.093858 dB and −1.298166 HVS. Mode 2 is the measured
+effective-density-divisor hypothesis, not eye tracking or a peripheral-acuity
+model: its tight fence falls to 40.007427 dB / p99 12 while its all-90 HVS is
+43.012701 dB. Its centre is only +0.068186 dB PSNR-Y / +0.088406 HVS against
+uniform, while corners are −0.111039 dB / −0.112266 HVS. Its fence improves by
+0.074199 dB and whole-crop HVS by 0.003885 dB versus uniform 24; these small,
+unreplicated aggregate gains come with the recorded peripheral loss. The fixed regional
+rectangles and mirrored-right Session-07 geometry assumption limit these
+comparisons; neither mode establishes an overall quality improvement or a live candidate.
+
+Closed-loop temporal work is evidence against promoting a temporal optimization
+today. The completed native-previous-decoded and synthetic pose-shift models
+both retain 90 decoded frames, but their tight fences are only 30.558714 and
+30.515085 dB respectively, both with p99 49; all-90 HVS is 35.683889 and
+35.293644 dB. The first-frame proof establishes decoded-pixel equality despite
+noncanonical unused sign-padding bits; it does not establish a live interframe protocol, transport or speedup.
+
+Prioritize individual dequantization and inverse-wavelet pass profiling on the
+faster AHardwareBuffer allocation configuration. Then evaluate final-stage fusion
+and direct YUV presentation against reference pixels, colour behaviour, image
+transitions and resource lifetime. Their speed gains are unmeasured; the existing
+CPU inverse proof is only a starting gate.
+
+Entropy coding follows those decoder investigations and is not a deployment
+candidate: its restricted serialized-bitplane model is
+an upper bound of 11,499,003 bytes over 90 frames (13.74% of bitplanes, 9.20%
+of full payload). It has no emitted stream, decoder implementation, or decode
+cost. Keep the CDF 9/7 fused-inverse work behind its CPU mapping and retained
+image-parity gates. Its CPU proof does not establish a decoder speedup. No
+additional artifact, bitrate increase, or runtime default follows from either
+study.
+
+### Ranked next PyroWave investigations
+
+The gain column separates measured quality changes from unmeasured speed gains.
+Keep the baseline and matching installed pair unchanged until controlled timing,
+image checks and owner approval support a promotion.
+
+| Priority | Investigation | Gain supported so far / estimate limit | Cost and next gate |
+|---:|---|---|---|
+| 1 | Profile each dequant/iDWT pass on the faster AHardwareBuffer allocation baseline | No new speed estimate. Retained GPU execution, fence completion and decode wall time have different boundaries; they cannot be subtracted into a reliable per-pass model. | Low source effort, supervised finite headset profiling later; retain matching builds and native activation markers. |
+| 2 | Final-level inverse-wavelet fusion, optionally including colour conversion | Speed gain unmeasured. The mechanism removes intermediate writes/reads and a dispatch; the CPU 5/3 and 9/7 models are a correctness starting point only. | Medium/high shader effort; prove boundaries, chroma siting, range/transfer and all retained planes before timing. See [WO-6 CPU proof](WO6-FUSED-INVERSE-CPU-RESULT.md). |
+| 3 | Direct YUV sampling/presentation with pooled Vulkan images | Speed gain unmeasured. It may remove the RGBA intermediate and some hand-off work; the external references still include completion waits. | High integration/resource-lifetime risk; separate image transitions, ownership, completion and compositor scheduling. |
+| 4 | Keep uniform RDO-24 as the image-quality comparison | Full-FOV Haar/500 improves the fence by 3.656 dB and HVS by 1.532 dB versus the retained legacy density. This is a quality gain, not a decoder-speed gain. | Low encoder effort; explicit session readback is prepared in the uninstalled corrected pair. Position variants and lower uniform densities have trade-offs and are not promoted. |
+| 5 | Reconstruction-offset sweep | Completed: +0.125 gives +0.053 dB on the fence but −0.058 dB HVS versus zero. No tested offset improves both metrics; no speed gain is established. | Low decoder change; retain zero-default all-90 parity and keep the legacy reconstruction point. |
+| 6 | Receive-overlapped progressive work | Current full-frame API offers zero usable overlap. Ideal serialized coarse-band arrival bounds are 0.179/0.455 ms at 1 Gbps; matched arrival/pass timing is missing. | High packet/API and synchronization effort; obtain matched timing before estimating latency savings. |
+| 7 | Context-modelled entropy coding | Restricted-model upper bound: 9.20% of total payload, not an implemented coder or a universal limit. Decode-time cost is unknown and could increase. | High parallel GPU decoding risk; prototype only after the existing reconstruction bottleneck is measured. |
+
+The tested 8-bit residual closed-loop prediction models are rejected for this
+corpus: both lose more than 9 dB of fence PSNR and have temporal p99 49. A new
+prediction experiment needs a changed residual precision/clipping hypothesis;
+neither that rejection nor the successful intra rows establishes a live 90 Hz pass.
+
 ## Current headset preparation checkpoint — 2026-10-04 21:34 CEST
 
 The owner requested the verified 80a1635 pair, Q4, then **a, a2, b, c, d** and
@@ -356,6 +474,17 @@ Take the first unblocked item. Items marked ∥ are independent.
      checkpoint-only records.
 
 ## Log
+
+- 2026-10-05 05:14 UTC, final overnight PC-only quality publication: 19 new qualified
+  rows, selected retained controls, regional comparisons, temporal negatives,
+  CPU source/latency/entropy studies and 7 CPU CI receipts are published in
+  [the combined report](../results/metro-overnight-quality-2026-10-05.md).
+  The final Light and Medium 5/3 leases closed cleanly; no timing qualification,
+  headset/installation/settings/arm action or default promotion. Full-FOV
+  pre-encode motion stress remains unrun and is explicitly separate from the
+  post-decode private preview. Corrected 0f07f05 pair staged; rollback intact.
+  Checklist updated; stopped for owner review.
+
 
 - 2026-10-04 19:34 UTC, supervised headset preparation only: reverified and
   separately staged 80a1635, preserved d1c3 rollback, added a2 and exact owner

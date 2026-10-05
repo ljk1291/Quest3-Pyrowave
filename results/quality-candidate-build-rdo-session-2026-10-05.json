@@ -1,0 +1,64 @@
+{
+  "android_native": {
+    "libpyroclient_so_sha256": "bd33b0fa2ac6eb600c16806f645b4704afa4144a501fed08835efa39bc6c246d",
+    "libpyrowave_shared_so_sha256": "8e9189f026d2555f7ba0b27ac6398def69098f0d82f1104c5d91ac425b31bac9"
+  },
+  "artifacts": {
+    "android_apk_sha256": "0de40871572a2d83698b841ff28e306a0578788527d77222cdcb5cea9bba0e85",
+    "android_id": 11320032089,
+    "declared_payload_hashes_verified": true,
+    "matching_metadata": true,
+    "windows_id": 11320873613,
+    "windows_server_zip_sha256": "2b78c2b928871bae3afaf5fe101f4304c3333b32ad06aab83082e9251fb60239"
+  },
+  "dependency_revisions": {
+    "alvr": "7eda092dbf0002281410a4222683ec228700cffb",
+    "cargo_apk": "0fd3126dad5aa1c5f0f26cdae3410f2e5af62c60",
+    "granite": "842d9d5686ba8c799a7d34a78a68f98d6aeb5a68",
+    "integration": "54cc8519bddceff57e159e6f39914e373b512809",
+    "pyrowave": "d2997ac172bdc00e29c58e3f2938acb7e94580bf"
+  },
+  "device_commands_issued": false,
+  "installation_performed": false,
+  "kind": "pyrowave_rdo_session_setting_matching_pair",
+  "qualification": "Build, package, provenance and native-export verification only; no runtime, headset, ADB or installation action occurred.",
+  "rdo_controls": {
+    "alvr_session_setting_overlay_sha256": "b8bb0419e94312471576ecdfccb1c26604cd1f1b3f0028379593b33bae25d5d3",
+    "default_behavior": "zero session value retains the environment/legacy path; the explicit session setting is opt-in",
+    "getter_overlay_sha256": "2a8c8e151689204d05c8f8ebd480ea297a76bd3ece2c6c81997ee15d1f370f96",
+    "session_override_overlay_sha256": "e9f88932659a892d5c4a5a6e597e817e02d3738450838d6c7434e652fb4b5f9e"
+  },
+  "runtime_started": false,
+  "schema": 1,
+  "shader_hashes": {
+    "shaders/constants.h": "3bc9555f8399bad2bd6960536125588fd7dbc7936a7147755fc497241f04e062",
+    "shaders/dwt.comp": "f58c3f95d68a90f4621fc1999bcf9a95e1a263b80d20355b0ac20002828a90b1",
+    "shaders/dwt_common.h": "591f529143fce7efad00c0f5a5e6d9be0a714fb2d5098ac5e89242c0041ada26",
+    "shaders/dwt_quant_scale.h": "4a5e60c22785075341afa29211275857a4f3922999e0f5799131c5f4acf2c4be",
+    "shaders/dwt_swizzle.h": "0283e54d268f25375866274dd3728384c75d9783cab12787d8914588b80f0f30",
+    "shaders/idwt.comp": "e3bb1b44e1e0cb0c2137c44dc50c42f0de4b625f8505f26e96b89ea210c2c3af",
+    "shaders/idwt_haar_fused.comp": "a85ffbeb0966e22855d8c76690a7283fb6a2a5967ae5028feac81663c99be629",
+    "shaders/slangmosh.hpp": "4f84897f9d7fbb07cbc5ccba6d98bc83b85f697ca170578ba959118c84032995",
+    "shaders/slangmosh.json": "d5ea9829b89ee2ac5d16c12b34561971cfeaef5e97eec5ac47ec9a4baa3d06d5",
+    "shaders/wavelet_dequant.comp": "e588ddfdd7c3d1873b758a9d8511b80a946fccf384a7aab0b3368d4212aa1a44"
+  },
+  "source": {
+    "application_version": "20.13.0-ljk1291.2+0f07f05b4df8",
+    "commit": "0f07f05b4df88f8fa08ea034f794cda4be9eaf38",
+    "sources_lock_sha256": "df5a580af6d247ce5d0bf3af4b95d64988d261de2a96eab89e5a5765fc2bf8cd"
+  },
+  "stable_signing_certificate_sha256": "4a3fe0a8d47ee67b01710df6ffdc870e91ebc5b8e7feec7c87534944ca2a44aa",
+  "verification_receipt_sha256": "fc94fe17565761986109493a2cce2e91844b4f23681d2dac6b21450e6c202fc8",
+  "verified": true,
+  "windows_native": {
+    "driver_alvr_server_dll_sha256": "619aa946a8093c3e554b25c48d89a96c029154a94a791281144f980a9bfe5a5b",
+    "exported_pyrowave_encoder_get_rdo_density": true,
+    "libpyrowave_shared_0_dll_sha256": "504ee4bb11e5ebcee9e948239c9d42f0debb26dc7d24160f0e0def2296197abf"
+  },
+  "workflow": {
+    "conclusion": "success",
+    "event": "workflow_dispatch",
+    "run_id": 37249212605,
+    "url": "https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37249212605"
+  }
+}
