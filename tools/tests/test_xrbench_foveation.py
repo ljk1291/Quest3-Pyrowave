@@ -199,6 +199,29 @@ class FoveationTests(unittest.TestCase):
         self.assertEqual(encoded.encoded_eye,(256,256))
         rebuilt=reconstruct_planes(encoded.planes,encoded)
         self.assertEqual(rebuilt[0].shape,y.shape)
+    def test_width_only_softness_keeps_vertical_stripes_at_identity_density(self):
+        # Horizontal stripes exercise the full-height axis. Softness may widen
+        # the X footprint, but width-only must not average adjacent Y rows.
+        cfg=FoveationConfig('h264width',.5)
+        image=np.repeat((np.arange(64,dtype=np.float64)*3)[:,None],80,axis=1)
+        encoded=forward_eye(image,cfg)
+        self.assertEqual(encoded.shape[0],image.shape[0])
+        self.assertLessEqual(float(np.max(np.abs(encoded-image[:,0,None]))),1.0)
+
+    def test_width_only_overrides_softened_y_footprint_only(self):
+        uv=np.array([[[.03,.04],[.5,.5],[.97,.96]]])
+        cfg=FoveationConfig('h264width',.5); size=(2624,2784); packed=encoded_size(*size,cfg)
+        source=forward_map_uv(uv,size,packed,cfg)
+        softened=local_squeeze(uv,size,packed,cfg)*(1+cfg.softness*softness_ramp(source,size,packed,cfg)[...,None])
+        self.assertGreater(float(softened[...,1].max()),1.0)
+        softened[...,1]=1.
+        self.assertTrue(np.array_equal(softened[...,1],np.ones_like(softened[...,1])))
+        # Existing Medium keeps its two-axis softness behavior.
+        medium=FoveationConfig('medium',.5); mp=encoded_size(*size,medium)
+        ms=forward_map_uv(uv,size,mp,medium)
+        medium_footprint=local_squeeze(uv,size,mp,medium)*(1+medium.softness*softness_ramp(ms,size,mp,medium)[...,None])
+        self.assertGreater(float(medium_footprint[...,1].max()),1.0)
+
     def test_width_only_h264_has_identity_y_and_invertible_x(self):
         cfg=FoveationConfig('h264width',.5)
         size=(2624,2784); packed=encoded_size(*size,cfg)

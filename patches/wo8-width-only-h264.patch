@@ -152,6 +152,9 @@ diff --git a/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelS
 +        mappingDerivative.y = 1.;
 +    }
       if (blurOnly > .5) mappingDerivative = float2(1., 1.);
++    // Peripheral softness expands the shared two-axis footprint above. Restore
++    // width-only's identity Y *after* that multiplication so it never blurs Y.
++    if (verticalIdentity > .5) mappingDerivative.y = 1.;
 
 
 diff --git a/alvr/graphics/resources/stream.wgsl b/alvr/graphics/resources/stream.wgsl

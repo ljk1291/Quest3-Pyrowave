@@ -22,6 +22,8 @@ class WidthOnlyNativeSourcePatchTests(unittest.TestCase):
 
     def test_opt_in_profile_has_explicit_identity_y_contract(self) -> None:
         self.assertIn("H264WidthOnly", self.patch)
+        self.assertIn("FoveationProfile::H264WidthOnly => (23.0 / 41.0, 2.0", self.patch)
+        self.assertIn("config.center_size_x = 23.0 / 41.0", self.patch)
         self.assertIn("FoveationProfile::H264WidthOnly => 1.0", self.patch)
         self.assertIn("1.0 / 1.0 is a deliberate identity-Y sentinel", self.patch)
 
@@ -36,6 +38,7 @@ class WidthOnlyNativeSourcePatchTests(unittest.TestCase):
         self.assertIn("float verticalIdentity;", self.patch)
         self.assertIn("compressedUV.y = outputEyeUV.y", self.patch)
         self.assertIn("mappingDerivative.y = 1.", self.patch)
+        self.assertIn("Peripheral softness expands the shared two-axis footprint above", self.patch)
         self.assertIn("c2.y = 1.", self.patch)
 
     def test_receiver_uses_finite_placeholder_then_restores_identity_y(self) -> None:

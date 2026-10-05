@@ -360,6 +360,12 @@ def forward_eye(image: np.ndarray, config: FoveationConfig, *, tile_rows: int=TI
         stop=min(eh,start+tile_rows); y=(np.arange(start,stop)+.5)/eh; xx,yy=np.meshgrid(x,y)
         uv=np.stack((xx,yy),axis=-1); source=forward_map_uv(uv,(w,h),(ew,eh),config)
         footprint=local_squeeze(uv,(w,h),(ew,eh),config)*(1+config.softness*softness_ramp(source,(w,h),(ew,eh),config)[...,None])
+        # H264WidthOnly uses the same peripheral ramp for its horizontal
+        # prefilter, but its Y axis remains an identity raster. Apply the
+        # identity after the shared softness multiplier so no peripheral Y
+        # blur is introduced by a scalar two-axis footprint expansion.
+        if config.axis_constants(1) is None:
+            footprint[...,1]=1.
         out[start:stop]=_area_box(image,source,footprint,sat_cache=sat_cache)
     return out
 
