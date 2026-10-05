@@ -14,8 +14,14 @@ class OwnedProcessTest(unittest.TestCase):
                                creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         try:
             rows=u.Host()._comfy_pids()
+            # A denied/unavailable CIM inventory must remain fail-closed while
+            # preserving the row shape expected by process consumers.
+            self.assertTrue(all('ProcessId' in row for row in rows))
             self.assertNotIn(child.pid,[r['ProcessId'] for r in rows])
             self.assertFalse(any('Get-CimInstance Win32_Process' in r.get('CommandLine','') for r in rows))
+            if any(row.get('discovery_error') for row in rows):
+                self.assertEqual(rows, [{'ProcessId': None,
+                                         'discovery_error': 'backend_process_inventory_unavailable'}])
         finally:
             if child.poll() is None: child.terminate()
             child.wait(timeout=5)
