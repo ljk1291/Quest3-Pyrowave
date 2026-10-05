@@ -469,7 +469,7 @@ class FrameBankTests(unittest.TestCase):
                               {'path': 'patches.pyrowave_dequant_reconstruction_offset.path', 'old': None,
                                'new': 'patches/pyrowave-dequant-reconstruction-offset.patch', 'role': 'codec_decoder_zero_default_only'},
                               {'path': 'patches.pyrowave_dequant_reconstruction_offset.sha256', 'old': None,
-                               'new': '74f6b188bcfd98a8b43a318deceab942357ee5be73dd196da929d6522936782d', 'role': 'codec_decoder_zero_default_only'},
+                               'new': '299e6130268afb2201d39e014bea0c5790d0cb5d2d64b3e159b6b84af2577c77', 'role': 'codec_decoder_zero_default_only'},
                               {'path': 'patches.wo8_light_centre_phase.path', 'old': None,
                                'new': 'patches/wo8-light-centre-phase.patch', 'role': 'presentation_foveation_only'},
                               {'path': 'patches.wo8_light_centre_phase.sha256', 'old': None,

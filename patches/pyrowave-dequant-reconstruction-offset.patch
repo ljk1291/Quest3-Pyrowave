@@ -129,16 +129,17 @@ index 0000000..a41d234
 +}
 diff --git a/pyrowave_dequant_reconstruction_offset_test.cpp b/pyrowave_dequant_reconstruction_offset_test.cpp
 new file mode 100644
-index 0000000..f866e66
+index 0000000..364e70a
 --- /dev/null
 +++ b/pyrowave_dequant_reconstruction_offset_test.cpp
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,54 @@
 +// Copyright (c) 2026 Hans-Kristian Arntzen
 +// SPDX-License-Identifier: MIT
 +#include "pyrowave_dequant_reconstruction_offset.hpp"
 +#include <cstdint>
 +#include <cstdio>
 +#include <cstring>
++#include <initializer_list>
 +
 +#define ASSERT_THAT(expr) do { \
 +	if (!(expr)) { std::fprintf(stderr, "Assertion failed: %s at line %d.\n", #expr, __LINE__); return 1; } \
