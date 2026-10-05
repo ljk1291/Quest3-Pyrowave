@@ -41,6 +41,10 @@ expected_wo8_phase_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value w
 actual_wo8_phase_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/wo8-light-centre-phase.patch")
 [ "$actual_wo8_phase_patch" = "$expected_wo8_phase_patch" ] || { echo "WO-8 Light phase patch hash does not match sources.lock.json" >&2; exit 1; }
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/wo8-light-centre-phase.patch"
+expected_nvenc_dimension_preflight_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value nvenc_dimension_preflight_patch_sha256)
+actual_nvenc_dimension_preflight_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/nvenc-dimension-preflight.patch")
+[ "$actual_nvenc_dimension_preflight_patch" = "$expected_nvenc_dimension_preflight_patch" ] || { echo "NVENC dimension-preflight patch hash does not match sources.lock.json" >&2; exit 1; }
+apply_patch "$dest/ALVR-20.13.0" "$repo/patches/nvenc-dimension-preflight.patch"
 expected_alvr_rdo_live_readback_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value alvr_pyrowave_rdo_live_readback_patch_sha256)
 actual_alvr_rdo_live_readback_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/alvr-pyrowave-rdo-live-readback.patch")
 [ "$actual_alvr_rdo_live_readback_patch" = "$expected_alvr_rdo_live_readback_patch" ] || { echo "ALVR PyroWave RDO live-readback patch hash does not match sources.lock.json" >&2; exit 1; }

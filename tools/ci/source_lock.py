@@ -38,7 +38,8 @@ def load():
                       ("pyrowave_rdo_session_setting", "patches/pyrowave-rdo-session-setting.patch"),
                       ("wo8_light_centre_phase", "patches/wo8-light-centre-phase.patch"),
                       ("alvr_pyrowave_rdo_live_readback", "patches/alvr-pyrowave-rdo-live-readback.patch"),
-                      ("alvr_pyrowave_rdo_session_setting", "patches/alvr-pyrowave-rdo-session-setting.patch")):
+                      ("alvr_pyrowave_rdo_session_setting", "patches/alvr-pyrowave-rdo-session-setting.patch"),
+                      ("nvenc_dimension_preflight", "patches/nvenc-dimension-preflight.patch")):
         patch = patches.get(key, {})
         if (not isinstance(patch, dict) or patch.get("path") != path
                 or not re.fullmatch(r"[0-9a-f]{64}", patch.get("sha256", ""))):
@@ -52,7 +53,7 @@ def main():
     parser.add_argument("--value", choices=("rust", "android_ndk", "pyrowave_rdo_density_patch_sha256",
                         "pyrowave_rdo_live_readback_patch_sha256", "pyrowave_rdo_session_setting_patch_sha256",
                         "wo8_light_centre_phase_patch_sha256", "alvr_pyrowave_rdo_live_readback_patch_sha256",
-                        "alvr_pyrowave_rdo_session_setting_patch_sha256"))
+                        "alvr_pyrowave_rdo_session_setting_patch_sha256", "nvenc_dimension_preflight_patch_sha256"))
     args = parser.parse_args()
     data = load()
     if args.value:
@@ -63,6 +64,7 @@ def main():
             "wo8_light_centre_phase_patch_sha256": "wo8_light_centre_phase",
             "alvr_pyrowave_rdo_live_readback_patch_sha256": "alvr_pyrowave_rdo_live_readback",
             "alvr_pyrowave_rdo_session_setting_patch_sha256": "alvr_pyrowave_rdo_session_setting",
+            "nvenc_dimension_preflight_patch_sha256": "nvenc_dimension_preflight",
         }
         if args.value in patch_values:
             print(data["patches"][patch_values[args.value]]["sha256"])
@@ -88,6 +90,7 @@ def main():
         "WO8_LIGHT_CENTRE_PHASE_PATCH_SHA256": data["patches"]["wo8_light_centre_phase"]["sha256"],
         "ALVR_PYROWAVE_RDO_LIVE_READBACK_PATCH_SHA256": data["patches"]["alvr_pyrowave_rdo_live_readback"]["sha256"],
         "ALVR_PYROWAVE_RDO_SESSION_SETTING_PATCH_SHA256": data["patches"]["alvr_pyrowave_rdo_session_setting"]["sha256"],
+        "NVENC_DIMENSION_PREFLIGHT_PATCH_SHA256": data["patches"]["nvenc_dimension_preflight"]["sha256"],
     }
     for key, value in values.items():
         print(f"{key}={value}" if args.github_env else f"{key}={shlex.quote(value)}")
