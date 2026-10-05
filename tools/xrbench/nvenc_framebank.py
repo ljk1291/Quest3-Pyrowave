@@ -1666,6 +1666,9 @@ def main(argv=None):
         if args.revised_q3a or args.width_only_h264:
             if not args.crop_geometry or not args.fence_rectangle:
                 parser.error("--revised-q3a/--width-only-h264 requires --crop-geometry and --fence-rectangle")
+            if args.width_only_h264 and not (args.foveation_implementation_revision and
+                                              args.foveation_implementation_source_sha256):
+                parser.error("--width-only-h264 requires paired foveation implementation revision and SHA-256")
             builder = build_width_only_h264_plan if args.width_only_h264 else build_revised_q3a_plan
             plan = builder(Path(args.source), args.vertical_pixels_per_degree,
                 horizontal_pixels_per_degree=args.horizontal_pixels_per_degree,

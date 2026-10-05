@@ -336,8 +336,11 @@ class NvencFramebankTests(unittest.TestCase):
             with mock.patch.object(nf,"build_width_only_h264_plan",return_value=expected) as build:
                 self.assertEqual(nf.main(["plan","--source","source.y4m","--projection-evidence","p", "--crop-evidence","c",
                     "--out",str(out),"--vertical-pixels-per-degree","23.5","--crops","[]", "--crop-geometry",str(crop),
-                    "--fence-rectangle",str(fence),"--width-only-h264"]),0)
+                    "--fence-rectangle",str(fence),"--width-only-h264",
+                    "--foveation-implementation-revision","cf3e2e1",
+                    "--foveation-implementation-source-sha256","a"*64]),0)
             self.assertTrue(build.called)
+            self.assertEqual(build.call_args.kwargs["implementation_revision"],"cf3e2e1")
             self.assertEqual(json.loads(out.read_text()),expected)
 
     def test_width_only_h264_plan_pads_but_does_not_resample_vertical_source(self):
