@@ -25,8 +25,10 @@ an independent byte-for-byte CPU reference and a per-plane range proof first.
 
 Qualification gates before any production activation are:
 
-1. A scalar CPU reference mirrors the current 5/3 inverse and the candidate
-   fetch/boundary rule on random, impulse, edge and odd-sized coefficient grids.
+1. A scalar CPU reference mirrors the current 5/3 inverse loops, gathered
+   apron, clamped line boundary rule, update-before-predict order and FP16
+   shared-memory round trips. It must agree with the candidate on random,
+   impulse, edge and odd-sized coefficient grids.
 2. Candidate output differs by at most one code value from the existing decoder
    for all Y, Cb and Cr planes on retained 5/3 streams; exact equality is the
    preferred gate.
