@@ -3,6 +3,7 @@ import random
 import unittest
 
 from tools.xrbench.wo6_cdf97_model import (f16, fused_idwt97_2d, fused_idwt97_line,
+                                            library_gather_wxzy_coordinates, LIBRARY_IDWT_LAYERS,
                                             mirror_index, reference_idwt97_2d,
                                             reference_idwt97_line)
 
@@ -37,6 +38,17 @@ class Cdf97FusedModelTests(unittest.TestCase):
         self.assertEqual(mirror_index(5, 5, True, False), 4)
         self.assertEqual(mirror_index(5, 5, False, True), 3)
         self.assertEqual(mirror_index(99, 5, True, False), 0)  # candidate clamp after one mirror step
+
+    def test_pinned_library_gather_component_swizzle_and_layers(self):
+        # GLSL gather then .wxzy, after generate_mirror_uv's +1: (x,y), (x,y+1), (x+1,y+1), (x+1,y).
+        self.assertEqual(library_gather_wxzy_coordinates((3, 5), (9, 11), True, True),
+                         [(3, 5), (3, 6), (4, 6), (4, 5)])
+        # Near low/even and high/odd conventions come from generate_mirror_uv.
+        self.assertEqual(library_gather_wxzy_coordinates((-1, -1), (5, 5), True, True),
+                         [(1, 1), (1, 0), (0, 0), (0, 1)])
+        self.assertEqual(library_gather_wxzy_coordinates((-1, -1), (5, 5), False, False),
+                         [(0, 0), (0, 0), (0, 0), (0, 0)])
+        self.assertEqual(LIBRARY_IDWT_LAYERS, {"ll": 0, "x_high": 2, "y_high": 1, "hh": 3})
 
     def test_adversarial_zeros_alternating_and_large_finite_coefficients(self):
         vectors = ([0.0] * 16,

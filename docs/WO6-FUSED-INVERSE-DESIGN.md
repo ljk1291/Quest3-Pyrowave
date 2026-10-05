@@ -60,14 +60,19 @@ interleaves LL, x-high, y-high and HH as `(even,even)`, `(odd,even)`,
 then performs the vertical pass. Random, impulse, zero, alternating and large
 finite-coefficient tests compare this reference with the fused candidate model.
 
-The boundary model also records the candidate's explicit mapping: the low/even
-band maps near `-1` to `1` and uses the half-sample far rule; high/odd maps
-near `-1` to `0` and uses the whole-sample far rule. The fused candidate uses
-`texelFetch` after this index resolution. The library shader instead reaches
-its coefficient layers through `generate_mirror_uv()` and mirrored-repeat
-texture gathers. The complete two-dimensional gather component order, swizzle,
-and coordinate-to-layer proof has not been independently derived from the
-pinned shader source. This remains an open proof: the CPU model establishes
-only the stated apron lifting, FP16 ordering, layer convention and endpoint
-assumptions. It does not qualify the fused shader, regenerate a header, enable
-a runtime setting, or claim output parity or performance.
+The source gather mapping is now explicit in the CPU model. In the pinned
+`idwt.comp`, layers are LL=0, x-high=2, y-high=1 and HH=3. For each layer,
+`generate_mirror_uv()` adds its parity-dependent coordinate adjustment and
+then transposes the UV. GLSL `textureGather` returns `(i0,j1), (i1,j1),
+(i1,j0), (i0,j0)`; its `.wxzy` swizzle therefore feeds `write_shared_4x4()`
+as source coordinates `(x,y), (x,y+1), (x+1,y+1), (x+1,y)`, after its +1 adjustment and normalized
+mirrored-repeat addressing. This is checked at interior and near-edge points
+by `test_wo6_cdf97_model.py`, using the [GLSL gather ordering](https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.html).
+
+The candidate uses `texelFetch` after equivalent index resolution. What still
+needs an independent proof is whole-stage equivalence: workgroup/tile coverage
+for every level, final-image boundary writeback, and comparison against retained
+decoder output. The CPU model establishes the stated apron lifting, FP16 order,
+layer convention and endpoint assumptions; it does not qualify the fused
+shader, regenerate a header, enable a runtime setting, or claim output parity
+or performance.

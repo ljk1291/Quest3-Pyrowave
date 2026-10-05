@@ -18,6 +18,7 @@ GAMMA = 0.882911075530934
 DELTA = 0.443506852043971
 K = 1.230174104914001
 INV_K = 1.0 / K
+LIBRARY_IDWT_LAYERS = {"ll": 0, "x_high": 2, "y_high": 1, "hh": 3}
 
 
 def f32(value: float) -> float:
@@ -41,6 +42,36 @@ def mirror_index(index: int, size: int, even_band: bool, far_whole_sample: bool)
     if index >= size:
         index = 2 * size - 2 - index if far_whole_sample else 2 * size - 1 - index
     return min(max(index, 0), size - 1)
+
+
+def mirrored_repeat_texel(index: int, size: int) -> int:
+    """The integer texel sequence for normalized MIRRORED_REPEAT gathers."""
+    if size <= 0:
+        raise ValueError("size must be positive")
+    period = 2 * size
+    index %= period
+    return index if index < size else period - 1 - index
+
+
+def library_gather_wxzy_coordinates(coord: tuple[int, int], resolution: tuple[int, int],
+                                    even_x: bool, even_y: bool) -> list[tuple[int, int]]:
+    """Resolve the pinned library's generate_mirror_uv + gather + ``.wxzy``.
+
+    ``generate_mirror_uv`` offsets each axis before transposing UV. GLSL gather
+    returns (i0,j1), (i1,j1), (i1,j0), (i0,j0); the shader's ``.wxzy`` makes
+    the final source-coordinate order (x,y), (x,y+1), (x+1,y+1), (x+1,y),
+    after MIRRORED_REPEAT addressing.
+    """
+    x, y = coord
+    width, height = resolution
+    x = x - (1 if even_x and x < 0 else 0) + 1
+    y = y - (1 if even_y and y < 0 else 0) + 1
+    x += 1 if not even_x and x >= width else 0
+    y += 1 if not even_y and y >= height else 0
+    return [(mirrored_repeat_texel(x - 1, width), mirrored_repeat_texel(y - 1, height)),
+            (mirrored_repeat_texel(x - 1, width), mirrored_repeat_texel(y, height)),
+            (mirrored_repeat_texel(x, width), mirrored_repeat_texel(y, height)),
+            (mirrored_repeat_texel(x, width), mirrored_repeat_texel(y - 1, height))]
 
 
 def _scaled(values: Sequence[float]) -> list[float]:
