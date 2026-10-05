@@ -91,3 +91,4 @@ layer, band/block range, required coarse set, and checksum; then independently
 measure completeness, quality under missing fine data, decoder readiness,
 queue replacement, and display age. Until then, retain the complete-frame gate
 and do not call a proposed packet order a latency improvement.
+
