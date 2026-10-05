@@ -64,6 +64,18 @@ def test_fetch_script_applies_rdo_density_after_the_pyrowave_overlays():
     assert expected["sha256"] == hashlib.sha256((REPO / expected["path"]).read_bytes()).hexdigest()
 
 
+def test_dequant_offset_patch_is_pinned_and_applied_after_rdo_density():
+    import hashlib
+    expected = LOCK["patches"]["pyrowave_dequant_reconstruction_offset"]
+    assert expected["path"] == "patches/pyrowave-dequant-reconstruction-offset.patch"
+    patch = REPO / expected["path"]
+    assert patch.is_file()
+    assert expected["sha256"] == hashlib.sha256(patch.read_bytes()).hexdigest()
+    script = (REPO / "tools/ci/fetch_sources.sh").read_text()
+    assert script.index("pyrowave-rdo-density.patch") < script.index("pyrowave-dequant-reconstruction-offset.patch")
+    assert "PYROWAVE_DEQUANT_RECONSTRUCTION_OFFSET_PATCH_SHA256" in script
+
+
 def test_light_phase_patch_is_pinned_and_verified_before_application():
     import hashlib
     expected = LOCK["patches"]["wo8_light_centre_phase"]

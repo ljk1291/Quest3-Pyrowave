@@ -1,0 +1,244 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 0b58ac1..f6538c6 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -136,6 +136,10 @@ if (${PROJECT_IS_TOP_LEVEL})
+     add_executable(pyrowave-rdo-density-test pyrowave_rdo_density_test.cpp)
+     target_compile_options(pyrowave-rdo-density-test PRIVATE ${PYROWAVE_CXX_FLAGS})
+ 
++    # CPU parity contract for the opt-in decoder reconstruction-offset experiment.
++    add_executable(pyrowave-dequant-reconstruction-offset-test pyrowave_dequant_reconstruction_offset_test.cpp)
++    target_compile_options(pyrowave-dequant-reconstruction-offset-test PRIVATE ${PYROWAVE_CXX_FLAGS})
++
+     add_executable(pyrowave-c-interop-test pyrowave_c_interop_test.cpp com_ptr.hpp)
+     target_link_libraries(pyrowave-c-interop-test PRIVATE pyrowave-shared granite-vulkan)
+     target_compile_options(pyrowave-c-interop-test PRIVATE ${PYROWAVE_CXX_FLAGS})
+diff --git a/pyrowave_decoder.cpp b/pyrowave_decoder.cpp
+index f2fa70d..b25bd8f 100644
+--- a/pyrowave_decoder.cpp
++++ b/pyrowave_decoder.cpp
+@@ -5,6 +5,7 @@
+ #include "buffer.hpp"
+ #include "image.hpp"
+ #include "math.hpp"
++#include "pyrowave_dequant_reconstruction_offset.hpp"
+ #include "pyrowave_common.hpp"
+ #include <algorithm>
+ #include <cstdlib>
+@@ -22,13 +23,32 @@ struct DequantizerPushData
+ 	int32_t block_offset_32x32;
+ 	int32_t block_stride_32x32;
+ 	int32_t block_count_32x32;
++	float reconstruction_offset;
+ };
+ 
++static float bounded_reconstruction_offset()
++{
++	// Opt-in decoder experiment. Zero is deliberately the exact legacy value.
++	const char *value = getenv("PYROWAVE_DEQUANT_RECONSTRUCTION_OFFSET");
++	if (!value || !*value)
++		return 0.0f;
++	auto parsed = parse_reconstruction_offset(value);
++	if (!parsed.valid)
++	{
++		LOGW("Ignoring invalid PYROWAVE_DEQUANT_RECONSTRUCTION_OFFSET. Allowed interval is [-0.25, 0.25].\n");
++		return 0.0f;
++	}
++	return parsed.value;
++}
++
+ struct Decoder::Impl final : public WaveletBuffers
+ {
+ 	bool fused_haar = getenv("PYROWAVE_FUSED_HAAR") && strcmp(getenv("PYROWAVE_FUSED_HAAR"), "1") == 0;
+ 	bool batch_dequant = getenv("PYROWAVE_BATCH_DEQUANT") && strcmp(getenv("PYROWAVE_BATCH_DEQUANT"), "1") == 0;
+ 	bool idwt_enabled = true;   // XRW Experiment 3
++	// Read once: the environment is an instance configuration, not a per-frame control.
++	float reconstruction_offset = bounded_reconstruction_offset();
++	ReconstructionOffsetObservation reconstruction_offset_observation;
+ 
+ 	BufferHandle dequant_offset_buffer, payload_data;
+ 	BufferViewHandle payload_u32_view, payload_u16_view, payload_u8_view;
+@@ -304,6 +324,7 @@ void Decoder::Impl::init_block_meta()
+ bool Decoder::Impl::dequant(CommandBuffer &cmd)
+ {
+ 	DequantizerPushData push = {};
++	push.reconstruction_offset = reconstruction_offset;
+ 
+ 	cmd.set_specialization_constant_mask(0);
+ 	cmd.enable_subgroup_size_control(true);
+@@ -330,6 +351,8 @@ bool Decoder::Impl::dequant(CommandBuffer &cmd)
+ 		cmd.set_program(shaders.wavelet_dequant[0]);
+ 
+ 	cmd.begin_region("DWT dequant");
++	if (reconstruction_offset_observation.should_emit(push.reconstruction_offset))
++		LOGI("DWT dequant reconstruction magnitude offset: %.6f\n", push.reconstruction_offset);
+ 	auto start_dequant = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+ 
+ 	cmd.image_barrier(*wavelet_img_high_res, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+diff --git a/pyrowave_dequant_reconstruction_offset.hpp b/pyrowave_dequant_reconstruction_offset.hpp
+new file mode 100644
+index 0000000..c1fef2a
+--- /dev/null
++++ b/pyrowave_dequant_reconstruction_offset.hpp
+@@ -0,0 +1,69 @@
++// Copyright (c) 2026 Hans-Kristian Arntzen
++// SPDX-License-Identifier: MIT
++#pragma once
++
++#include <cerrno>
++#include <cmath>
++#include <cstdlib>
++
++namespace PyroWave
++{
++struct ReconstructionOffset
++{
++	float value = 0.0f;
++	bool valid = true;
++};
++
++// Decoder configuration is immutable for one Impl instance. This tiny state
++// object makes its single native observation independently testable, avoiding
++// one log line per decoded frame and the resulting bounded-log truncation.
++struct ReconstructionOffsetObservation
++{
++	bool emitted = false;
++	bool should_emit(float offset)
++	{
++		if (offset == 0.0f || emitted)
++			return false;
++		emitted = true;
++		return true;
++	}
++};
++
++// Keep the opt-in range deliberately below one decoded magnitude step. Zero
++// follows the legacy expression exactly, which is part of this experiment's
++// compatibility contract.
++inline ReconstructionOffset parse_reconstruction_offset(const char *requested)
++{
++	ReconstructionOffset result = {};
++	if (!requested || !*requested)
++		return result;
++
++	errno = 0;
++	char *end = nullptr;
++	float parsed = std::strtof(requested, &end);
++	if (errno || end == requested || !end || *end != '\0' || !std::isfinite(parsed) ||
++	    parsed < -0.25f || parsed > 0.25f)
++	{
++		result.valid = false;
++		return result;
++	}
++	result.value = parsed;
++	return result;
++}
++
++// This mirrors wavelet_dequant.comp: magnitudes are offset before scaling and
++// sign restoration, while encoded zeros remain zero.
++inline float reconstruct_dequant_magnitude(float magnitude, float inv_scale, float offset)
++{
++	if (magnitude == 0.0f)
++		return 0.0f;
++	if (offset == 0.0f)
++		return magnitude * inv_scale;
++	return (magnitude + offset) * inv_scale;
++}
++
++inline float restore_dequant_sign(float magnitude, bool negative)
++{
++	return negative ? -magnitude : magnitude;
++}
++}
+diff --git a/pyrowave_dequant_reconstruction_offset_test.cpp b/pyrowave_dequant_reconstruction_offset_test.cpp
+new file mode 100644
+index 0000000..3af708a
+--- /dev/null
++++ b/pyrowave_dequant_reconstruction_offset_test.cpp
+@@ -0,0 +1,60 @@
++// Copyright (c) 2026 Hans-Kristian Arntzen
++// SPDX-License-Identifier: MIT
++#include "pyrowave_dequant_reconstruction_offset.hpp"
++#include <cstdint>
++#include <cstdio>
++#include <cstring>
++#include <initializer_list>
++
++#define ASSERT_THAT(expr) do { \
++	if (!(expr)) { std::fprintf(stderr, "Assertion failed: %s at line %d.\n", #expr, __LINE__); return 1; } \
++} while (false)
++
++static uint32_t float_bits(float value)
++{
++	uint32_t bits = 0;
++	static_assert(sizeof(bits) == sizeof(value), "Unexpected float size.");
++	std::memcpy(&bits, &value, sizeof(bits));
++	return bits;
++}
++
++static float legacy_deadzone_dequant(float magnitude, float inv_scale)
++{
++	return magnitude == 0.0f ? 0.0f : magnitude * inv_scale;
++}
++
++int main()
++{
++	using namespace PyroWave;
++	const float inv_scale = 0.375f;
++	const float magnitude = 3.5f;
++
++	// The default path must retain the legacy IEEE-754 operation and bits.
++	const float legacy = legacy_deadzone_dequant(magnitude, inv_scale);
++	ASSERT_THAT(float_bits(reconstruct_dequant_magnitude(magnitude, inv_scale, 0.0f)) == float_bits(legacy));
++	ASSERT_THAT(float_bits(reconstruct_dequant_magnitude(magnitude, inv_scale, parse_reconstruction_offset(nullptr).value)) == float_bits(legacy));
++
++	for (float offset : { -0.25f, -0.125f, 0.0f, 0.125f, 0.25f })
++	{
++		const float reconstructed = reconstruct_dequant_magnitude(magnitude, inv_scale, offset);
++		ASSERT_THAT(float_bits(reconstructed) == float_bits((magnitude + offset) * inv_scale));
++		ASSERT_THAT(float_bits(restore_dequant_sign(reconstructed, false)) == float_bits(reconstructed));
++		ASSERT_THAT(float_bits(restore_dequant_sign(reconstructed, true)) == float_bits(-reconstructed));
++		ASSERT_THAT(float_bits(reconstruct_dequant_magnitude(0.0f, inv_scale, offset)) ==
++		            float_bits(legacy_deadzone_dequant(0.0f, inv_scale)));
++	}
++
++	for (const char *accepted : { "-0.25", "-0.125", "0", "0.125", "0.25" })
++		ASSERT_THAT(parse_reconstruction_offset(accepted).valid);
++	for (const char *rejected : { "-0.2501", "0.2501", "nan", "inf", "0x1p-3x" })
++		ASSERT_THAT(!parse_reconstruction_offset(rejected).valid);
++
++	ReconstructionOffsetObservation observation;
++	ASSERT_THAT(!observation.should_emit(0.0f));
++	ASSERT_THAT(observation.should_emit(-0.25f));
++	ASSERT_THAT(!observation.should_emit(-0.25f));
++	ASSERT_THAT(!observation.should_emit(0.125f));
++
++	std::puts("PyroWave dequant reconstruction offset default parity, sign/zero, and interval checks passed.");
++	return 0;
++}
+diff --git a/shaders/wavelet_dequant.comp b/shaders/wavelet_dequant.comp
+index 42fa782..779db6d 100644
+--- a/shaders/wavelet_dequant.comp
++++ b/shaders/wavelet_dequant.comp
+@@ -58,6 +58,7 @@ layout(push_constant) uniform Registers
+     int block_offset_32x32;
+     int block_stride_32x32;
+     int block_count_32x32;
++    float reconstruction_offset;
+ } registers;
+ 
+ #if STORAGE_MODE == 1
+@@ -315,6 +316,13 @@ void main()
+         float q = decode_quant(q_code);
+         float inv_scale = q * decode_quant_scale(bitfieldExtract(control_word2, QUANT_SCALE_OFFSET - 16, QUANT_SCALE_BITS));
+ 
++        // v is an unsigned magnitude here. The sign is applied below, so the
++        // optional offset stays symmetric and never turns an encoded zero into
++        // a nonzero coefficient. Offset=0 is bit-identical to the legacy path.
++        for (int j = 0; j < 2; j++)
++            for (int i = 0; i < 4; i++)
++                if (v[j][i] != 0.0)
++                    v[j][i] += registers.reconstruction_offset;
+         v *= inv_scale;
+     }
+     else
