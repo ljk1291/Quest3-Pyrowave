@@ -38,12 +38,14 @@ byte exactly.
 | Alignment padding | 816,930 |
 | Total payload | 124,995,088 |
 
-The parser also builds a byte histogram separately for each plane ordinal. Its
-zero-order Shannon `H0` model gives 72,778,515.59 bytes for the 83,689,797
-actual bitplane bytes (86.96% of the raw plane bytes), a theoretical
-10,911,281.41-byte, 13.04% difference **within plane symbols only**. Pooling
-all plane ordinals instead gives 74,683,766.12 bytes; the per-plane result is
-the tighter context-free bound here. The first three plane ordinals carry
+The parser builds byte histograms by plane ordinal and by the available native
+control context: the `q_bits` nibble plus plane ordinal. The latter zero-order
+Shannon `H0` model gives 72,190,793.77 bytes for the 83,689,797 actual
+bitplane bytes (86.26% of the raw plane bytes), a theoretical
+11,499,003.23-byte, 13.74% difference **within plane symbols only**. It uses
+existing controls and needs no new side data, but it remains a model rather
+than a coder. Plane ordinal alone gives 72,778,515.59 bytes; pooling all plane
+ordinals gives 74,683,766.12 bytes. The first three plane ordinals carry
 36,164,683, 24,068,621, and 13,358,894 bytes respectively, with `H0` values
 6.1540, 7.3005, and 7.7704 bits/byte; later planes are close to 8 bits/byte.
 

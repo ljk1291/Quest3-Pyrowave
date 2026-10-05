@@ -38,6 +38,8 @@ class PyroWaveBitplaneParserTests(unittest.TestCase):
         })
         self.assertEqual(result["bitplane_h0"]["symbols"], 2)
         self.assertAlmostEqual(result["bitplane_h0"]["aggregate_h0_bits_per_byte"], 1.0)
+        self.assertEqual(result["bitplane_h0"]["context"], "native q_bits control nibble plus plane ordinal")
+        self.assertAlmostEqual(result["bitplane_h0"]["per_q_bits_and_plane_h0_bytes_sum"], 0.0)
 
     def test_parser_rejects_trailing_frame_bytes(self):
         with self.assertRaisesRegex(bp.BitplaneFormatError, "truncated frame length"):

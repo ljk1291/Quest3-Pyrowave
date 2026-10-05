@@ -328,6 +328,18 @@ class NvencFramebankTests(unittest.TestCase):
         self.assertEqual(plan["extension_matrix"]["historical_q3b_dropped"],["h264-dual-blur-light-s05-700"])
         self.assertEqual(nf.profile("av1",200,preset="p1",spatial_aq=True)["preset"],"p1")
 
+    def test_plan_cli_selects_width_only_controller(self):
+        with tempfile.TemporaryDirectory() as root:
+            root=Path(root); crop=root/"crop.json"; fence=root/"fence.json"; out=root/"plan.json"
+            crop.write_text(json.dumps({"geometry":"fixture"})); fence.write_text(json.dumps({"fence":"fixture"}))
+            expected={"kind":"nvenc_frame_bank","width_only_contract":{"encoded_eye":[2048,2784]}}
+            with mock.patch.object(nf,"build_width_only_h264_plan",return_value=expected) as build:
+                self.assertEqual(nf.main(["plan","--source","source.y4m","--projection-evidence","p", "--crop-evidence","c",
+                    "--out",str(out),"--vertical-pixels-per-degree","23.5","--crops","[]", "--crop-geometry",str(crop),
+                    "--fence-rectangle",str(fence),"--width-only-h264"]),0)
+            self.assertTrue(build.called)
+            self.assertEqual(json.loads(out.read_text()),expected)
+
     def test_width_only_h264_plan_pads_but_does_not_resample_vertical_source(self):
         geometry={"kind":"per_eye_crop","source_eye":[3072,3232],"target_eye":[2624,2776],
                   "eyes":[{"eye":"left","x":278,"y":274,"width":2624,"height":2776},

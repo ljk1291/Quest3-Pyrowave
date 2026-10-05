@@ -44,6 +44,7 @@ class FrameStats:
     sign_bytes: int
     padding_bytes: int
     plane_counts: tuple[tuple[int, tuple[tuple[int, int], ...]], ...]
+    plane_context_counts: tuple[tuple[tuple[int, int], tuple[tuple[int, int], ...]], ...]
 
 
 def _need(blob: bytes, offset: int, length: int, where: str) -> None:
@@ -81,6 +82,7 @@ def _parse_frame(payload: bytes) -> FrameStats:
     last_block_index = -1
     block_header_bytes = control_bytes = plane_bytes = sign_bytes = padding_bytes = 0
     plane_counts: dict[int, Counter[int]] = defaultdict(Counter)
+    plane_context_counts: dict[tuple[int, int], Counter[int]] = defaultdict(Counter)
 
     for expected_block in range(total_blocks):
         _need(payload, pos, _BLOCK_HEADER_BYTES, f"block {expected_block} header")
@@ -120,6 +122,7 @@ def _parse_frame(payload: bytes) -> FrameStats:
                 values = payload[plane_at : plane_at + planes]
                 for plane_index, value in enumerate(values):
                     plane_counts[plane_index][value] += 1
+                    plane_context_counts[(q_bits, plane_index)][value] += 1
                     significance |= value
                 plane_at += planes
                 significant_values += significance.bit_count()
@@ -149,6 +152,8 @@ def _parse_frame(payload: bytes) -> FrameStats:
         control_bytes=control_bytes, plane_bytes=plane_bytes, sign_bytes=sign_bytes,
         padding_bytes=padding_bytes,
         plane_counts=tuple((plane, tuple(sorted(counts.items()))) for plane, counts in sorted(plane_counts.items())),
+        plane_context_counts=tuple((context, tuple(sorted(counts.items())))
+                                   for context, counts in sorted(plane_context_counts.items())),
     )
 
 
@@ -207,6 +212,17 @@ def analyze_wave_bytes(blob: bytes) -> dict:
         summed_h0_bits += count * h0
         by_plane.append({"plane_index": plane, "bytes": count, "h0_bits_per_byte": h0,
                          "h0_bytes": count * h0 / 8.0})
+    counts_by_context: dict[tuple[int, int], Counter[int]] = defaultdict(Counter)
+    for frame in frames:
+        for context, pairs in frame.plane_context_counts:
+            counts_by_context[context].update(dict(pairs))
+    contextual_h0_bits = 0.0
+    for counts in counts_by_context.values():
+        count = sum(counts.values())
+        if count:
+            contextual_h0_bits += -sum(
+                value_count * math.log2(value_count / count)
+                for value_count in counts.values())
 
     payload_sizes = [frame.payload_bytes for frame in frames]
     classes = {
@@ -240,7 +256,9 @@ def analyze_wave_bytes(blob: bytes) -> dict:
         "bitplane_h0": {"symbols": total_symbols, "aggregate_h0_bits_per_byte": aggregate_h0,
                         "aggregate_h0_bytes": total_symbols * aggregate_h0 / 8.0,
                         "per_plane_h0_bytes_sum": summed_h0_bits / 8.0,
+                        "per_q_bits_and_plane_h0_bytes_sum": contextual_h0_bits / 8.0,
                         "per_plane": by_plane,
+                        "context": "native q_bits control nibble plus plane ordinal",
                         "interpretation": "zero-order symbol entropy bound only; no entropy coder was run"},
     }
 

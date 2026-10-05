@@ -1640,7 +1640,9 @@ def main(argv=None):
     p.add_argument("--vertical-pixels-per-degree", type=float, required=True)
     p.add_argument("--horizontal-pixels-per-degree", type=float)
     p.add_argument("--crops", required=True)
-    p.add_argument("--revised-q3a", action="store_true", help="freeze only the revised NVENC Q3a subset")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--revised-q3a", action="store_true", help="freeze only the revised NVENC Q3a subset")
+    mode.add_argument("--width-only-h264", action="store_true", help="freeze the opt-in WO-8 2048x2784-per-eye H.264 cell")
     p.add_argument("--crop-geometry", help="JSON from fence_metrics.crop_geometry (required with --revised-q3a)")
     p.add_argument("--fence-rectangle", help="frozen Q3 fence rectangle JSON (required with --revised-q3a)")
     r = sub.add_parser("run")
@@ -1653,10 +1655,11 @@ def main(argv=None):
     r.add_argument("--scorer-compatibility", help="tracked historical-HVS compatibility descriptor; scorer-only")
     args = parser.parse_args(argv)
     if args.command == "plan":
-        if args.revised_q3a:
+        if args.revised_q3a or args.width_only_h264:
             if not args.crop_geometry or not args.fence_rectangle:
-                parser.error("--revised-q3a requires --crop-geometry and --fence-rectangle")
-            plan = build_revised_q3a_plan(Path(args.source), args.vertical_pixels_per_degree,
+                parser.error("--revised-q3a/--width-only-h264 requires --crop-geometry and --fence-rectangle")
+            builder = build_width_only_h264_plan if args.width_only_h264 else build_revised_q3a_plan
+            plan = builder(Path(args.source), args.vertical_pixels_per_degree,
                 horizontal_pixels_per_degree=args.horizontal_pixels_per_degree,
                 projection_evidence=args.projection_evidence, crop_evidence=args.crop_evidence,
                 crop_geometry=json.loads(Path(args.crop_geometry).read_text(encoding="utf-8")),
@@ -1664,7 +1667,7 @@ def main(argv=None):
                 crops=_crops_argument(args.crops))
         else:
             if args.crop_geometry or args.fence_rectangle:
-                parser.error("crop geometry and fence rectangle require --revised-q3a")
+                parser.error("crop geometry and fence rectangle require --revised-q3a or --width-only-h264")
             plan = build_plan(Path(args.source), args.vertical_pixels_per_degree,
                               horizontal_pixels_per_degree=args.horizontal_pixels_per_degree,
                               projection_evidence=args.projection_evidence, crop_evidence=args.crop_evidence,
