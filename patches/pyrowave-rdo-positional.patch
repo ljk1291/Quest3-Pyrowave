@@ -64,7 +64,7 @@ index c21165b..2b2d60a 100644
 +	if (impl->rdo_local_mode != RDOLocalMode::Disabled)
 +		LOGI("PyroWave positional RDO: mode %d; Session-07 calibration reused for Session-09; "
 +		     "per-eye cropped frusta L[-1.17589234,0.71649807,-1.22520507,0.83088732] "
-+		     "R[-0.71649807,1.17589234,-1.22520507,0.83088732]; scalar geometric-mean PPD anchored at optical axis.\n",
++		     "R[-0.71649807,1.17589234,-1.22520507,0.83088732] (right is a retained-left mirror assumption); scalar geometric-mean PPD anchored at optical axis.\n",
 +		     int(impl->rdo_local_mode));
  
  	auto ops = device->get_device_features().vk11_props.subgroupSupportedOperations;

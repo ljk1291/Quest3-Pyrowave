@@ -2,7 +2,7 @@
 
 This encoder-only overlay retains the existing coefficient orientation and band-midpoint RDO model. It does not change the bitstream syntax or decoder. `PYROWAVE_RDO_POSITIONAL` is disabled when unset or `0`; the shader returns exactly `1.0` before calculating position, so the default uses the prior RDO arithmetic. Modes `1` and `2` additionally require an explicit, non-legacy `PYROWAVE_RDO_PX_PER_DEG` and the fixed 5248x2776 dual-eye crop. Any invalid mode or geometry fails initialization rather than selecting a fallback.
 
-The crop geometry is the Session-07 projection calibration reused by Session 09. Each 2624x2776 eye uses left `[-1.17589234, 0.71649807, -1.22520507, 0.83088732]` or right `[-0.71649807, 1.17589234, -1.22520507, 0.83088732]` tangent bounds. The crop centre is not assumed to be the optical axis.
+The crop geometry is the Session-07 projection calibration reused by Session 09. Each 2624x2776 eye uses left `[-1.17589234, 0.71649807, -1.22520507, 0.83088732]` tangent bounds. The right bounds `[-0.71649807, 1.17589234, -1.22520507, 0.83088732]` are a mirror derived from the retained left-eye calibration, not an independent right-eye measurement. The crop centre is not assumed to be the optical axis.
 
 For tangent coordinates `(tx, ty)`, `spanx = right-left`, and `spany = top-bottom`, the scalar uses:
 

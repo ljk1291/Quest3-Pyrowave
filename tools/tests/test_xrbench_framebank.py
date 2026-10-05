@@ -469,7 +469,7 @@ class FrameBankTests(unittest.TestCase):
                               {'path': 'patches.pyrowave_rdo_positional.path', 'old': None,
                                'new': 'patches/pyrowave-rdo-positional.patch', 'role': 'codec_encoder_only'},
                               {'path': 'patches.pyrowave_rdo_positional.sha256', 'old': None,
-                               'new': '8b88fdebb8ce4de8d4e7d2b3a365f9172e919f5728b15c9f407adcd68b0b6b9b', 'role': 'codec_encoder_only'},
+                               'new': 'b5828125cb308fad68612f34603ac2b258f14596b4b3af8d7bb3150bb0529ddc', 'role': 'codec_encoder_only'},
                               {'path': 'patches.wo8_light_centre_phase.path', 'old': None,
                                'new': 'patches/wo8-light-centre-phase.patch', 'role': 'presentation_foveation_only'},
                               {'path': 'patches.wo8_light_centre_phase.sha256', 'old': None,
