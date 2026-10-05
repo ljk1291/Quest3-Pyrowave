@@ -46,7 +46,7 @@ def foveation_transform_descriptor(*, profile: str, softness: float, blur_only: 
                                     implementation_revision: str | None = None,
                                     implementation_source_sha256: str | None = None) -> dict:
     """Frozen Q3b source-transform descriptor; WO-8 owns its implementation."""
-    if profile not in ("light", "medium", "h264fit"):
+    if profile not in ("light", "medium", "h264fit", "h264width"):
         raise ValueError("unknown foveation profile")
     if not isinstance(softness, (int, float)) or not math.isfinite(softness) or not 0 <= softness <= 1:
         raise ValueError("foveation softness must be in [0, 1]")
@@ -441,6 +441,48 @@ def build_q3_extension_nvenc_plan(source: Path, vertical_pixels_per_degree: floa
     return base
 
 
+def build_width_only_h264_plan(source: Path, vertical_pixels_per_degree: float, *,
+                               implementation_revision: str | None = None,
+                               implementation_source_sha256: str | None = None,
+                               **kwargs) -> dict:
+    """Plan one opt-in H.264 P7 width-only WO-8 comparison.
+
+    The source crop stays 2624x2776. Eight bottom-edge rows are replicated
+    solely to reach a 2784-pixel allocation boundary; the inverse drops those
+    rows before scoring. Vertical resampling is therefore not part of this
+    candidate. The encoded SBS raster is exactly 4096x2784: 2048 pixels per
+    eye is the least aligned width that meets the H.264 limit.
+    """
+    base = build_revised_q3a_plan(source, vertical_pixels_per_degree, **kwargs)
+    crop = next(row for row in base["cells"] if row["label"] == "h264-dual-p7-400")
+    from .foveation import FoveationConfig, encoded_size
+    transform = foveation_transform_descriptor(
+        profile="h264width", softness=.5, blur_only=False,
+        implementation_revision=implementation_revision,
+        implementation_source_sha256=implementation_source_sha256)
+    source_eye = (2624, 2776); expanded_eye = (2624, 2784)
+    width, height = encoded_size(*expanded_eye, FoveationConfig("h264width", .5, False))
+    if width * 2 != 4096 or height != expanded_eye[1]:
+        raise ValueError("width-only H264 geometry does not meet its allocation contract")
+    encoded_base = dict(crop, eye_width=width, eye_height=height, stereo_width=width * 2,
+                        cap_bytes=fb.cap_bytes(700, fb.FPS), bits_per_pixel=fb.bpp(fb.cap_bytes(700, fb.FPS), width, height))
+    row = _revised_cell(encoded_base, codec="h264", rate_mbps=700, preset="p7", layout="stereo_sbs",
+                        spatial_aq=False, label="h264-width-only-s05-700", source_geometry="crop")
+    row.update(experiment_id="wo8_width_only_h264_p7_700", source_transform=transform,
+               source_eye=source_eye, expanded_source_eye=expanded_eye,
+               vertical_allocation_padding_rows=expanded_eye[1] - source_eye[1],
+               vertical_resampling=False, score_vertical_pixels_per_degree=float(vertical_pixels_per_degree))
+    base.update(cells=[row], q3_revision="2026-10-05-wo8-width-only-h264",
+                width_only_contract={"source_eye":list(source_eye), "expanded_source_eye":list(expanded_eye),
+                                     "encoded_eye":[width,height], "encoded_sbs_width":width*2,
+                                     "h264_sbs_width_limit":4096, "vertical_resampling":False})
+    full_height = kwargs.get("full_eye", fb.DISPLAY_EYE)[1]
+    base["hvs_calibration"]["codec_cells"] = [fb.hvs_calibration_for_vertical_ppd(
+        vertical_pixels_per_degree * height / full_height, height)]
+    validate_plan(base)
+    return base
+
+
 def _validate_source_adapter(plan: dict) -> None:
     adapter = plan.get("source_adapter")
     if adapter is None:  # schema-1 compatibility only
@@ -515,7 +557,7 @@ def validate_plan(plan: dict) -> dict:
             raise ValueError("cropped score PPD is invalid")
         transform = cell.get("source_transform")
         if transform is not None:
-            if plan.get("q3_revision") not in ("2026-10-04-q3b", "2026-10-04-q3-extension"):
+            if plan.get("q3_revision") not in ("2026-10-04-q3b", "2026-10-04-q3-extension", "2026-10-05-wo8-width-only-h264"):
                 raise ValueError("WO-8 transform is only valid for Q3b or the Q3 extension")
             try:
                 if transform != foveation_transform_descriptor(profile=transform.get("profile"),
@@ -969,7 +1011,7 @@ def _stream_q3b_sources(source: Path, source_info: fb.Y4MInfo, geometry: dict, t
                     # owner guard after completion and before it has any durable
                     # output effect or we queue another source frame.
                     if guard is not None: guard.status()
-                    if encoded.expanded_eye != expanded or encoded.chroma420 is not True:
+                    if (encoded.source_eye or encoded.expanded_eye) != expanded or encoded.chroma420 is not True:
                         raise ValueError("Q3b WO-8 expanded geometry/chroma drifted")
                     if first is None:
                         first = encoded; small = encoded.encoded_eye
@@ -1005,6 +1047,24 @@ def _stream_q3b_sources(source: Path, source_info: fb.Y4MInfo, geometry: dict, t
         "preparation_execution": "bounded_cpu_threads_ordered_output"}
 
 
+def _load_prepared_q3b_sources(prepared: Path, plan_hash: str, cell: dict):
+    """Reuse a verified CPU-only WO-8 reference bank; never recompute it in a lease."""
+    receipt = json.loads((prepared / "width-only-preparation.json").read_text(encoding="utf-8"))
+    if receipt.get("complete") is not True or receipt.get("codec_or_scorer_ran") is not False:
+        raise ValueError("prepared WO-8 receipt is not CPU-only complete")
+    if receipt.get("frozen_plan_sha256") != plan_hash:
+        raise ValueError("prepared WO-8 plan identity differs")
+    if receipt.get("candidate", {}).get("source_transform") != cell.get("source_transform"):
+        raise ValueError("prepared WO-8 transform differs")
+    identities = receipt.get("frame_identity")
+    if not isinstance(identities, list) or len(identities) != 90:
+        raise ValueError("prepared WO-8 identities are incomplete")
+    encoded, sharp, blur = (prepared / name for name in ("encoded-reference.y4m", "sharp-reference.y4m", "blur-reference.y4m"))
+    if not all(path.is_file() for path in (encoded, sharp, blur)):
+        raise ValueError("prepared WO-8 references are missing")
+    return fb.inspect_y4m(encoded), fb.inspect_y4m(sharp), identities, receipt["transform"], encoded, sharp, blur
+
+
 def _reconstruct_q3b_decoded(decoded_small: Path, encoded_info: fb.Y4MInfo, score_path: Path,
                               score_info: fb.Y4MInfo, transform: dict) -> None:
     """Expand a decoded reduced WO-8 frame only after the codec stage."""
@@ -1013,8 +1073,10 @@ def _reconstruct_q3b_decoded(decoded_small: Path, encoded_info: fb.Y4MInfo, scor
     except ImportError as exc:
         raise ValueError("Q3b reconstruction module is unavailable") from exc
     config = _q3b_config(transform)
+    source_eye = (score_info.width // 2, score_info.height)
+    expanded_eye = (source_eye[0], int(math.ceil(source_eye[1] / 32.0) * 32)) if config.profile == "h264width" else source_eye
     template = EncodedPlanes((np.empty((0, 0), np.uint8),) * 3,
-        (score_info.width // 2, score_info.height), (encoded_info.width // 2, encoded_info.height), True, config)
+        expanded_eye, (encoded_info.width // 2, encoded_info.height), True, config, source_eye)
     with fb._open_writer(score_path, score_info) as out:
         for _, planes, _ in fb.iter_y4m(decoded_small, encoded_info):
             fb._write_frame(out, score_info, reconstruct_planes(planes, template))
@@ -1354,7 +1416,7 @@ def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, 
 def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, window: Path, *,
              command_timeout_s: float = 900, keep_artifacts: bool = False, supervised: bool = True,
              tools_metadata: Path | None = None, preparation_workers: int = 1,
-             scorer_compatibility: Path | None = None) -> dict:
+             scorer_compatibility: Path | None = None, prepared_references: Path | None = None) -> dict:
     """Run a frozen proxy matrix through an owner-supervised quality lease."""
     raw = Path(plan_path).read_bytes(); plan = validate_plan(json.loads(raw))
     source = Path(source); private_out = fb._private_path(private_out)
@@ -1409,9 +1471,14 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
             else:
                 score_ref = directory / "score-sharp-reference.y4m"
                 score_blur = directory / "score-blur-reference.y4m"
-                ref_info, score_ref_info, identities, q3b_provenance = _stream_q3b_sources(
-                    source, source_info, plan["source_adapter"]["geometry"], q3b_transform,
-                    ref, score_ref, score_blur, preparation_workers=preparation_workers, guard=guard)
+                reused_preparation = prepared_references is not None
+                if reused_preparation:
+                    ref_info, score_ref_info, identities, q3b_provenance, ref, score_ref, score_blur = _load_prepared_q3b_sources(
+                        Path(prepared_references), hashlib.sha256(raw).hexdigest(), row)
+                else:
+                    ref_info, score_ref_info, identities, q3b_provenance = _stream_q3b_sources(
+                        source, source_info, plan["source_adapter"]["geometry"], q3b_transform,
+                        ref, score_ref, score_blur, preparation_workers=preparation_workers, guard=guard)
                 row["q3b_transform"] = q3b_provenance
             row["identity_count"] = len(identities)
             if [x["source_sha256"] for x in identities] != [x["source_sha256"] for x in plan["source"]["frame_identity"]]:
@@ -1602,9 +1669,13 @@ def main(argv=None):
     p.add_argument("--vertical-pixels-per-degree", type=float, required=True)
     p.add_argument("--horizontal-pixels-per-degree", type=float)
     p.add_argument("--crops", required=True)
-    p.add_argument("--revised-q3a", action="store_true", help="freeze only the revised NVENC Q3a subset")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--revised-q3a", action="store_true", help="freeze only the revised NVENC Q3a subset")
+    mode.add_argument("--width-only-h264", action="store_true", help="freeze the opt-in WO-8 2048x2784-per-eye H.264 cell")
     p.add_argument("--crop-geometry", help="JSON from fence_metrics.crop_geometry (required with --revised-q3a)")
     p.add_argument("--fence-rectangle", help="frozen Q3 fence rectangle JSON (required with --revised-q3a)")
+    p.add_argument("--foveation-implementation-revision", help="WO-8 source revision; must be paired with its SHA-256")
+    p.add_argument("--foveation-implementation-source-sha256", help="WO-8 source SHA-256; must be paired with its revision")
     r = sub.add_parser("run")
     for name in ("plan", "source", "private-out", "report", "window", "ffmpeg", "ffprobe", "psnr-hvs-m-h", "tools-metadata"):
         r.add_argument("--" + name, required=True)
@@ -1615,18 +1686,25 @@ def main(argv=None):
     r.add_argument("--scorer-compatibility", help="tracked historical-HVS compatibility descriptor; scorer-only")
     args = parser.parse_args(argv)
     if args.command == "plan":
-        if args.revised_q3a:
+        if args.revised_q3a or args.width_only_h264:
             if not args.crop_geometry or not args.fence_rectangle:
-                parser.error("--revised-q3a requires --crop-geometry and --fence-rectangle")
-            plan = build_revised_q3a_plan(Path(args.source), args.vertical_pixels_per_degree,
+                parser.error("--revised-q3a/--width-only-h264 requires --crop-geometry and --fence-rectangle")
+            if args.width_only_h264 and not (args.foveation_implementation_revision and
+                                              args.foveation_implementation_source_sha256):
+                parser.error("--width-only-h264 requires paired foveation implementation revision and SHA-256")
+            builder = build_width_only_h264_plan if args.width_only_h264 else build_revised_q3a_plan
+            plan = builder(Path(args.source), args.vertical_pixels_per_degree,
                 horizontal_pixels_per_degree=args.horizontal_pixels_per_degree,
                 projection_evidence=args.projection_evidence, crop_evidence=args.crop_evidence,
                 crop_geometry=json.loads(Path(args.crop_geometry).read_text(encoding="utf-8")),
                 fence_rectangle=json.loads(Path(args.fence_rectangle).read_text(encoding="utf-8")),
-                crops=_crops_argument(args.crops))
+                crops=_crops_argument(args.crops),
+                **({"implementation_revision": args.foveation_implementation_revision,
+                    "implementation_source_sha256": args.foveation_implementation_source_sha256}
+                   if args.width_only_h264 else {}))
         else:
             if args.crop_geometry or args.fence_rectangle:
-                parser.error("crop geometry and fence rectangle require --revised-q3a")
+                parser.error("crop geometry and fence rectangle require --revised-q3a or --width-only-h264")
             plan = build_plan(Path(args.source), args.vertical_pixels_per_degree,
                               horizontal_pixels_per_degree=args.horizontal_pixels_per_degree,
                               projection_evidence=args.projection_evidence, crop_evidence=args.crop_evidence,

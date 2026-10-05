@@ -15,6 +15,12 @@ PROFILE_CONSTANTS = {
     "light": (0.8, 1.5),
     "medium": (0.6, 2.0),
     "h264fit": (0.5, 2.0),
+    # H.264's 4096-wide SBS limit needs horizontal reduction.  This opt-in
+    # profile preserves the vertically padded source raster exactly.
+    # 23/41 at 2624 pixels with a 2x edge ratio gives precisely 2048
+    # allocated output pixels: the least horizontal reduction meeting a
+    # 4096-wide stereo H.264 limit.
+    "h264width": (23.0 / 41.0, 2.0),
 }
 # The unrounded ratio-2 derivative peaks at 2r-1 = 3 source pixels/output
 # pixel.  Allocation is rounded to 32 pixels, which raises the actual Q3
@@ -34,7 +40,7 @@ class FoveationConfig:
 
     def __post_init__(self):
         if self.profile not in PROFILE_CONSTANTS:
-            raise ValueError("profile must be light, medium or h264fit")
+            raise ValueError("profile must be light, medium, h264fit or h264width")
         if not math.isfinite(self.softness) or not 0.0 <= self.softness <= 1.0:
             raise ValueError("softness must be finite in [0, 1]")
         if len(self.center_shift) != 2 or any(not math.isfinite(x) or abs(x) >= 1 for x in self.center_shift):
@@ -45,17 +51,28 @@ class FoveationConfig:
     @property
     def edge_ratio(self) -> float: return PROFILE_CONSTANTS[self.profile][1]
 
+    def axis_constants(self, axis: int) -> tuple[float, float] | None:
+        """Return the native per-axis parameters; ``None`` means identity."""
+        if self.profile == "h264width" and axis == 1:
+            return None
+        return self.center_fraction, self.edge_ratio
+
 def encoded_size(width: int, height: int, config: FoveationConfig) -> tuple[int, int]:
     """Exact ALVR FFR alignment, including its 32-pixel output allocation."""
     if min(width, height) <= 0: raise ValueError("invalid geometry")
     if config.blur_only: return width, height
-    c, ratio = config.center_fraction, config.edge_ratio
-    def axis(n):
+    def axis(n, index):
+        constants = config.axis_constants(index)
+        # Allocation padding is not resampling. encode_planes extends the
+        # vertical edge to this 32-pixel boundary before the identity pass.
+        if constants is None:
+            return int(math.ceil(n / 32.0) * 32)
+        c, ratio = constants
         edge = n - c * n
         aligned_center = 1.0 - math.ceil(edge / (ratio * 2.0)) * (ratio * 2.0) / n
         scaled = (aligned_center + (1.0 - aligned_center) / ratio) * n
         return int(math.ceil(scaled / 32.0) * 32)
-    return axis(width), axis(height)
+    return axis(width, 0), axis(height, 1)
 
 def _params(full: int, encoded: int, center_fraction: float, ratio: float, shift: float):
     edge = full - center_fraction * full
@@ -99,14 +116,18 @@ def forward_map_uv(uv: np.ndarray, full_size: tuple[int,int], encoded_size_: tup
     if config.blur_only: return uv.copy()
     out=np.empty_like(uv)
     for axis,(full,enc,shift) in enumerate(zip(full_size,encoded_size_,config.center_shift)):
-        er,c1,c2,lo,hi=_params(full,enc,config.center_fraction,config.edge_ratio,shift)
+        constants=config.axis_constants(axis)
+        if constants is None:
+            out[...,axis]=uv[...,axis]; continue
+        center_fraction, ratio=constants
+        er,c1,c2,lo,hi=_params(full,enc,center_fraction,ratio,shift)
         x=uv[...,axis]/er
-        center=x*c2/config.edge_ratio+c1
+        center=x*c2/ratio+c1
         d2=x*c2; d3=(x-1.0)*c2+1.0
         left=(x/lo)*center+(1.0-x/lo)*d2
         right=((1.0-x)/(1.0-hi))*center+(1.0-(1.0-x)/(1.0-hi))*d3
         mapped=np.where(x < lo,left,np.where(x > hi,right,center))
-        out[...,axis]=mapped + _sample_phase_uv(full, enc, config.center_fraction, config.edge_ratio, shift)
+        out[...,axis]=mapped + _sample_phase_uv(full, enc, center_fraction, ratio, shift)
     return out
 
 def hlsl_forward_map_uv(uv: np.ndarray, full_size: tuple[int,int], encoded_size_: tuple[int,int], config: FoveationConfig) -> np.ndarray:
@@ -122,9 +143,13 @@ def hlsl_forward_map_uv(uv: np.ndarray, full_size: tuple[int,int], encoded_size_
     if config.blur_only: return uv.copy()
     out=np.empty_like(uv)
     for axis,(full,enc,shift) in enumerate(zip(full_size,encoded_size_,config.center_shift)):
-        er,c1,c2,lo,hi=(np.float32(x) for x in _params(full,enc,config.center_fraction,config.edge_ratio,shift))
+        constants=config.axis_constants(axis)
+        if constants is None:
+            out[...,axis]=uv[...,axis]; continue
+        center_fraction, ratio=constants
+        er,c1,c2,lo,hi=(np.float32(x) for x in _params(full,enc,center_fraction,ratio,shift))
         x=uv[...,axis]/er
-        center=x*c2/np.float32(config.edge_ratio)+c1
+        center=x*c2/np.float32(ratio)+c1
         d2=x*c2; d3=(x-np.float32(1.0))*c2+np.float32(1.0)
         left=(x/lo)*center+(np.float32(1.0)-x/lo)*d2
         right=((np.float32(1.0)-x)/(np.float32(1.0)-hi))*center+(np.float32(1.0)-(np.float32(1.0)-x)/(np.float32(1.0)-hi))*d3
@@ -167,7 +192,10 @@ def inverse_map_uv(uv: np.ndarray, full_size: tuple[int,int], encoded_size_: tup
     if config.blur_only: return uv.copy()
     if config.center_shift == (0.0, 0.0):
         for axis,(full,enc) in enumerate(zip(full_size,encoded_size_)):
-            ratio=config.edge_ratio; c=config.center_fraction
+            constants=config.axis_constants(axis)
+            if constants is None:
+                out[...,axis]=uv[...,axis]; continue
+            c, ratio=constants
             edge=full-c*full
             center=1.0-math.ceil(edge/(ratio*2.0))*(ratio*2.0)/full
             scale=(center+(1.0-center)/ratio)*full/enc
@@ -209,13 +237,17 @@ def local_squeeze(uv: np.ndarray, full_size: tuple[int,int], encoded_size_: tupl
     uv=np.asarray(uv,dtype=np.float64); result=np.empty_like(uv)
     if config.blur_only: return np.ones_like(uv)
     for axis,(full,enc,shift) in enumerate(zip(full_size,encoded_size_,config.center_shift)):
-        er,c1,c2,lo,hi=_params(full,enc,config.center_fraction,config.edge_ratio,shift)
+        constants=config.axis_constants(axis)
+        if constants is None:
+            result[...,axis]=1.; continue
+        center_fraction, ratio=constants
+        er,c1,c2,lo,hi=_params(full,enc,center_fraction,ratio,shift)
         x=uv[...,axis]/er
         # Central derivative is c2/ratio. Edge derivatives are from the HLSL blend.
-        center=x*c2/config.edge_ratio+c1; d2=x*c2; d3=(x-1)*c2+1
-        left_der=(center-d2)/lo+(x/lo)*(c2/config.edge_ratio)+(1-x/lo)*c2
-        right_der=-(center-d3)/(1-hi)+((1-x)/(1-hi))*(c2/config.edge_ratio)+(1-(1-x)/(1-hi))*c2
-        deriv=np.where(x < lo,left_der,np.where(x > hi,right_der,c2/config.edge_ratio))/er
+        center=x*c2/ratio+c1; d2=x*c2; d3=(x-1)*c2+1
+        left_der=(center-d2)/lo+(x/lo)*(c2/ratio)+(1-x/lo)*c2
+        right_der=-(center-d3)/(1-hi)+((1-x)/(1-hi))*(c2/ratio)+(1-(1-x)/(1-hi))*c2
+        deriv=np.where(x < lo,left_der,np.where(x > hi,right_der,c2/ratio))/er
         result[...,axis]=np.maximum(1.0,deriv*full/enc)
     return result
 
@@ -237,6 +269,8 @@ def softness_ramp(source_uv: np.ndarray, full_size: tuple[int,int], encoded_size
     p=np.asarray(source_uv,dtype=np.float64)
     distances=[]
     for axis,(full,enc,shift) in enumerate(zip(full_size,encoded_size_,config.center_shift)):
+        if config.axis_constants(axis) is None:
+            distances.append(np.zeros(p.shape[:-1],dtype=np.float64)); continue
         _,_,_,lo,hi=_params(full,enc,config.center_fraction,config.edge_ratio,shift)
         # Evaluate the mapped joins instead of assuming a profile fraction.
         joins=forward_map_uv(np.array([[[lo, .5], [hi, .5]]]) if axis == 0 else
@@ -326,6 +360,12 @@ def forward_eye(image: np.ndarray, config: FoveationConfig, *, tile_rows: int=TI
         stop=min(eh,start+tile_rows); y=(np.arange(start,stop)+.5)/eh; xx,yy=np.meshgrid(x,y)
         uv=np.stack((xx,yy),axis=-1); source=forward_map_uv(uv,(w,h),(ew,eh),config)
         footprint=local_squeeze(uv,(w,h),(ew,eh),config)*(1+config.softness*softness_ramp(source,(w,h),(ew,eh),config)[...,None])
+        # H264WidthOnly uses the same peripheral ramp for its horizontal
+        # prefilter, but its Y axis remains an identity raster. Apply the
+        # identity after the shared softness multiplier so no peripheral Y
+        # blur is introduced by a scalar two-axis footprint expansion.
+        if config.axis_constants(1) is None:
+            footprint[...,1]=1.
         out[start:stop]=_area_box(image,source,footprint,sat_cache=sat_cache)
     return out
 
@@ -376,6 +416,7 @@ class EncodedPlanes:
     encoded_eye: tuple[int,int]
     chroma420: bool
     config: FoveationConfig
+    source_eye: tuple[int,int] | None = None
 
 def _split_eyes(planes):
     y,cb,cr=planes; h,w2=y.shape; w=w2//2
@@ -386,12 +427,21 @@ def _split_eyes(planes):
 def encode_planes(planes, config: FoveationConfig) -> EncodedPlanes:
     """Convert already-cropped stereo C420jpeg/FULL frames into smaller encoded planes."""
     eyes,size,chroma420=_split_eyes(planes); enc=[]
+    expanded_size=size
+    if config.profile == "h264width":
+        padded_height=int(math.ceil(size[1] / 32.0) * 32)
+        pad=padded_height-size[1]
+        if pad:
+            factor=2 if chroma420 else 1
+            eyes=[tuple(np.pad(plane, ((0, pad if index == 0 else pad // factor), (0, 0)), mode="edge")
+                        for index,plane in enumerate(eye)) for eye in eyes]
+        expanded_size=(size[0],padded_height)
     for eye_index,eye in enumerate(eyes):
         eye_config=_eye_config(config, eye_index == 1)
         rgb=_decode_709_full(eye); out=[]
         for channel in range(3): out.append(forward_eye(rgb[...,channel],eye_config))
         enc.append(_encode_709_full(np.stack(out,axis=-1),chroma420))
-    return EncodedPlanes(tuple(np.concatenate((enc[0][i],enc[1][i]),axis=1) for i in range(3)),size,encoded_size(*size,config),chroma420,config)
+    return EncodedPlanes(tuple(np.concatenate((enc[0][i],enc[1][i]),axis=1) for i in range(3)),expanded_size,encoded_size(*expanded_size,config),chroma420,config,size)
 
 def reconstruct_planes(decoded_planes, encoded: EncodedPlanes):
     """Expand codec-decoded small planes back to the already-cropped stereo reference size."""
@@ -407,7 +457,12 @@ def reconstruct_planes(decoded_planes, encoded: EncodedPlanes):
         code=_decode_709_full_code(eye); out=[]
         for channel in range(3): out.append(reconstruct_eye(code[...,channel],encoded.expanded_eye,eye_config))
         rebuilt.append(_encode_709_full_code(np.stack(out,axis=-1),encoded.chroma420))
-    return [np.concatenate((rebuilt[0][i],rebuilt[1][i]),axis=1) for i in range(3)]
+    # Vertical allocation padding was added before the identity axis mapping.
+    # Discard it after reconstruction; no source pixels were vertically resized.
+    source_eye=encoded.source_eye or encoded.expanded_eye
+    factor=2 if encoded.chroma420 else 1
+    return [np.concatenate((rebuilt[0][i][:source_eye[1] // (factor if i else 1)],
+                            rebuilt[1][i][:source_eye[1] // (factor if i else 1)]),axis=1) for i in range(3)]
 
 def blur_reference(planes, config: FoveationConfig):
     """Reference reconstructed from the same foveated prefilter without codec loss."""
