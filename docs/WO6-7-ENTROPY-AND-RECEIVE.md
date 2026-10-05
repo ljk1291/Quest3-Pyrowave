@@ -49,6 +49,8 @@ ordinals gives 74,683,766.12 bytes. The first three plane ordinals carry
 36,164,683, 24,068,621, and 13,358,894 bytes respectively, with `H0` values
 6.1540, 7.3005, and 7.7704 bits/byte; later planes are close to 8 bits/byte.
 
+Against the whole 124,995,088-byte payload, that 11,499,003.23-byte bitplane-only model difference is 9.20%, not 13.74%. Huffman/table coding has fixed-table and branch costs; rANS needs tables, renormalisation and parallel streams; contextual arithmetic/bit coding adds serial dependencies and likely a GPU-decode penalty unless redesigned around independent blocks. None has a measured decode cost here.
+
 This is a coding headroom model, not a predicted saving. It excludes headers,
 controls, signs, framing, model signalling, context selection, tails, and
 decoder work. No entropy-coded stream or timing measurement exists, so the
@@ -61,10 +63,7 @@ sanitized JSON result with the input hash and no source path.
 
 ## Receive order
 
-`pyrowave_encoder.cpp::Encoder::Impl::packetize` writes the sequence header
-then iterates non-empty 32x32 blocks in ascending block-index order. It has no
-coarse/fine packet ordering. The retained transport contract remains
-whole-frame:
+`pyrowave_common.cpp::WaveletBuffers::init_block_meta` assigns block-index ranges from decomposition level 4 down to 0, then component and band; `pyrowave_encoder.cpp::Encoder::Impl::packetize` emits non-empty records in ascending block index. This is coarse-to-fine subband order, with top-level luma band-0 LL first. Parsing all 90 retained records with the native aligned 5248x2784 layout finds that first range uses 2,017,636 bytes total: 22,418 bytes/frame, 1.61% of payload. Ideal 1000 Mb/s serialization yields 0.179 ms for that prefix and 11.111 ms for the mean 1,388,834-byte complete frame. These are byte/rate arithmetic, not wire timing: no matched fragment arrivals or per-pass decoder work exist. Actual overlap is zero under the current complete-frame API; a future overlap is bounded by `min(actual_stage_work, remaining_transfer)`, neither measured here. The retained transport contract remains whole-frame:
 
 1. One complete codec frame is encoded.
 2. The UDP form divides its bytes into payloads no larger than 1368 bytes.
