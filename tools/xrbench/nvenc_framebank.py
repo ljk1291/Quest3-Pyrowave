@@ -1047,6 +1047,24 @@ def _stream_q3b_sources(source: Path, source_info: fb.Y4MInfo, geometry: dict, t
         "preparation_execution": "bounded_cpu_threads_ordered_output"}
 
 
+def _load_prepared_q3b_sources(prepared: Path, plan_hash: str, cell: dict):
+    """Reuse a verified CPU-only WO-8 reference bank; never recompute it in a lease."""
+    receipt = json.loads((prepared / "width-only-preparation.json").read_text(encoding="utf-8"))
+    if receipt.get("complete") is not True or receipt.get("codec_or_scorer_ran") is not False:
+        raise ValueError("prepared WO-8 receipt is not CPU-only complete")
+    if receipt.get("frozen_plan_sha256") != plan_hash:
+        raise ValueError("prepared WO-8 plan identity differs")
+    if receipt.get("candidate", {}).get("source_transform") != cell.get("source_transform"):
+        raise ValueError("prepared WO-8 transform differs")
+    identities = receipt.get("frame_identity")
+    if not isinstance(identities, list) or len(identities) != 90:
+        raise ValueError("prepared WO-8 identities are incomplete")
+    encoded, sharp, blur = (prepared / name for name in ("encoded-reference.y4m", "sharp-reference.y4m", "blur-reference.y4m"))
+    if not all(path.is_file() for path in (encoded, sharp, blur)):
+        raise ValueError("prepared WO-8 references are missing")
+    return fb.inspect_y4m(encoded), fb.inspect_y4m(sharp), identities, receipt["transform"], encoded, sharp, blur
+
+
 def _reconstruct_q3b_decoded(decoded_small: Path, encoded_info: fb.Y4MInfo, score_path: Path,
                               score_info: fb.Y4MInfo, transform: dict) -> None:
     """Expand a decoded reduced WO-8 frame only after the codec stage."""
@@ -1398,7 +1416,7 @@ def _same_frame_scores(plan, cell_index, cell, tools, guard, directory, source, 
 def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, window: Path, *,
              command_timeout_s: float = 900, keep_artifacts: bool = False, supervised: bool = True,
              tools_metadata: Path | None = None, preparation_workers: int = 1,
-             scorer_compatibility: Path | None = None) -> dict:
+             scorer_compatibility: Path | None = None, prepared_references: Path | None = None) -> dict:
     """Run a frozen proxy matrix through an owner-supervised quality lease."""
     raw = Path(plan_path).read_bytes(); plan = validate_plan(json.loads(raw))
     source = Path(source); private_out = fb._private_path(private_out)
@@ -1453,9 +1471,14 @@ def run_plan(plan_path: Path, source: Path, private_out: Path, tools: dict, wind
             else:
                 score_ref = directory / "score-sharp-reference.y4m"
                 score_blur = directory / "score-blur-reference.y4m"
-                ref_info, score_ref_info, identities, q3b_provenance = _stream_q3b_sources(
-                    source, source_info, plan["source_adapter"]["geometry"], q3b_transform,
-                    ref, score_ref, score_blur, preparation_workers=preparation_workers, guard=guard)
+                reused_preparation = prepared_references is not None
+                if reused_preparation:
+                    ref_info, score_ref_info, identities, q3b_provenance, ref, score_ref, score_blur = _load_prepared_q3b_sources(
+                        Path(prepared_references), hashlib.sha256(raw).hexdigest(), row)
+                else:
+                    ref_info, score_ref_info, identities, q3b_provenance = _stream_q3b_sources(
+                        source, source_info, plan["source_adapter"]["geometry"], q3b_transform,
+                        ref, score_ref, score_blur, preparation_workers=preparation_workers, guard=guard)
                 row["q3b_transform"] = q3b_provenance
             row["identity_count"] = len(identities)
             if [x["source_sha256"] for x in identities] != [x["source_sha256"] for x in plan["source"]["frame_identity"]]:
