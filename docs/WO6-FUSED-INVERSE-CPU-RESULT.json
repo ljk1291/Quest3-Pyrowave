@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "kind": "wo6_fused_inverse_cpu_design_result",
+  "repository_commit": "9177afccbe3d24ef1642159e8d82c67a4c5d404a",
+  "scope": "CPU equivalence-model proof only; no shader, runtime, device, timing, or quality activation",
+  "local_validation": {
+    "cdf53": {"command": "python -m pytest tools/tests/test_wo6_fused_inverse.py -q", "tests_passed": 4},
+    "cdf97": {"command": "python -m unittest tools.tests.test_wo6_cdf97_model -v", "tests_passed": 5}
+  },
+  "ci": {
+    "workflow": ".github/workflows/ci.yml",
+    "explicit_steps": ["CDF 5/3 pair-local inverse model parity", "CDF 9/7 fused inverse model parity"],
+    "remote_status": "unverified_in_this_checkout_gcm_credential_unavailable"
+  },
+  "cdf53_proof": [
+    "literal inverse update-before-predict loops on an interleaved apron",
+    "pair-local current plus adjacent coefficient neighbourhood",
+    "randomized, impulse, endpoint, invalid-shape and FP16 shared-store/load cases"
+  ],
+  "cdf97_proof": [
+    "16-sample apron with K/inverse-K scaling and Delta/Gamma/Beta/Alpha order",
+    "float32 lifting and FP16 writeback",
+    "LL=0, x-high=2, y-high=1, HH=3 layer convention",
+    "generate_mirror_uv/gather .wxzy interior and near-edge mapping",
+    "two-dimensional horizontal then vertical model"
+  ],
+  "open_shader_gates": [
+    "whole-stage workgroup coverage and final-image boundary writeback",
+    "retained 5/3 and 9/7 decoded-frame comparison for Y, Cb and Cr",
+    "shader compilation and regenerated slangmosh header plus manifest binding",
+    "opt-in-only decoder integration and default all-90-frame regression",
+    "separate armed device measurement after correctness qualification"
+  ],
+  "not_claimed": ["shader equivalence", "decoded-stream parity", "quality gain", "GPU timing", "runtime activation"]
+}
