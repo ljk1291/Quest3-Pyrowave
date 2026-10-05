@@ -162,7 +162,7 @@ index 779de33ca83d78d9b52c92193b54f60b00056503..d51c2750e698a61f047cb54e6f18135b
              ck!(gl.delete_texture(self.surface_texture));
              for framebuffer in &self.framebuffers {
 diff --git a/alvr/graphics/src/stream.rs b/alvr/graphics/src/stream.rs
-index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..60737bc5c63f3cbf3fbc6e09f845f3af19e37c9b 100644
+index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..0805d4e41b93f3fae3a49461e6dbc815d03b670b 100644
 --- a/alvr/graphics/src/stream.rs
 +++ b/alvr/graphics/src/stream.rs
 @@ -182,6 +182,12 @@ impl StreamRenderer {
@@ -208,7 +208,7 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..60737bc5c63f3cbf3fbc6e09f845f3af
      pub fn last_copy_was_direct(&self) -> bool { self.last_copy_direct.get() }
  
      pub fn poll_import_copy(&self) -> (bool, Option<f32>) {
-@@ -720,3 +735,109 @@ pub fn compute_target_view_resolution(
+@@ -720,3 +735,121 @@ pub fn compute_target_view_resolution(
      }
      target_resolution.as_uvec2()
  }
@@ -219,7 +219,7 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..60737bc5c63f3cbf3fbc6e09f845f3af
 +#[cfg(all(test, target_os = "linux"))]
 +mod staging_correctness_tests {
 +    use super::*;
-+    use crate::egl;
++    use alvr_common::log;
 +    use alvr_session::FoveationProfile;
 +    use glow::HasContext;
 +
@@ -247,7 +247,19 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..60737bc5c63f3cbf3fbc6e09f845f3af
 +    fn software_gles_staging_both_eyes_survive_fixed_profile_inverse_and_gl_state() {
 +        assert_eq!(std::env::var("LIBGL_ALWAYS_SOFTWARE").as_deref(),Ok("1"),
 +            "run this gate only in the explicitly software-rendered CI environment");
++        struct Diagnostics;
++        impl log::Log for Diagnostics {
++            fn enabled(&self, _: &log::Metadata) -> bool { true }
++            fn log(&self, record: &log::Record) { eprintln!("{} {}",record.target(),record.args()); }
++            fn flush(&self) {}
++        }
++        static DIAGNOSTICS: Diagnostics=Diagnostics;
++        log::set_logger(&DIAGNOSTICS).unwrap();
++        log::set_max_level(log::LevelFilter::Debug);
 +        let context=Rc::new(GraphicsContext::new_gl());
++        let adapter=context.adapter.get_info();
++        assert_eq!(adapter.device_type,wgpu::DeviceType::Cpu,"this gate must use a CPU renderer");
++        eprintln!("software adapter: {adapter:?}");
 +        let gl=&context.gl_context;
 +        for profile in [FoveationProfile::Light,FoveationProfile::Medium,FoveationProfile::H264Fit] {
 +          for format in [glow::RGBA8,glow::SRGB8_ALPHA8] {
