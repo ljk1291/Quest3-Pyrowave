@@ -297,12 +297,17 @@ class WindowGuard:
             if not window.is_relative_to(private) or self.window.is_symlink(): return
             directory=window/'status-diagnostics'; directory.mkdir(exist_ok=True)
             if directory.is_symlink(): return
-            stdout='' if result is None else result.stdout; stderr='' if result is None else result.stderr
+            def text(value):
+                if value is None: return ''
+                if isinstance(value,bytes): return value.decode('utf-8','replace')
+                return str(value)
+            stdout=text(getattr(exc,'output',None) if result is None else result.stdout)
+            stderr=text(getattr(exc,'stderr',None) if result is None else result.stderr)
             payload={'schema':1,'kind':'lease_status_failure_diagnostic','command':cmd,
                      'returncode':None if result is None else result.returncode,
                      'stdout':stdout,'stderr':stderr,'exception':None if exc is None else repr(exc),
-                     'stdout_sha256':hashlib.sha256(stdout.encode()).hexdigest(),
-                     'stderr_sha256':hashlib.sha256(stderr.encode()).hexdigest()}
+                     'hash_encoding':'utf-8-replacement','stdout_sha256':hashlib.sha256(stdout.encode('utf-8')).hexdigest(),
+                     'stderr_sha256':hashlib.sha256(stderr.encode('utf-8')).hexdigest()}
             path=directory/f'status-{time.time_ns()}.json'
             path.write_text(json.dumps(payload,sort_keys=True),encoding='utf-8')
         except Exception: pass
