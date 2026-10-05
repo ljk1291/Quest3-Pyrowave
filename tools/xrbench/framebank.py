@@ -415,6 +415,9 @@ _HISTORICAL_HVS_ALLOWED_LOCK_ROLES = {
     'patches.pyrowave_rdo_density.sha256': 'codec_encoder_only',
     'patches.wo8_light_centre_phase.path': 'presentation_foveation_only',
     'patches.wo8_light_centre_phase.sha256': 'presentation_foveation_only',
+    # This default-off encoder capability overlay does not change the qualified PyroWave scorer, decoder, shader, or pre-existing artifact bytes.
+    'patches.nvenc_dimension_preflight.path': 'encoder_capability_preflight_inactive_only',
+    'patches.nvenc_dimension_preflight.sha256': 'encoder_capability_preflight_inactive_only',
 }
 _HISTORICAL_HVS_DESCRIPTOR_RELATIVE = Path(
     'tools/xrbench/historical_locks/qualified-hvs-scorer-b4a61-compatibility.json')

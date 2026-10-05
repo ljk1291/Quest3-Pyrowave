@@ -469,7 +469,11 @@ class FrameBankTests(unittest.TestCase):
                               {'path': 'patches.wo8_light_centre_phase.path', 'old': None,
                                'new': 'patches/wo8-light-centre-phase.patch', 'role': 'presentation_foveation_only'},
                               {'path': 'patches.wo8_light_centre_phase.sha256', 'old': None,
-                               'new': '4f4ce22430f810c78195d749425f35f77ffdb1a14c844b927dff485c3c91e7f3', 'role': 'presentation_foveation_only'}]}
+                               'new': '4f4ce22430f810c78195d749425f35f77ffdb1a14c844b927dff485c3c91e7f3', 'role': 'presentation_foveation_only'},
+                              {'path': 'patches.nvenc_dimension_preflight.path', 'old': None,
+                               'new': 'patches/nvenc-dimension-preflight.patch', 'role': 'encoder_capability_preflight_inactive_only'},
+                              {'path': 'patches.nvenc_dimension_preflight.sha256', 'old': None,
+                               'new': '19a31859e798f8eba0c3d29f183970b1d6d2e608e18a359a2bee0fd71a686fde', 'role': 'encoder_capability_preflight_inactive_only'}]}
             descriptor_path = folder / 'compatibility.json'; descriptor_path.write_text(json.dumps(descriptor))
             with self.assertRaisesRegex(ValueError, 'not the reviewed tracked proof'):
                 fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)
@@ -497,6 +501,19 @@ class FrameBankTests(unittest.TestCase):
                 {'path': 'granite.commit', 'old': 'old', 'new': 'new', 'role': 'codec_encoder_only'})
             descriptor_path.write_text(json.dumps(tampered))
             with self.assertRaisesRegex(ValueError, 'allowed lock change is malformed'):
+                historical()
+            tampered = json.loads(json.dumps(descriptor)); tampered['allowed_current_lock_changes'].append(
+                {'path': 'pyrowave.commit', 'old': 'old', 'new': 'new', 'role': 'codec_encoder_only'})
+            descriptor_path.write_text(json.dumps(tampered))
+            with self.assertRaisesRegex(ValueError, 'allowed lock change is malformed'):
+                historical()
+            tampered = json.loads(json.dumps(descriptor)); tampered['allowed_current_lock_changes'][-1]['role'] = 'codec_encoder_only'
+            descriptor_path.write_text(json.dumps(tampered))
+            with self.assertRaisesRegex(ValueError, 'allowed lock change is malformed'):
+                historical()
+            tampered = json.loads(json.dumps(descriptor)); tampered['allowed_current_lock_changes'][-1]['new'] = '0' * 64
+            descriptor_path.write_text(json.dumps(tampered))
+            with self.assertRaisesRegex(ValueError, 'lock changes exceed'):
                 historical()
             descriptor_path.write_text(json.dumps(descriptor)); tools['psnr_hvs_m_h'].write_bytes(b'changed scorer')
             with self.assertRaisesRegex(ValueError, 'qualified scorer identity differs'):
