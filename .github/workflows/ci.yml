@@ -135,7 +135,8 @@ jobs:
           $meta = @{ schema=1; kind='pyrowave_dequant_reconstruction_offset_decode_tools'; repository_commit=$env:GITHUB_SHA; source_lock_sha256=$lockHash.Trim(); overlay_patch_sha256=$env:PYROWAVE_DEQUANT_RECONSTRUCTION_OFFSET_PATCH_SHA256; embedded_header_sha256=(Get-FileHash out/slangmosh.hpp).Hash.ToLower(); shader_manifest_sha256=(Get-FileHash out/quest3-manifest.json).Hash.ToLower(); imports_manifest_sha256=(Get-FileHash out/DEQUANT-OFFSET-IMPORTS.json).Hash.ToLower(); decoder_sha256=(Get-FileHash out/pyrowave-decode.exe).Hash.ToLower(); parity_helper_sha256=(Get-FileHash out/dequant_decode_parity.py).Hash.ToLower(); zero_offset_gate=@{ required_frames=90; retained_label='crop97-rdo24-1000'; required_before_nonzero_sweep=$true } } | ConvertTo-Json -Depth 4
           Set-Content out/DEQUANT-OFFSET-TOOLS-METADATA.json $meta
           python tools/ci/build_metadata.py write --platform windows --output out --pyrowave "$env:XRWIRED_INPUTS/research/pyrowave" --required-native out/pyrowave-decode.exe out/pyrowave-dequant-reconstruction-offset-test.exe
-          Get-FileHash out/* -Algorithm SHA256 | Format-Table -AutoSize | Out-File -Encoding ascii out/SHA256SUMS.txt
+          $checksumLines = @(Get-ChildItem out -File | Where-Object Name -ne 'SHA256SUMS.txt' | ForEach-Object { (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower() + '  ' + $_.Name })
+          $checksumLines | Set-Content -Encoding ascii out/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: dequant-reconstruction-offset-offline-tools
