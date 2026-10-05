@@ -97,9 +97,10 @@ def prepare(plan_path: Path, source: Path, private_out: Path, ledgers: list[Path
                 row["source_sha256"] for row in plan["source"]["frame_identity"]]:
             raise ValueError("WO-8 requires exactly the frozen 90-frame identity sequence")
         cropped_fence = plan.get("fence_rectangles", {}).get("cropped")
-        if not isinstance(cropped_fence, dict):
-            raise ValueError("WO-8 plan lacks frozen cropped fence region")
-        _, periphery = nvenc._q3b_periphery_mask(cell, score_info, cropped_fence)
+        mapped_fence = cropped_fence.get("mapped") if isinstance(cropped_fence, dict) else None
+        if not isinstance(mapped_fence, dict):
+            raise ValueError("WO-8 plan lacks frozen cropped fence mapped region")
+        _, periphery = nvenc._q3b_periphery_mask(cell, score_info, mapped_fence)
         receipt = {"schema": 1, "kind": "wo8_width_only_cpu_preparation", "complete": True,
                    "codec_or_scorer_ran": False, "frozen_plan_sha256": hashlib.sha256(raw_plan).hexdigest(),
                    "candidate": candidate, "duplicate_preflight": {"status": "no_exact_completed_duplicate",
