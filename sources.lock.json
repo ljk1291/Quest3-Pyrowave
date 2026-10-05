@@ -24,9 +24,25 @@
       "path": "patches/pyrowave-rdo-density.patch",
       "sha256": "1641a9456dd9d9e5811a110016cfe673587e7de56d9a76d709a3ea7599f3a4cc"
     },
+    "pyrowave_rdo_live_readback": {
+      "path": "patches/pyrowave-rdo-live-readback.patch",
+      "sha256": "2a8c8e151689204d05c8f8ebd480ea297a76bd3ece2c6c81997ee15d1f370f96"
+    },
+    "pyrowave_rdo_session_setting": {
+      "path": "patches/pyrowave-rdo-session-setting.patch",
+      "sha256": "e9f88932659a892d5c4a5a6e597e817e02d3738450838d6c7434e652fb4b5f9e"
+    },
     "wo8_light_centre_phase": {
       "path": "patches/wo8-light-centre-phase.patch",
       "sha256": "4f4ce22430f810c78195d749425f35f77ffdb1a14c844b927dff485c3c91e7f3"
+    },
+    "alvr_pyrowave_rdo_live_readback": {
+      "path": "patches/alvr-pyrowave-rdo-live-readback.patch",
+      "sha256": "d32a96c6456f13ace911db9298800f1c7da9ebf9f75296b3b3c668489a2bb94d"
+    },
+    "alvr_pyrowave_rdo_session_setting": {
+      "path": "patches/alvr-pyrowave-rdo-session-setting.patch",
+      "sha256": "b8bb0419e94312471576ecdfccb1c26604cd1f1b3f0028379593b33bae25d5d3"
     }
   },
   "rust": "1.97.1",

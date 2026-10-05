@@ -1,0 +1,202 @@
+diff --git a/alvr/server_core/src/connection.rs b/alvr/server_core/src/connection.rs
+index 10d916cd23e71dd363ab081a91d2eefb5f9ef2a7..d537f8f5f1f5b8c73f2629bf553f69730e8926a2 100644
+--- a/alvr/server_core/src/connection.rs
++++ b/alvr/server_core/src/connection.rs
+@@ -268,6 +268,7 @@ fn openvr_config_with_env(
+         pyrowave_wavelet_haar: pyrowave.wavelet_haar,
+         pyrowave_decode_path: pyrowave.decode_path as u32,
+         pyrowave_chroma_444: settings.video.pyrowave.chroma_444,
++        pyrowave_rdo_pixels_per_degree: pyrowave.rdo_pixels_per_degree.unwrap_or(0.0),
+         _controller_profile,
+         _server_impl_debug: settings.extra.logging.debug_groups.server_impl,
+         _client_impl_debug: settings.extra.logging.debug_groups.client_impl,
+diff --git a/alvr/server_openvr/cpp/alvr_server/Settings.cpp b/alvr/server_openvr/cpp/alvr_server/Settings.cpp
+index b71016fe730ec1bcfee1c074c39b00020976dd2f..b4987b59d2c3355c30356febaeeeaa721299082c 100644
+--- a/alvr/server_openvr/cpp/alvr_server/Settings.cpp
++++ b/alvr/server_openvr/cpp/alvr_server/Settings.cpp
+@@ -70,6 +70,7 @@ void Settings::Load() {
+         m_pyrowaveWaveletHaar = config.get("pyrowave_wavelet_haar").get<bool>();
+         m_pyrowaveChroma444 = config.get("pyrowave_chroma_444").get<bool>();
+         m_pyrowaveDecodePath = (int32_t)config.get("pyrowave_decode_path").get<int64_t>();
++        m_pyrowaveRdoPixelsPerDegree = (float)config.get("pyrowave_rdo_pixels_per_degree").get<double>();
+         m_h264Profile = (int32_t)config.get("h264_profile").get<int64_t>();
+         m_rateControlMode = (uint32_t)config.get("rate_control_mode").get<int64_t>();
+         m_fillerData = config.get("filler_data").get<bool>();
+diff --git a/alvr/server_openvr/cpp/alvr_server/Settings.h b/alvr/server_openvr/cpp/alvr_server/Settings.h
+index e42d6c87cacc1725bcbb631f5783a97980c4bb30..1ad686a1b949e5177919cbb681519bd793bf59e2 100644
+--- a/alvr/server_openvr/cpp/alvr_server/Settings.h
++++ b/alvr/server_openvr/cpp/alvr_server/Settings.h
+@@ -49,6 +49,7 @@ public:
+     bool m_pyrowaveWaveletHaar = false;
+     bool m_pyrowaveChroma444 = false;
+     int m_pyrowaveDecodePath = 0; // 0 auto, 1 fragment, 2 compute
++    float m_pyrowaveRdoPixelsPerDegree = 0.0f; // zero: legacy/environment RDO selection
+     int m_h264Profile;
+     bool m_use10bitEncoder;
+     bool m_useFullRangeEncoding;
+diff --git a/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp b/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp
+index 50a567a33a9b36da592e90b65370f5c45d4dee7c..e77e2a60df18477d020215854b7079116438f18f 100644
+--- a/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp
++++ b/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp
+@@ -130,6 +130,7 @@ void VideoEncoderPyroWave::Initialize() {
+     encoderInfo.height = m_renderHeight;
+     encoderInfo.chroma = Chroma444() ? PYROWAVE_CHROMA_SUBSAMPLING_444 : PYROWAVE_CHROMA_SUBSAMPLING_420;
+     encoderInfo.wavelet = Haar() ? PYROWAVE_WAVELET_HAAR : Legall53() ? PYROWAVE_WAVELET_CDF53 : PYROWAVE_WAVELET_CDF97;
++    encoderInfo.rdo_pixels_per_degree = Settings::Instance().m_pyrowaveRdoPixelsPerDegree;
+     PYRO_OR_THROW(pyrowave_encoder_create(&encoderInfo, &m_pyroEncoder));
+     pyrowave_encoder_rdo_density rdoDensity = {};
+     PYRO_OR_THROW(pyrowave_encoder_get_rdo_density(m_pyroEncoder, &rdoDensity));
+@@ -138,7 +139,7 @@ void VideoEncoderPyroWave::Initialize() {
+     Warn("[PYROWAVE] native encoder RDO density applied: %.9g px/deg, Nyquist %.9g cycles/deg, %s\n",
+          rdoDensity.pixels_per_degree,
+          rdoDensity.nyquist_cycles_per_degree,
+-         rdoDensity.legacy_equivalent ? "legacy 96 DPI @ 1m" : "PYROWAVE_RDO_PX_PER_DEG");
++         rdoDensity.legacy_equivalent ? "legacy 96 DPI @ 1m" : encoderInfo.rdo_pixels_per_degree > 0.0f ? "ALVR session RDO setting" : "PYROWAVE_RDO_PX_PER_DEG");
+     Info("[PYROWAVE] wavelet %s\n", WaveletName());
+ 
+     // What H.264 carries as SPS/PPS, PyroWave carries here: the client's DecoderConfig payload.
+diff --git a/alvr/session/src/beta.rs b/alvr/session/src/beta.rs
+index 11ea6fddaf8c20e5a04f2223f368f2ce03f46613..d36edf7f76370c3bd51471f2d880caebd4415cc2 100644
+--- a/alvr/session/src/beta.rs
++++ b/alvr/session/src/beta.rs
+@@ -7,7 +7,7 @@ use crate::settings::{
+     CodecType, PyroWaveDecodePath, PyroWaveTransport, PyroWaveWavelet, Settings,
+ };
+ use serde_json as json;
+-use settings_schema::{SchemaEntry, SchemaNode};
++use settings_schema::{SchemaEntry, SchemaNode, Switch};
+ use std::fmt;
+ 
+ pub const RECOMMENDED_PROFILE: &str = "Quest 3 PyroWave 400 Mbps / 72 Hz candidate";
+@@ -374,6 +374,7 @@ pub struct PyroWaveEffective {
+     pub wavelet_53: bool,
+     pub wavelet_haar: bool,
+     pub decode_path: PyroWaveDecodePath,
++    pub rdo_pixels_per_degree: Option<f32>,
+     pub follow_gaze: bool,
+     pub overrides: Vec<&'static str>,
+ }
+@@ -407,6 +408,10 @@ pub fn pyrowave_effective(
+     let wavelet_haar = wavelet.as_ref().map(|v| v.eq_ignore_ascii_case("haar"))
+         .unwrap_or(video.pyrowave.wavelet == PyroWaveWavelet::Haar);
+     let follow_gaze = false;
++    let rdo_pixels_per_degree = match video.pyrowave.rdo_pixels_per_degree {
++        Switch::Enabled(value) => Some(value),
++        Switch::Disabled => None,
++    };
+ 
+     PyroWaveEffective {
+         enabled,
+@@ -415,6 +420,7 @@ pub fn pyrowave_effective(
+         wavelet_53,
+         wavelet_haar,
+         decode_path: video.pyrowave.decode_path,
++        rdo_pixels_per_degree,
+         follow_gaze,
+         overrides,
+     }
+@@ -435,10 +441,11 @@ impl fmt::Display for PyroWaveEffective {
+         write!(
+             f,
+             "PyroWave effective config: chroma={} transport={} wavelet={} \
+-             decode_path={decode_path} follow_gaze={} overrides={}",
++             decode_path={decode_path} rdo_px_per_deg={} follow_gaze={} overrides={}",
+             if self.chroma_444 { "4:4:4" } else { "4:2:0" },
+             if self.udp { "UDP" } else { "TCP" },
+             if self.wavelet_haar { "Haar" } else if self.wavelet_53 { "CDF 5/3" } else { "CDF 9/7" },
++            self.rdo_pixels_per_degree.map(|value| value.to_string()).unwrap_or_else(|| "legacy".to_owned()),
+             if self.follow_gaze { "on" } else { "off" },
+             if self.overrides.is_empty() {
+                 "none".to_owned()
+diff --git a/alvr/session/src/beta_tests.rs b/alvr/session/src/beta_tests.rs
+index ccf28875de672740519e13af3cef6af714a03796..123e0fa9fa63a99e8958158d10f75ef248f77ba4 100644
+--- a/alvr/session/src/beta_tests.rs
++++ b/alvr/session/src/beta_tests.rs
+@@ -58,7 +58,13 @@ fn pyrowave_section_exposes_chroma_transport_wavelet_and_decode_path() {
+     let entries = visible_children(&schema(), &["video", "pyrowave"]).unwrap();
+     assert_eq!(
+         names(entries, Visibility::Experiment),
+-        sorted(&["chroma_444", "transport", "wavelet", "decode_path"])
++        sorted(&[
++            "chroma_444",
++            "transport",
++            "wavelet",
++            "decode_path",
++            "rdo_pixels_per_degree",
++        ])
+     );
+     assert_eq!(
+         visible_variants(&schema(), &["video", "pyrowave", "decode_path"]).unwrap(),
+@@ -252,6 +258,7 @@ fn effective_config_follows_settings_without_env() {
+     assert!(!e.udp);
+     assert!(!e.wavelet_53);
+     assert_eq!(e.decode_path, PyroWaveDecodePath::Auto);
++    assert_eq!(e.rdo_pixels_per_degree, None);
+     assert!(!e.follow_gaze);
+     assert!(e.overrides.is_empty());
+ }
+@@ -262,10 +269,12 @@ fn effective_config_follows_a_non_default_setting() {
+     s.video.pyrowave.transport = PyroWaveTransport::Udp;
+     s.video.pyrowave.wavelet = PyroWaveWavelet::Cdf53;
+     s.video.pyrowave.decode_path = PyroWaveDecodePath::Fragment;
++    s.video.pyrowave.rdo_pixels_per_degree = Switch::Enabled(24.0);
+     let e = pyrowave_effective(&s, &env(&[]));
+     assert!(e.udp);
+     assert!(e.wavelet_53);
+     assert_eq!(e.decode_path, PyroWaveDecodePath::Fragment);
++    assert_eq!(e.rdo_pixels_per_degree, Some(24.0));
+ }
+ 
+ #[test]
+@@ -309,7 +318,7 @@ fn effective_config_log_line_names_chroma_and_every_knob() {
+     assert_eq!(
+         line,
+         "PyroWave effective config: chroma=4:2:0 transport=TCP wavelet=CDF 9/7 \
+-         decode_path=auto follow_gaze=off overrides=none"
++         decode_path=auto rdo_px_per_deg=legacy follow_gaze=off overrides=none"
+     );
+ }
+ 
+diff --git a/alvr/session/src/lib.rs b/alvr/session/src/lib.rs
+index b03b3ca73d1e369e026ae0e029ff357a2a23e5a1..ae8ee1a223762be64f1967f193427708279a3770 100644
+--- a/alvr/session/src/lib.rs
++++ b/alvr/session/src/lib.rs
+@@ -128,6 +128,8 @@ pub struct OpenvrConfig {
+     pub pyrowave_decode_path: u32,
+     #[serde(default)]
+     pub pyrowave_chroma_444: bool,
++    #[serde(default)]
++    pub pyrowave_rdo_pixels_per_degree: f32,
+ 
+     // these settings are not used on the C++ side, but we need them to correctly trigger a SteamVR
+     // restart
+diff --git a/alvr/session/src/settings.rs b/alvr/session/src/settings.rs
+index 30181ded9f6bdbbfa14079f93f8c48d6f4d4473e..6e2b1882009887b5d67836e394df9be8e2ab1267 100644
+--- a/alvr/session/src/settings.rs
++++ b/alvr/session/src/settings.rs
+@@ -674,6 +674,14 @@ pub struct PyroWaveConfig {
+     ))]
+     #[schema(flag = "steamvr-restart")]
+     pub decode_path: PyroWaveDecodePath,
++
++    #[schema(strings(
++        display_name = "RDO viewing density",
++        help = "Experimental encoder-only override. Off preserves the legacy 96 DPI at 1 m RDO model exactly. When enabled, the value is passed directly to the native encoder and confirmed in vrserver.txt."
++    ))]
++    #[schema(gui(slider(min = 1.0, max = 200.0, step = 1.0)), suffix = " px/deg")]
++    #[schema(flag = "steamvr-restart")]
++    pub rdo_pixels_per_degree: Switch<f32>,
+ }
+ 
+ /// Crops the client-reported OpenXR frustum about each eye's optical axis.
+@@ -1861,6 +1869,10 @@ pub fn session_settings_default() -> SettingsDefault {
+                 decode_path: PyroWaveDecodePathDefault {
+                     variant: PyroWaveDecodePathDefaultVariant::Auto,
+                 },
++                rdo_pixels_per_degree: SwitchDefault {
++                    enabled: false,
++                    content: 24.0,
++                },
+             },
+             fov_crop: SwitchDefault {
+                 enabled: false,

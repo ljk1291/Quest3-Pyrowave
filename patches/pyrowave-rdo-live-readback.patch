@@ -1,0 +1,154 @@
+diff --git a/pyrowave.h b/pyrowave.h
+index f74438b85c802ddaa94c8736ecfd1c3c57bb6e08..1202565d746d22befe5bf472d90446ccafc2a104 100644
+--- a/pyrowave.h
++++ b/pyrowave.h
+@@ -373,6 +373,18 @@ typedef struct pyrowave_encoder_create_info
+ 	pyrowave_wavelet wavelet;
+ } pyrowave_encoder_create_info;
+ 
++// Read-only state retained by an initialized encoder. The values are reported
++// by the native codec, rather than inferred from the process environment.
++typedef struct pyrowave_encoder_rdo_density
++{
++	float pixels_per_degree;
++	float nyquist_cycles_per_degree;
++	uint32_t legacy_equivalent;
++} pyrowave_encoder_rdo_density;
++
++PYROWAVE_PUBLIC_API pyrowave_result
++pyrowave_encoder_get_rdo_density(pyrowave_encoder encoder, pyrowave_encoder_rdo_density *density);
++
+ typedef struct pyrowave_packet
+ {
+ 	size_t offset;
+diff --git a/pyrowave_c.cpp b/pyrowave_c.cpp
+index 31b36bb14e99d13939a094aa0b53ce14382d7120..8f57e84e87800133074972147743d1b2ef5a019f 100644
+--- a/pyrowave_c.cpp
++++ b/pyrowave_c.cpp
+@@ -863,6 +863,19 @@ pyrowave_encoder_create(const pyrowave_encoder_create_info *info, pyrowave_encod
+ 	return PYROWAVE_SUCCESS;
+ }
+ 
++pyrowave_result pyrowave_encoder_get_rdo_density(pyrowave_encoder encoder, pyrowave_encoder_rdo_density *density)
++{
++	if (!encoder || !density)
++		return PYROWAVE_ERROR_INVALID_ARGUMENT;
++
++	bool legacy_equivalent = false;
++	encoder->encoder.get_rdo_density(&density->pixels_per_degree,
++	                                 &density->nyquist_cycles_per_degree,
++	                                 &legacy_equivalent);
++	density->legacy_equivalent = legacy_equivalent ? 1u : 0u;
++	return PYROWAVE_SUCCESS;
++}
++
+ struct WrappedViewBuffers : ViewBuffers
+ {
+ 	ImageHandle wrapped_images[3];
+diff --git a/pyrowave_encoder.cpp b/pyrowave_encoder.cpp
+index c21165b4278d45a74905c9efa1774f70b612d1cc..8f2d1f12c34c55f76058dc5e403745d4be7b3bcc 100644
+--- a/pyrowave_encoder.cpp
++++ b/pyrowave_encoder.cpp
+@@ -1296,6 +1296,18 @@ bool Encoder::init(Device *device, int width_, int height_, ChromaSubsampling ch
+ 	return impl->init(device, width_, height_, chroma_, false);
+ }
+ 
++void Encoder::get_rdo_density(float *pixels_per_degree, float *nyquist_cycles_per_degree,
++	                            bool *legacy_equivalent) const
++{
++	const auto report = rdo_density_report(impl->rdo_density);
++	if (pixels_per_degree)
++		*pixels_per_degree = report.pixels_per_degree;
++	if (nyquist_cycles_per_degree)
++		*nyquist_cycles_per_degree = report.nyquist_cycles_per_degree;
++	if (legacy_equivalent)
++		*legacy_equivalent = report.legacy_equivalent;
++}
++
+ bool Encoder::encode(CommandBuffer &cmd, const ViewBuffers &views, const BitstreamBuffers &buffers)
+ {
+ 	return impl->encode(cmd, views, buffers);
+diff --git a/pyrowave_encoder.hpp b/pyrowave_encoder.hpp
+index 836248a18a7dd65def224f5df68a09af6b2eb2cb..da531801af21e74a07097d1ef659954284a7c1a7 100644
+--- a/pyrowave_encoder.hpp
++++ b/pyrowave_encoder.hpp
+@@ -37,6 +37,12 @@ public:
+ 	bool init(Vulkan::Device *device, int width, int height, ChromaSubsampling chroma, bool legall53 = false, bool haar = false);
+ 	bool encode(Vulkan::CommandBuffer &cmd, const ViewBuffers &views, const BitstreamBuffers &buffers);
+ 
++	// Read-only initialized RDO state. This does not alter encoder state or the
++	// bitstream; it exists so embedding applications can record the effective
++	// density that the encoder actually retained.
++	void get_rdo_density(float *pixels_per_degree, float *nyquist_cycles_per_degree,
++	                     bool *legacy_equivalent) const;
++
+ 	// Debug hackery
+ 	const Vulkan::ImageView &get_wavelet_band(int component, int level);
+ 	bool encode_pre_transformed(Vulkan::CommandBuffer &cmd, const BitstreamBuffers &buffers, float quant_scale);
+@@ -86,4 +92,4 @@ private:
+ 	struct Impl;
+ 	std::unique_ptr<Impl> impl;
+ };
+-}
+\ No newline at end of file
++}
+diff --git a/pyrowave_rdo_density.hpp b/pyrowave_rdo_density.hpp
+index 774a1150cefafbd5a5e6e46fe35f8c611194b143..b2b1628fa24c5fb3d505fcf96f5b6a75537077fb 100644
+--- a/pyrowave_rdo_density.hpp
++++ b/pyrowave_rdo_density.hpp
+@@ -26,6 +26,17 @@ struct RDODensity
+ 	bool legacy_equivalent = true;
+ };
+ 
++// This is deliberately a value object rather than a logging format. Callers
++// can report the exact density retained by an initialized encoder without
++// reparsing its environment.
++struct RDODensityReport
++{
++	float pixels_per_degree = LegacyRDOPixelsPerDegree;
++	float nyquist_cycles_per_degree = LegacyRDOCyclesPerPixelNyquist *
++	                                     LegacyRDOViewingDistanceMeters * LegacyRDODpi;
++	bool legacy_equivalent = true;
++};
++
+ inline RDODensity parse_rdo_pixels_per_degree(const char *requested)
+ {
+ 	RDODensity density = {};
+@@ -60,6 +71,11 @@ inline float rdo_cpd_nyquist(const RDODensity &density)
+ 	return 0.5f * density.pixels_per_degree;
+ }
+ 
++inline RDODensityReport rdo_density_report(const RDODensity &density)
++{
++	return { density.pixels_per_degree, rdo_cpd_nyquist(density), density.legacy_equivalent };
++}
++
+ inline float rdo_quant_csf(const RDODensity &density, int level, int component, int band,
+ 				  bool chroma420, int decomposition_levels)
+ {
+diff --git a/pyrowave_rdo_density_test.cpp b/pyrowave_rdo_density_test.cpp
+index 0bd64660cdbcb335507be9e0684e6fea50714f1a..5024079019b6cbbcb845369c19dc52020384666d 100644
+--- a/pyrowave_rdo_density_test.cpp
++++ b/pyrowave_rdo_density_test.cpp
+@@ -32,6 +32,10 @@ int main()
+ 	ASSERT_THAT(float_bits(rdo_cpd_nyquist(explicit_legacy_ppd)) == float_bits(legacy));
+ 	ASSERT_THAT(float_bits(rdo_cpd_nyquist(explicit96)) == float_bits(48.0f));
+ 	ASSERT_THAT(float_bits(unset.pixels_per_degree) == float_bits(2.0f * legacy));
++	const auto unset_report = rdo_density_report(unset);
++	ASSERT_THAT(float_bits(unset_report.pixels_per_degree) == float_bits(2.0f * legacy));
++	ASSERT_THAT(float_bits(unset_report.nyquist_cycles_per_degree) == float_bits(legacy));
++	ASSERT_THAT(unset_report.legacy_equivalent);
+ 
+ 	const auto rdo24 = parse_rdo_pixels_per_degree("24");
+ 	const auto rdo36 = parse_rdo_pixels_per_degree("36");
+@@ -39,6 +43,10 @@ int main()
+ 	ASSERT_THAT(rdo36.valid && !rdo36.legacy_equivalent && rdo36.pixels_per_degree == 36.0f);
+ 	ASSERT_THAT(float_bits(rdo_cpd_nyquist(rdo24)) == float_bits(12.0f));
+ 	ASSERT_THAT(float_bits(rdo_cpd_nyquist(rdo36)) == float_bits(18.0f));
++	const auto rdo24_report = rdo_density_report(rdo24);
++	ASSERT_THAT(float_bits(rdo24_report.pixels_per_degree) == float_bits(24.0f));
++	ASSERT_THAT(float_bits(rdo24_report.nyquist_cycles_per_degree) == float_bits(12.0f));
++	ASSERT_THAT(!rdo24_report.legacy_equivalent);
+ 
+ 	// The encoder's original distortion-CSF calculation must be exactly
+ 	// preserved at every band/component/level on the default path.

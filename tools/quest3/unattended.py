@@ -296,7 +296,9 @@ class Host:
                 raise ValueError('invalid backend process inventory')
             return [row for row in data if is_comfy_backend_process(row)]
         except Exception:
-            return [{'discovery_error': 'backend_process_inventory_unavailable'}]
+            # Keep the process-inventory shape stable even when WMI/CIM is
+            # unavailable. Callers still fail closed on discovery_error.
+            return [{'ProcessId': None, 'discovery_error': 'backend_process_inventory_unavailable'}]
     def _comfy_queue(self):
         url=os.environ.get('Q3PW_COMFY_URL','http://127.0.0.1:8192')+'/queue'
         try:

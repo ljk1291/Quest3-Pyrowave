@@ -41,6 +41,14 @@ expected_wo8_phase_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value w
 actual_wo8_phase_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/wo8-light-centre-phase.patch")
 [ "$actual_wo8_phase_patch" = "$expected_wo8_phase_patch" ] || { echo "WO-8 Light phase patch hash does not match sources.lock.json" >&2; exit 1; }
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/wo8-light-centre-phase.patch"
+expected_alvr_rdo_live_readback_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value alvr_pyrowave_rdo_live_readback_patch_sha256)
+actual_alvr_rdo_live_readback_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/alvr-pyrowave-rdo-live-readback.patch")
+[ "$actual_alvr_rdo_live_readback_patch" = "$expected_alvr_rdo_live_readback_patch" ] || { echo "ALVR PyroWave RDO live-readback patch hash does not match sources.lock.json" >&2; exit 1; }
+apply_patch "$dest/ALVR-20.13.0" "$repo/patches/alvr-pyrowave-rdo-live-readback.patch"
+expected_alvr_rdo_session_setting_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value alvr_pyrowave_rdo_session_setting_patch_sha256)
+actual_alvr_rdo_session_setting_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/alvr-pyrowave-rdo-session-setting.patch")
+[ "$actual_alvr_rdo_session_setting_patch" = "$expected_alvr_rdo_session_setting_patch" ] || { echo "ALVR PyroWave RDO session-setting patch hash does not match sources.lock.json" >&2; exit 1; }
+apply_patch "$dest/ALVR-20.13.0" "$repo/patches/alvr-pyrowave-rdo-session-setting.patch"
 
 checkout "$PYROWAVE_URL" "$dest/pyrowave" "$PYROWAVE_BASE"
 # pyrowave's checkout_granite.sh pins a newer Granite (9d44761), which spiked encoder p99 to 14 ms;
@@ -55,5 +63,13 @@ expected_rdo_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value pyrowav
 actual_rdo_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/pyrowave-rdo-density.patch")
 [ "$actual_rdo_patch" = "$expected_rdo_patch" ] || { echo "WO-7 PyroWave RDO patch hash does not match sources.lock.json" >&2; exit 1; }
 apply_patch "$dest/pyrowave" "$repo/patches/pyrowave-rdo-density.patch"
+expected_rdo_live_readback_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value pyrowave_rdo_live_readback_patch_sha256)
+actual_rdo_live_readback_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/pyrowave-rdo-live-readback.patch")
+[ "$actual_rdo_live_readback_patch" = "$expected_rdo_live_readback_patch" ] || { echo "PyroWave RDO live-readback patch hash does not match sources.lock.json" >&2; exit 1; }
+apply_patch "$dest/pyrowave" "$repo/patches/pyrowave-rdo-live-readback.patch"
+expected_rdo_session_setting_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value pyrowave_rdo_session_setting_patch_sha256)
+actual_rdo_session_setting_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/pyrowave-rdo-session-setting.patch")
+[ "$actual_rdo_session_setting_patch" = "$expected_rdo_session_setting_patch" ] || { echo "PyroWave RDO session-setting patch hash does not match sources.lock.json" >&2; exit 1; }
+apply_patch "$dest/pyrowave" "$repo/patches/pyrowave-rdo-session-setting.patch"
 
 echo "sources ready in $dest: ALVR ${ALVR_BASE%${ALVR_BASE#???????}}, pyrowave ${PYROWAVE_BASE%${PYROWAVE_BASE#???????}}, Granite ${GRANITE_COMMIT%${GRANITE_COMMIT#???????}}"
