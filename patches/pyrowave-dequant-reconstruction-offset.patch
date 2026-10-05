@@ -14,7 +14,7 @@ index 0b58ac1..f6538c6 100644
      target_link_libraries(pyrowave-c-interop-test PRIVATE pyrowave-shared granite-vulkan)
      target_compile_options(pyrowave-c-interop-test PRIVATE ${PYROWAVE_CXX_FLAGS})
 diff --git a/pyrowave_decoder.cpp b/pyrowave_decoder.cpp
-index f2fa70d..6876de1 100644
+index f2fa70d..b25bd8f 100644
 --- a/pyrowave_decoder.cpp
 +++ b/pyrowave_decoder.cpp
 @@ -5,6 +5,7 @@
@@ -25,7 +25,7 @@ index f2fa70d..6876de1 100644
  #include "pyrowave_common.hpp"
  #include <algorithm>
  #include <cstdlib>
-@@ -22,8 +23,24 @@ struct DequantizerPushData
+@@ -22,13 +23,32 @@ struct DequantizerPushData
  	int32_t block_offset_32x32;
  	int32_t block_stride_32x32;
  	int32_t block_count_32x32;
@@ -50,29 +50,37 @@ index f2fa70d..6876de1 100644
  struct Decoder::Impl final : public WaveletBuffers
  {
  	bool fused_haar = getenv("PYROWAVE_FUSED_HAAR") && strcmp(getenv("PYROWAVE_FUSED_HAAR"), "1") == 0;
-@@ -304,6 +321,7 @@ void Decoder::Impl::init_block_meta()
+ 	bool batch_dequant = getenv("PYROWAVE_BATCH_DEQUANT") && strcmp(getenv("PYROWAVE_BATCH_DEQUANT"), "1") == 0;
+ 	bool idwt_enabled = true;   // XRW Experiment 3
++	// Read once: the environment is an instance configuration, not a per-frame control.
++	float reconstruction_offset = bounded_reconstruction_offset();
++	ReconstructionOffsetObservation reconstruction_offset_observation;
+ 
+ 	BufferHandle dequant_offset_buffer, payload_data;
+ 	BufferViewHandle payload_u32_view, payload_u16_view, payload_u8_view;
+@@ -304,6 +324,7 @@ void Decoder::Impl::init_block_meta()
  bool Decoder::Impl::dequant(CommandBuffer &cmd)
  {
  	DequantizerPushData push = {};
-+	push.reconstruction_offset = bounded_reconstruction_offset();
++	push.reconstruction_offset = reconstruction_offset;
  
  	cmd.set_specialization_constant_mask(0);
  	cmd.enable_subgroup_size_control(true);
-@@ -330,6 +348,8 @@ bool Decoder::Impl::dequant(CommandBuffer &cmd)
+@@ -330,6 +351,8 @@ bool Decoder::Impl::dequant(CommandBuffer &cmd)
  		cmd.set_program(shaders.wavelet_dequant[0]);
  
  	cmd.begin_region("DWT dequant");
-+	if (push.reconstruction_offset != 0.0f)
++	if (reconstruction_offset_observation.should_emit(push.reconstruction_offset))
 +		LOGI("DWT dequant reconstruction magnitude offset: %.6f\n", push.reconstruction_offset);
  	auto start_dequant = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
  
  	cmd.image_barrier(*wavelet_img_high_res, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
 diff --git a/pyrowave_dequant_reconstruction_offset.hpp b/pyrowave_dequant_reconstruction_offset.hpp
 new file mode 100644
-index 0000000..a41d234
+index 0000000..c1fef2a
 --- /dev/null
 +++ b/pyrowave_dequant_reconstruction_offset.hpp
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,69 @@
 +// Copyright (c) 2026 Hans-Kristian Arntzen
 +// SPDX-License-Identifier: MIT
 +#pragma once
@@ -87,6 +95,21 @@ index 0000000..a41d234
 +{
 +	float value = 0.0f;
 +	bool valid = true;
++};
++
++// Decoder configuration is immutable for one Impl instance. This tiny state
++// object makes its single native observation independently testable, avoiding
++// one log line per decoded frame and the resulting bounded-log truncation.
++struct ReconstructionOffsetObservation
++{
++	bool emitted = false;
++	bool should_emit(float offset)
++	{
++		if (offset == 0.0f || emitted)
++			return false;
++		emitted = true;
++		return true;
++	}
 +};
 +
 +// Keep the opt-in range deliberately below one decoded magnitude step. Zero
@@ -129,10 +152,10 @@ index 0000000..a41d234
 +}
 diff --git a/pyrowave_dequant_reconstruction_offset_test.cpp b/pyrowave_dequant_reconstruction_offset_test.cpp
 new file mode 100644
-index 0000000..364e70a
+index 0000000..3af708a
 --- /dev/null
 +++ b/pyrowave_dequant_reconstruction_offset_test.cpp
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,60 @@
 +// Copyright (c) 2026 Hans-Kristian Arntzen
 +// SPDX-License-Identifier: MIT
 +#include "pyrowave_dequant_reconstruction_offset.hpp"
@@ -183,6 +206,12 @@ index 0000000..364e70a
 +		ASSERT_THAT(parse_reconstruction_offset(accepted).valid);
 +	for (const char *rejected : { "-0.2501", "0.2501", "nan", "inf", "0x1p-3x" })
 +		ASSERT_THAT(!parse_reconstruction_offset(rejected).valid);
++
++	ReconstructionOffsetObservation observation;
++	ASSERT_THAT(!observation.should_emit(0.0f));
++	ASSERT_THAT(observation.should_emit(-0.25f));
++	ASSERT_THAT(!observation.should_emit(-0.25f));
++	ASSERT_THAT(!observation.should_emit(0.125f));
 +
 +	std::puts("PyroWave dequant reconstruction offset default parity, sign/zero, and interval checks passed.");
 +	return 0;
