@@ -5,6 +5,38 @@ agent (Codex). Codex reads it at every checkpoint and appends to **Log**. The ow
 Claude may reorder **Queue** or add **Notes for Codex** between checkpoints. Keep
 entries short and link to evidence.
 
+## Evening supervised checkpoint — 2026-10-05
+
+The owner-authorized visual-first session is stopped and all 48 changed keys
+are restored with exact readbacks. The corrected stable-signed **0f07f05** APK
+is installed and verified against its artifact; matching isolated server payloads
+were used. Both older rollback pairs remain intact. VD hashes, driver inventory
+and OpenXR runtime match the saved state; SteamVR scale is back to 150%.
+The temporary test driver, owned Windows VR/chart jobs and test client are stopped.
+
+[The diagnostic report](../results/metro-rdo-supervised-2026-10-05.md) and
+[JSON evidence](../results/metro-rdo-supervised-2026-10-05.json) record full-FOV
+Haar/500 with verified legacy RDO: **84.076 fresh submissions/s**, **9.033 ms
+median GPU decode**, **11.456 ms decode-to-fence**, **67.170 ms estimated pipeline**.
+Runtime 90 Hz is confirmed; sustained 90 fresh submissions/s is not achieved.
+The owner confirms visible compression on diagonal chart lines. The dashboard
+overlaid the measured capture, and scene metadata is missing; retain it as
+diagnostic evidence rather than the decode ladder's clean matched baseline.
+
+A2's native marker verifies RDO 24 and its chart started, but no complete capture
+was collected. Post-stop battery reads 9% despite charging, below the retained
+10% floor. Owner-requested controller thermal-cutoff removal was session-only;
+device protections were unchanged. Original terminal stop text was lost when
+the restorer overwrote it, so do not claim its exact cause from retained logs.
+The private Python controller now preserves that text; 39 CPU tests pass.
+The original refresh-property drift failure is retained alongside the final
+manual restoration proof; no blanket settings replacement was used.
+
+Resume a clean matched a/a2 chart comparison under a new owner-confirmed finite
+session once charged. A/a2 Metro, Q4, a-1000/a2-1000 and later cells remain pending.
+No profile or decoder optimization is promoted. The morning checkpoint below
+is historical offline evidence, including its then-staged installation status.
+
 ## Morning offline checkpoint — 2026-10-05 07:14 CEST
 
 The finite PC-only overnight queue is stopped for owner review. The
@@ -474,6 +506,14 @@ Take the first unblocked item. Items marked ∥ are independent.
      checkpoint-only records.
 
 ## Log
+
+- 2026-10-05 evening, owner-supervised visual-first session: matching corrected
+  pair installed; a native legacy marker and a2 native RDO24 marker verified.
+  Diagnostic a records 84.076 fresh/s and owner-visible compression; a2 capture
+  incomplete. All 48 changed keys restored, VD/driver/OpenXR verified, test
+  runtimes closed. Q4/1000-Mbps/Metro and subsequent cells remain pending.
+  See [the report](../results/metro-rdo-supervised-2026-10-05.md) and revised
+  [checklist](Q3-HEADSET-CHECKLIST.md). No stable-90 pass or default promotion.
 
 - 2026-10-05 05:14 UTC, final overnight PC-only quality publication: 19 new qualified
   rows, selected retained controls, regional comparisons, temporal negatives,

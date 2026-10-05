@@ -6,7 +6,25 @@ tables, WO-10/WO-8/WO-13 merge, and a verified matching signed pair are availabl
 
 ## Pinned matching build for later supervised preparation
 
-The available matching pair is GitHub Actions run `37217852222` from source
+The owner-reviewed corrected pair is source
+`0f07f05b4df88f8fa08ea034f794cda4be9eaf38`, from manual GitHub Actions
+[run 37249212605](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37249212605).
+Its verified APK SHA-256 is
+`0de40871572a2d83698b841ff28e306a0578788527d77222cdcb5cea9bba0e85`,
+and Windows server ZIP SHA-256 is
+`2b78c2b928871bae3afaf5fe101f4304c3333b32ad06aab83082e9251fb60239`.
+The stable signing certificate is unchanged:
+`4a3fe0a8d47ee67b01710df6ffdc870e91ebc5b8e7feec7c87534944ca2a44aa`.
+The [corrected-pair receipt](../results/quality-candidate-build-rdo-session-2026-10-05.json)
+binds all native payloads, pins and shaders, including the RDO session-setting
+route and exported native getter. On 2026-10-05 the owner authorized installation
+and the a/a2 visual comparison. The corrected APK is now installed and verified;
+preserve 80a1635 and d1c3 artifacts for rollback. No additional installation is
+authorized by this checklist.
+
+### Retained 80a1635 reference and rollback pair
+
+The earlier matching pair is GitHub Actions run `37217852222` from source
 commit `80a16353ca127508fec745dec53dc790ceb77fb2`. Its verified APK is
 `Quest3-Pyrowave-stable.apk` SHA-256
 `3d74c6e76964ecf752a4e0dc5414a562c92e14f2b072411f8f83f5e2d281ed53`,
@@ -28,17 +46,23 @@ or capture.
 
 ## Owner session revision — preparation, then confirmation
 
-The owner has requested installation of this verified `80a1635` pair, replacing
-the retained `d1c3b3d4edb3` pair, then Q4, cells **a, a2, b, c, d**, and **f–h**
-on the winning runnable cell. Preparation is authorized now. **Wait for the
-owner's confirmation to begin before installing, issuing ADB commands, starting
-VR or network tests, or changing settings.** Record the confirmation with the
+The owner has reviewed the overnight results and selected the corrected
+`0f07f05` pair for preparation, replacing the earlier proposed `80a1635` pin.
+The owner requests the visual comparison first: **a then a2 at 500 Mbps as
+diagnostic image checks**, followed by Q4, **a-1000, a2-1000, b, c, conditional c2, d1–d4,
+selected d-Metro**, then **f–h** on the winning runnable cell. Before-Q4 a/a2
+results retain network and sustained-rate qualification as pending; no stable
+90 Hz or transport-capacity pass follows from clear images. The first supervised
+diagnostic session has ended and settings are restored; see the checkpoint
+below. **Wait for the owner's confirmation of a new session before issuing ADB
+commands, starting VR or network tests, or changing settings.** Record the confirmation with the
 finite supervised session evidence; do not use or alter the unattended arm file.
 
 Keep the original d1c3 APK/server artifacts and its extracted server directory
-for rollback. Stage the new server in a separate directory. The authorized build
-replacement is distinct from settings restoration: retain the verified 80a1635
-pair after a healthy session and retain d1c3 for a necessary build rollback.
+for rollback, together with 80a1635. Stage the corrected server in a separate
+directory. Build replacement is distinct from settings restoration: after a
+later authorized healthy session, retain its verified corrected pair and both
+earlier pairs for a necessary build rollback.
 Snapshot current settings/registration immediately before the first change,
 restore every changed value exactly, and verify them before telling the owner
 that ALVR is fully restored. The owner performs the VD comparison themselves.
@@ -50,6 +74,9 @@ telemetry or a previous session. Winning-cell selection requires the owner's
 clarity/periphery/motion judgement as well as the recorded live measurements.
 
 ### Historical preparation finding: native RDO proof is blocked on 80a1635
+
+This records the earlier preparation blocker; the corrected pair below
+supersedes that build pin and supplies the native getter/readback route.
 
 Source inspection during preparation found that the live Windows encoder uses
 `pyrowave_encoder_create()` in `pyrowave_c.cpp`, which sets a release
@@ -70,7 +97,29 @@ requires a newly built, verified matching pair and an owner decision about the
 explicit 80a1635 pin. Until that decision, retain 80a1635 and mark these live
 RDO-proof gates blocked. No alternate pair is installed automatically.
 
-### 2026-10-05 corrected candidate: staged, not installed
+### 2026-10-05 supervised checkpoint: installed, restored, comparison incomplete
+
+The [supervised diagnostic report](../results/metro-rdo-supervised-2026-10-05.md)
+records verified matching 0f07f05 installation and native RDO markers for a
+(legacy-equivalent 65.28) and a2 (24). Cell a's fresh rate is **84.076/s**,
+GPU decode median **9.033 ms**, decode-to-fence median **11.456 ms**, estimated
+pipeline median **67.170 ms**. The owner confirms compression on diagonal
+chart lines. This is not a stable 90 Hz pass.
+
+A2's chart started, but no complete telemetry capture was collected before the
+stop. The last guard sample was 10% battery; post-stop readback was 9% while
+charging. Controller thermal cutoffs were removed for that session at the
+owner's request, with device protections unchanged. All 48 changed keys have
+been restored and verified; VD, driver registration and OpenXR proofs pass.
+The corrected APK remains installed and both rollback pairs remain staged.
+
+Resume with a clean matched chart comparison: the completed a capture contained
+the Library dashboard, and its scene metadata was missing. Keep it as diagnostic
+evidence, rather than the decode ladder's clean matched timing reference.
+A/a2 Metro, Q4, a-1000/a2-1000 and every later cell remain pending. Require
+sufficient charge and a new finite owner-supervised confirmation before resuming.
+
+### 2026-10-05 corrected pair provenance and RDO route
 
 The separately verified candidate is source `0f07f05b4df88f8fa08ea034f794cda4be9eaf38`,
 from successful manual [CI run 37249212605](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37249212605).
@@ -78,8 +127,8 @@ Its [build receipt](../results/quality-candidate-build-rdo-session-2026-10-05.js
 binds the matching APK/server, dependency pins, native payloads, shaders, stable
 certificate and exported `pyrowave_encoder_get_rdo_density` symbol. The original
 80a1635, getter-only 71c1be0 and d1c3 artifacts remain staged separately. No pair
-was installed and no headset session began overnight. Agree on the replacement
-pin with the owner before a future installation.
+was installed and no headset session began overnight. Installation subsequently
+occurred in the separately authorized evening session documented above.
 
 The dashboard launches `cmd /C start steam://rungameid/250820`; an existing Steam
 process can launch `vrserver.exe` without the dashboard's environment. Directly
@@ -95,7 +144,7 @@ session_settings.video.pyrowave.rdo_pixels_per_degree.content = 24.0
 The Rust connection config transfers it through `pyrowave_rdo_pixels_per_degree`
 to the Windows encoder's create-info; the native getter then reports the stored
 initialized value. Require a fresh native encoder marker in ALVR's warning/event
-log for a2 and the RDO24 PyroWave candidate:
+log for a2, every RDO24 decode-ladder rung and the selected d-Metro cell:
 
 ```text
 [PYROWAVE] native encoder RDO density applied: 24 px/deg, Nyquist 12 cycles/deg, ALVR session RDO setting
@@ -125,7 +174,8 @@ They cannot be activated by changing this pair's settings. Keep their offline
 quality results separate from the runnable headset cells until native build,
 matching-pair and image-correctness gates pass.
 
-The morning offline ranking does not alter cell d: the position-RDO mode-1 and
+The reviewed offline ranking informs the decode ladder's fence preference;
+the position-RDO mode-1 and
 mode-2 experiments used the same fixed 1000-Mbps cap but have regional tradeoffs
 and no matching live pair. Mode 2 is an effective-density divisor, not an
 eye-tracked or peripheral-acuity setting. Do not add either positional variable
@@ -139,12 +189,13 @@ allocation is 4096×2784 SBS with eight padding rows; the prospective live crop
 would be 4096×2752. Separate x/y foveation parameters exist, but the vertical
 identity guard and profile require that branch's native build and a newly
 verified matching pair. Neither is in the staged corrected pair. Keep c at
-H264Fit until owner review and those gates justify a separate cell.
+H264Fit; the owner-added c2 is a conditional separate cell, only after c decodes
+cleanly at 90 Hz and c2's own build, geometry and decoder gates are closed.
 
 The completed reconstruction-offset sweep does not change any live cell:
 none of the four tested offsets improves both the fence and calibrated HVS.
 Keep the legacy zero offset. The uniform 16/20 px/deg rows also trade a very
-small fence gain for HVS loss; a2 and d retain explicit uniform RDO 24.
+small fence gain for HVS loss; a2 and every d rung retain explicit uniform RDO 24.
 
 Private PNG previews produced by different exporters are not colour-comparable.
 Use the standardized full-range BT.709 comparison pack for baseline/a2 image
@@ -165,7 +216,10 @@ phase-fixed Light comparison. Fence uses frames 10–89; HVS uses all 90.
 | Medium 9/7 (retained) | 42.412796 | 9 | 37.356360 |
 | Light 9/7, phase fixed | 40.810309 | 11 | 40.698893 |
 
-Keep d at Medium 9/7/RDO24. Light trades 1.602 dB of fence accuracy for
+Replace the single d candidate with the d1–d4 live decode-time ladder below.
+Medium 9/7 has the highest offline fence score of these four; select it for
+Metro only if its measured fresh rate meets the current-session baseline.
+Light trades 1.602 dB of fence accuracy for
 3.343 dB higher whole-crop HVS against Medium 9/7. This ladder measures image quality only;
 it does not establish which transform is faster on Quest. The Light row
 has a different encoded size and must not be used to infer a decode-speed
@@ -175,7 +229,7 @@ allocation path before any further timing or promotion.
 
 No overnight headset session occurred. Require new owner confirmation,
 fresh snapshots, exact native readbacks and owner judgements before Q4
-or a/a2/b/c/d. All live fields in the offline report remain unset.
+or a/a2/b/c/c2/d1–d4/d-Metro. All live fields in the offline report remain unset.
 
 ## Fixed geometry distinction
 
@@ -225,12 +279,12 @@ the active multipliers before treating a runtime crop cell as valid.
 
    A link below 2.5 GbE makes the nominal 1000 Mbps Q4/live cells unqualified;
    retain the readback and use only a separately labelled lower-rate diagnostic.
-4. The fixed **offline-quality preparation candidate** is PyroWave CDF 9/7,
-   `Medium` softness `0.5`, RDO-24 and fixed 1000 Mbps. This uses the completed
-   Medium default/RDO comparison and is recorded below; it is not a runtime
-   default. Reconfirm it against the final combined quality review before any
-   authorized headset cell. The prior approximately 82–83 fresh submissions/s
-   is a baseline observation, never a 90 Hz pass.
+4. The reviewed PyroWave comparison is the d1–d4 decode-time ladder: Medium
+   Haar, Medium 5/3, Medium 9/7 and phase-fixed Light 9/7, all softness `0.5`,
+   crop, RDO-24 and fixed 1000 Mbps. Its Metro selection depends on the measured
+   fresh rate against cell a and the retained fence scores; no rung is promoted
+   in advance. The prior approximately 82–83 fresh submissions/s is a historical
+   baseline observation, never the current cell-a readback or a 90 Hz pass.
 
 The base controlled PyroWave apply command is:
 
@@ -254,9 +308,9 @@ session_settings.video.fov_crop.content.horizontal_tangent_multiplier = 0.854
 session_settings.video.fov_crop.content.vertical_tangent_multiplier = 0.85
 ```
 
-### Common Pyro allocation baseline for cells a, a2 and d
+### Common Pyro allocation baseline for cells a, a2 and d1–d4/d-Metro
 
-Cells **a**, **a2** and **d** use the same allocation baseline. First record each
+Cells **a**, **a2**, **d1–d4** and **d-Metro** use the same allocation baseline. First record each
 property's literal readback, then set and verify both values before the required
 client/decoder restart:
 
@@ -452,10 +506,10 @@ geometry, decoder, quality or timing gates.
 
 ### Reproducible native RDO selection in the corrected candidate
 
-The verified `0f07f05` candidate adds the opt-in session switch described above.
-It is staged only; its installation still requires the next owner-supervised
-session. Preserve the raw `enabled` and `content` values before any application.
-For a, explicitly enable `65.28`; for a2 and the selected RDO24 PyroWave cell,
+The verified and now installed `0f07f05` candidate adds the opt-in session switch
+described above. Preserve the raw `enabled` and `content` values before any application
+in a newly authorized owner-supervised session.
+For a, explicitly enable `65.28`; for a2, all d rungs and d-Metro,
 explicitly enable `24.0`. Restart the encoder under the supervised procedure,
 read back both settings, and require its fresh native `Warn()` record to report
 the effective density and `ALVR session RDO setting` source. The explicit legacy
@@ -471,9 +525,11 @@ Restore both raw session-switch values after the comparison and verify them.
 Do not change user/system environment values. Requested settings without the
 native effective-value record do not establish an RDO comparison.
 
-For each live Pyro cell, capture only after streaming is confirmed. Choose a
-whole duration from 60 through 90 seconds and record it; this is a time-based
-capture, never a 90-frame acceptance interval:
+For each live Pyro cell, capture only after streaming is confirmed. Full chart
+and Metro cells retain a recorded 60–90 second interval. The d1–d4 diagnostic
+ladder instead uses about 20 seconds per rung after consistent settling; record
+the actual interval and use `--seconds 20` for each rung. These are time-based
+captures, never 90-frame acceptance intervals:
 
 ```powershell
 python -m tools.quest3.bench capture --adb <ADB> --out <CELL_DIR> --seconds <60..90> --hz 90 `
@@ -538,15 +594,30 @@ silently lower it or remove the headroom requirement.
 
 ## Live cells, in order
 
-The listed nominal rates are deliberate. A cell runs only if Q4 and the selected
-codec's verified decoder limit support its exact rate; otherwise it is recorded
-unqualified rather than silently reduced to `Rlive`. Run a 60–90 second chart
-capture and the same owner-selected Metro fence scene. Preserve the runtime
+The listed nominal rates are deliberate. The owner-approved visual-first
+exception permits a and a2 at their exact 500 Mbps before Q4, labelled diagnostic
+with network/sustained-rate acceptance pending. Retain matching builds, native
+RDO readbacks, image checks, telemetry, safety stops and exact restoration;
+stop on a fault or disconnect. After Q4 qualifies 1000 Mbps, repeat the matched
+full-FOV Haar pair as **a-1000 then a2-1000**, changing only bitrate from the
+corresponding 500-Mbps cell. This gives four cells that separate bitrate from
+RDO density; the cropped/foveated d ladder cannot substitute for that comparison.
+Keep the same chart, Metro checkpoint, render/encoded dimensions, 90-Hz request,
+allocation settings, settling and capture intervals. Require fresh native RDO
+markers and an owner judgement for each cell. Compare both densities at each
+rate and each rate at a fixed density; report any fresh-rate or latency cost
+alongside image quality. The 1000-Mbps pair and ladder still wait for Q4.
+All other cells run only if Q4 and the selected codec's verified decoder limit
+support their exact rate; otherwise record them unqualified rather than silently
+reducing them to `Rlive`. Full cells retain a 60–90
+second chart capture and the same owner-selected Metro fence scene; d1–d4 use
+the short test-scene timing intervals described below. Preserve the runtime
 marker, requested/negotiated/decoded geometry, codec path, packet-size
 p50/p99/max, and native per-frame encode telemetry.
 
 Keep these fields separate in every result: `gpu_decode_ms` (GPU execution only
-when an explicit decoder GPU query produced it), `observed_fence_completion_ms`,
+when an explicit decoder GPU query produced it), `decode_to_fence_ms` (the
+observed decode-to-fence wall interval, also labelled `observed_fence_completion_ms`),
 `fresh_submissions_per_s`, and `estimated_pipeline_latency_ms` (ALVR
 `total_pipeline_latency_s`). Do not derive one from another or call any of them
 display/optical FPS or optical latency. For stock AV1/H.264 cells, set
@@ -561,24 +632,68 @@ Populate this table only from the corresponding headset cell. The retained
 approximately 82–83 fresh submissions/s observation belongs to the historical
 baseline; it is not a value for any blank cell and does not establish 90 Hz.
 
-| Cell | GPU decode execution ms | Observed fence completion ms | Fresh submissions/s | Estimated pipeline latency ms | Optical FPS / latency |
+| Cell | GPU decode execution ms | Decode-to-fence ms (observed completion) | Fresh submissions/s | Estimated pipeline latency ms | Optical FPS / latency |
 |---|---:|---:|---:|---:|---:|
 | a | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
 | a2 | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
+| a-1000 | `null` — pending Q4/headset | `null` — pending Q4/headset | `null` — pending Q4/headset | `null` — pending Q4/headset | `null` — no optical measurement |
+| a2-1000 | `null` — pending Q4/headset | `null` — pending Q4/headset | `null` — pending Q4/headset | `null` — pending Q4/headset | `null` — no optical measurement |
 | b | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
 | c | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
-| d | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
+| c2 | `null` — conditional, pending headset/build gates | `null` — conditional, pending headset/build gates | `null` — conditional, pending headset/build gates | `null` — conditional, pending headset/build gates | `null` — no optical measurement |
+| d1 — Medium Haar | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
+| d2 — Medium 5/3 | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
+| d3 — Medium 9/7 | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
+| d4 — Light 9/7 | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
+| d-Metro — selected rung | `null` — pending selection/headset | `null` — pending selection/headset | `null` — pending selection/headset | `null` — pending selection/headset | `null` — no optical measurement |
 
 | Cell | Exact intended configuration | Runnable state and gate |
 |---|---|---|
-| a | Today’s full baseline: PyroWave Haar, 4:2:0, Compute, TCP, SDR, 90 Hz, fixed 500 Mbps; `fov_crop=false`, WO-8 off, and the common allocation baseline above. On the corrected candidate, explicitly enable the session RDO switch with content `65.28`; require the native encoder log to report legacy default effective `65.28` px/deg and Nyquist `32.64` cycles/deg (allow the established float-log tolerance). | Baseline comparison only. Record and restore the raw RDO switch `enabled` and `content` values exactly. It is not evidence of a 90 Hz pass merely because the historical rate was ~82–83/s. Require Q4 to establish that the requested rate is transport-feasible; do not silently replace 500 with `Rlive`. |
-| a2 | Immediately after a: identical full-FOV Haar / 500 Mbps configuration and common allocation baseline, except the explicit session RDO content is `24.0`. | Require the native encoder initialization log to show requested/effective `24` px/deg and Nyquist `12` cycles/deg. Restart the encoder with that explicit session setting; retain all other a settings/property values and compare their readbacks. Use the same chart and owner-selected Metro scene and ask the owner for each judgement. Restore both original RDO session-switch values exactly when finished. Missing native activation proof or any other changed comparison knob invalidates the a/a2 comparison. |
+| a | Today’s full baseline: PyroWave Haar, 4:2:0, Compute, TCP, SDR, 90 Hz, fixed 500 Mbps; `fov_crop=false`, WO-8 off, and the common allocation baseline above. On the corrected candidate, explicitly enable the session RDO switch with content `65.28`; require the native encoder log to report legacy default effective `65.28` px/deg and Nyquist `32.64` cycles/deg (allow the established float-log tolerance). | Run first as the owner-requested before-Q4 diagnostic visual baseline. Record and restore the raw RDO switch `enabled` and `content` values exactly. It is not evidence of a 90 Hz pass merely because the historical rate was ~82–83/s. Q4 transport qualification remains pending; do not silently replace 500 with `Rlive` or infer network acceptance from the image. |
+| a2 | Immediately after a: identical full-FOV Haar / 500 Mbps configuration and common allocation baseline, except the explicit session RDO content is `24.0`. | Run as the second before-Q4 diagnostic visual comparison, with network/sustained-rate acceptance pending. Require the fresh native `Warn()` readback marker above to show effective `24` px/deg, Nyquist `12` cycles/deg and `ALVR session RDO setting`. Offline expectation versus legacy a: fence **+3.7 dB** (measured +3.656 dB), temporal p99 **44 → 33 luma codes**; this is not a promised live quality/rate gain. Restart the encoder with that explicit session setting; retain all other a settings/property values and compare their readbacks. Use the same chart and owner-selected Metro scene and ask the owner for each judgement. Restore both original RDO session-switch values exactly when finished. Missing native activation proof or any other changed comparison knob invalidates the a/a2 comparison. |
+| a-1000 | Identical to a, except fixed bitrate `1000` Mbps: full-FOV Haar, legacy session RDO `65.28`, WO-8 off and the same allocation configuration. | Run after Q4 qualifies the exact rate. Require the fresh legacy native RDO marker; compare settings with a with only bitrate changed. Ask for chart and Metro judgements; retain independent timing/freshness measurements. |
+| a2-1000 | Identical to a-1000, except session RDO content `24.0`; also identical to a2 except fixed bitrate `1000` Mbps. | Run immediately after a-1000, with a fresh RDO24 native marker. No cropped-Haar offline row is a full-FOV comparator, and the a2 500-Mbps offline expectation must not be presented as a measured 1000-Mbps result. Ask for chart and Metro judgements and retain all common gates. |
 | b | Stock single-SBS AV1: WO-10 crop, AV1 Main10 requested, fixed 200 Mbps, 90 Hz, SDR, NVENC `P4`, AQ `Disabled`. Set/read `preferred_codec=AV1`, `use_10bit=true`, `server_overrides_use_10bit=true`, `quality_preset=P4`, and `adaptive_quantization_mode=Disabled`, then restart SteamVR. | This is the P4/AQ-off live comparison, distinct from the offline P1/Spatial-AQ stock-default control. Source supports these settings but AV1 can negotiate/fall back to HEVC. Block/mark inconclusive without AV1 negotiated-codec readback, elementary-stream Main10 proof, MediaCodec identity/output evidence, and the runtime crop proof. `gpu_decode_ms` is null unless a real stock decoder GPU query is added. |
 | c | Stock single-SBS H.264: WO-10 crop + WO-8 `H264Fit`, softness `0.5`, fixed 700 Mbps, 90 Hz, SDR, NVENC `P7`, AQ `Disabled`, 8-bit. | The completed H264Fit row ranks well on the fence; require the final comparison and close the live H.264 audit gates before capture: active-device dimension acceptance/preflight, matching phase-patch provenance, negotiated/decoded `3968x2080` SBS evidence, H.264 SPS/profile evidence, and Quest decoder identity. Explicitly set/read `use_10bit=false`, `server_overrides_use_10bit=true` and AQ `Disabled` to match the offline row, then restore their original values. Stock ALVR two-per-eye H.264 remains unimplemented and the offline dual-stream rows are not runnable live cells. |
-| d | Selected **offline-quality preparation candidate**: PyroWave CDF 9/7, WO-10 crop + WO-8 `Medium` softness `0.5`, 4:2:0, Compute, TCP, SDR, fixed 1000 Mbps, RDO-24 (explicit session switch enabled, content `24.0`), and the common allocation baseline above. Require the native encoder log to report effective `24` px/deg and Nyquist `12` cycles/deg. | The completed Medium default/RDO pair is clean and shares the exact reduced input; RDO-24 has the stronger measured Medium fence: its tight-fence 10–89 edge PSNR-Y / temporal p99 / mean / all-90 HVS are `42.4128 dB / 9 codes / 1.3552 codes / 37.3564`, versus retained default `37.5434 dB / 15.32 codes / 2.6052 codes / 36.2617`. Its broad whole-image HVS remains below cropped Q3a RDO-24 (`43.0088`), which is a recorded transform/profile quality tradeoff rather than a default-setting decision. This is not a runtime promotion: retain the pending 32-row review, Q4 transport qualification at 1000 Mbps, matching WO-8 phase-pinned builds, runtime crop and Medium encoded-geometry readback. Apply the requested/effective native RDO session-setting and restoration gate above; no blur-only substitute for the reduced-encode candidate. |
+| c2 | Immediately after c, conditional: stock single-SBS width-only H.264 / WO-10 crop / fixed 700 Mbps / 90 Hz / P7 / AQ `Disabled` / SDR / 8-bit, softness `0.5`; compress x only to fit SBS width ≤4096, with full-density y. | Run only if c decodes cleanly at confirmed 90 Hz and meets its fresh-rate/image/decoder gates. Independently require c2's width-only profile and vertical-identity guard in a verified matching signed pair, capability acceptance and negotiated/decoded geometry (prospective `4096x2752` SBS), SPS/profile and Quest decoder evidence. This profile is absent from corrected `0f07f05`: queue c2 until those build gates close, without installing or silently substituting a pair now. Keep c's other settings identical and ask the owner for the c2 image/motion judgement. |
+| d1 | Short decode-time screen: WO-10 crop + WO-8 `Medium`, PyroWave `Haar`; common d ladder settings below. | About 20 s on the fixed test scene; fresh native RDO24 marker, requested/decoded geometry and complete three-metric telemetry required. Retained fence score: **39.714915 dB**. |
+| d2 | Short decode-time screen: WO-10 crop + WO-8 `Medium`, PyroWave `Cdf53`; common d ladder settings below. | About 20 s, same test scene and gates as d1. Retained fence score: **41.273421 dB**. |
+| d3 | Short decode-time screen: WO-10 crop + WO-8 `Medium`, PyroWave `Cdf97`; common d ladder settings below. | About 20 s, same test scene and gates as d1. Retained fence score: **42.412796 dB**. |
+| d4 | Short decode-time screen: WO-10 crop + phase-fixed WO-8 `Light`, PyroWave `Cdf97`; common d ladder settings below. | About 20 s, same test scene and gates as d1; retain Light's phase/mapping and decoded geometry. Retained fence score: **40.810309 dB**. |
+| d-Metro | The eligible d1–d4 rung with the highest retained fence score, applied without changing its other settings. | Run the same owner-selected Metro checkpoint for the full 60–90 s cell and ask the owner for clarity, fence aliasing/peripheral shimmer and motion judgement. Reconfirm its fresh rate and native RDO marker. The short ladder is selection evidence, not stable-90-Hz acceptance or an advance quality sign-off. |
 | f | The winning runnable cell, init-only `debug.q3pw.layer_filter` `0 -> 1 -> 0`, with all other applied keys and `Rlive` unchanged. | Set each value with `adb -s <QUEST_SERIAL> shell setprop debug.q3pw.layer_filter <0|1>`, read it back, and restart the client for every leg. For the `1` leg, require its `[Q3PW_LAYER_FILTER]` startup record to show the requested active flags; missing/unsupported/invalid activation fails the cell. Require identical settings/readback around all legs; judge fence aliasing and any new blur. |
 | g | The winning runnable cell, nominal fixed-rate steps `1000 -> 600 -> 1000` Mbps, 10 seconds each, without telling the owner the transition times. | Run only if the selected codec and network have verified 1000 Mbps support. Keep stream, scene and all non-rate keys fixed; retain packet-size telemetry and the owner's blinded change judgement. If the verified cap `Rlive < 1000`, mark this nominal test unqualified/unavailable. A capped `Rlive -> 600 -> Rlive` sequence may be recorded only as an owner-review alternative, never as the same requested test. |
 | h | The winning runnable cell at `Rlive`, owner turns 360°, crouches and moves a hand near the headset. | Record Q4-style stalls/late frames, fresh submissions, observed fence completion and subjective stutter. |
+
+### d1–d4 timing and Metro selection
+
+Every rung uses PyroWave, WO-10 crop, explicit session RDO `enabled=true` /
+`content=24.0`, fixed 1000 Mbps, 90 Hz, 4:2:0, Compute, TCP, SDR, WO-8
+softness `0.5`, `blur_only=false`, `follow_gaze=false`, clientside foveation off,
+and the same faster allocation configuration. Preserve all other experimental
+options. Verify the native RDO marker, wavelet/profile, effective runtime crop
+and encoded/decoded size after each required encoder/client restart.
+
+Use the same test scene, consistent settling and approximately 20 seconds of
+measurement for each rung. Ask the owner for each in-headset judgement. Record
+actual interval, sample counts, GPU decode execution ms and decode-to-fence ms
+(at least median and p95), plus the native fresh selected-output submissions/s.
+Use `gpu_decode_ms`, `decode_to_fence_ms` and
+`fresh_selected_output_rate_fps` from the corresponding capture, with its native
+source/counter proof. Keep estimated pipeline latency separate. Missing queries,
+completion samples or verified fresh counters leave the rung inconclusive;
+do not fill them from graph FPS, reusable tracking timestamps or offline scores.
+
+Compare each rung's measured fresh rate with **cell a in this session**, using
+matched settled measurement windows (retain a 20-second subwindow of a's
+capture and the rung's actual window). A rung is eligible only with valid
+telemetry, no decoder/device fault, disconnect or visible corruption, and fresh
+submissions/s **at least cell a's measured rate**. Among eligible rungs, prefer
+the highest retained fence score: d3, then d2, then d4, then d1. If none meets
+the baseline rate, mark d-Metro unqualified and report that outcome; do not
+silently lower bitrate or use the historical ~82–83/s as a replacement baseline.
+Run the selected rung as d-Metro for the owner's judgement. A short diagnostic
+screen that matches a sub-90 baseline is not a stable 90 Hz pass.
 
 For any candidate requiring stock H.264 dual-eye transport, stop at the label
 `BLOCKED: WO-11 live dual-stream transport/prototype qualification absent`.
@@ -588,7 +703,8 @@ Never recast the offline two-stream FFmpeg/NVENC proxy as a stock-ALVR selection
 
 1. A valid cell has matching signed build identity; complete telemetry; settings
    and runtime readback; exactly the requested codec/wavelet/transport/chroma;
-   the recorded 60–90 second capture interval; no decoder/device failure or
+   the recorded 60–90 second capture interval (about 20 s for diagnostic d1–d4,
+   with the selected d-Metro retaining 60–90 s); no decoder/device failure or
    disconnect; and an owner image/motion judgement. Missing any item records a
    failed/inconclusive cell, never a pass.
 2. A stable 90 Hz pass requires confirmed 90 Hz runtime operation and fresh

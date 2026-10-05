@@ -1,0 +1,206 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-05",
+  "scope": "owner-supervised before-Q4 diagnostic chart session",
+  "source_commit": "0f07f05b4df88f8fa08ea034f794cda4be9eaf38",
+  "installed_apk_sha256": "0de40871572a2d83698b841ff28e306a0578788527d77222cdcb5cea9bba0e85",
+  "rollback_pairs_retained": true,
+  "common_settings": {
+    "codec": "PyroWave",
+    "wavelet": "Haar",
+    "decode_path": "Compute",
+    "transport": "TCP",
+    "chroma": "420",
+    "hdr": false,
+    "requested_hz": 90,
+    "fixed_mbps": 500,
+    "render_eye": [
+      3072,
+      3232
+    ],
+    "encode_eye": [
+      3072,
+      3232
+    ],
+    "decoded_stereo": [
+      6144,
+      3232
+    ],
+    "fov_crop": false,
+    "foveation": false,
+    "direct_eye_copy": true,
+    "optimal_ahb_usage": true,
+    "fragment_min_usage": true
+  },
+  "cells": [
+    {
+      "cell": "a",
+      "status": "diagnostic_measured_not_accepted",
+      "rdo_px_per_deg": 65.2799988,
+      "duration_requested_s": 60,
+      "elapsed_s": 66.08836729999166,
+      "fresh_selected_output_rate_fps": 84.0760325179935,
+      "fresh_submission_window_s": 59.25588839998818,
+      "gpu_decode_ms": {
+        "n": 5072,
+        "p01": 7.400025329,
+        "p50": 9.0325515,
+        "p95": 9.3374714,
+        "p99": 9.51508372,
+        "max": 10.049791
+      },
+      "decode_to_fence_ms": {
+        "n": 5072,
+        "p01": 11.128944919999999,
+        "p50": 11.456043,
+        "p95": 12.2436287,
+        "p99": 12.653334319999999,
+        "max": 13.359741
+      },
+      "estimated_pipeline_latency_ms": {
+        "n": 5041,
+        "p01": 55.998963,
+        "p50": 67.16951,
+        "p95": 71.1349,
+        "p99": 74.8209176,
+        "max": 100.778975
+      },
+      "runtime_90_hz_evidence_fresh": true,
+      "build_identity_verified": true,
+      "telemetry_complete": true,
+      "resolution_evidence": {
+        "status": "verified",
+        "mismatches": [],
+        "expected_profile": "godlike-3072",
+        "aligned_requested_render_eye": [
+          3072,
+          3232
+        ],
+        "aligned_requested_encode_eye": [
+          3072,
+          3232
+        ],
+        "negotiated_render_eye": [
+          3072,
+          3232
+        ],
+        "negotiated_encode_eye": [
+          3072,
+          3232
+        ],
+        "observed_decoded_stereo_frames": [
+          [
+            6144,
+            3232
+          ]
+        ],
+        "pc_source_pixel_ratio": 1.0,
+        "scope": "Geometry only; a SteamVR recommendation is not proof of game texture size, image quality, optical presentation, or sustained performance."
+      },
+      "scene_geometry_evidence": {
+        "status": "unknown",
+        "reason": "scene_metadata_missing"
+      },
+      "owner_judgement": {
+        "chart_upright": true,
+        "compression_visible_on_diagonal_lines": true,
+        "colour": null,
+        "motion": null,
+        "dashboard_dismissed_after_capture": true
+      },
+      "requested_rate_screen_passed": false,
+      "sustained_requested_fps": false,
+      "optical_fps": null,
+      "optical_latency_ms": null,
+      "acceptance": {
+        "passed": false,
+        "reasons": [
+          "fresh_rate_below_target",
+          "endurance_not_run",
+          "Q4_not_run",
+          "dashboard_overlay_during_capture",
+          "scene_metadata_missing",
+          "owner_colour_motion_judgements_missing"
+        ]
+      },
+      "evidence_sha256": {
+        "raw_report": "24990414eacc1008550bd0b48382afbf584bc175d0de71321e7008bf852d3497",
+        "native_rdo": "739446e5339af8c519bbe10a92073b1cf8bddbddbebfdb7fb25466f13d5c928a",
+        "owner_judgement": "cec7a723c71db2074066a91ae7a0ac8b167dc9a177c6ecd15e8931119027f318",
+        "unobstructed_qualitative_screenshot": "68150b2101f7125138cae1420c2cff5044e52e98b10418ec6df124444ad32306"
+      }
+    },
+    {
+      "cell": "a2",
+      "status": "incomplete",
+      "rdo_px_per_deg": 24.0,
+      "native_rdo_marker_verified": true,
+      "other_requested_stream_settings_matched": true,
+      "chart_started": true,
+      "complete_capture": false,
+      "owner_judgement": null,
+      "fresh_selected_output_rate_fps": null,
+      "gpu_decode_ms": null,
+      "decode_to_fence_ms": null,
+      "estimated_pipeline_latency_ms": null,
+      "optical_fps": null,
+      "optical_latency_ms": null,
+      "evidence_sha256": {
+        "native_rdo": "45eb552eb0bd3730230f2f0fa3c29e6472dc287fb366026324a3a6dc12e1145c",
+        "comparison_settings": "4be655e2e7fd3939d2589acafba8f33e8700951f1c1686b660ea3e758d0bfb18"
+      }
+    }
+  ],
+  "stopped_session": {
+    "last_recorded_battery_percent": 10,
+    "battery_readback_after_stop_percent": 9,
+    "charging_reported": true,
+    "controller_thermal_cutoffs_disabled_by_owner": true,
+    "device_thermal_protections_changed": false,
+    "remaining_battery_floor_percent": 10,
+    "terminal_reason": "unavailable: original controller overwrote stop-marker text during restoration",
+    "inference": "Battery readback is below the remaining floor and independently prohibits a new cell."
+  },
+  "restoration": {
+    "all_48_changed_keys_verified": true,
+    "VD_settings_hashes_unchanged": true,
+    "driver_registration_unchanged": true,
+    "OpenXR_runtime_unchanged": true,
+    "SteamVR_scale": 1.5,
+    "test_client_closed": true,
+    "owned_windows_runtimes_remaining": 0,
+    "corrected_APK_retained": true,
+    "original_guard_refresh_property_drift_failure_retained": true,
+    "refresh_property_before": "72",
+    "refresh_property_observed_drift": "",
+    "refresh_property_restored": "72",
+    "refresh_property_drift_origin": "unverified",
+    "SteamVR_entire_file_hash_equal": false,
+    "unowned_SteamVR_changes_preserved": [
+      "DesktopUI.settings_desktop",
+      "GpuSpeed.gpuSpeed2",
+      "GpuSpeed.gpuSpeed3",
+      "GpuSpeed.gpuSpeedCount",
+      "GpuSpeed.gpuSpeedHorsepower"
+    ],
+    "evidence_sha256": "861dccd1433453eb4f8a4d436a00b5ceea648de483e06e5cd98ff040b5c1dcb2"
+  },
+  "not_run": [
+    "a/a2 Metro",
+    "Q4",
+    "a-1000",
+    "a2-1000",
+    "b",
+    "c",
+    "c2",
+    "d1-d4",
+    "d-Metro",
+    "f-h"
+  ],
+  "private_media": "Screenshots and source charts retained only under results/local; qualitative, not optical measurements.",
+  "controller_CPU_checks": {
+    "tests_passed": 39,
+    "scope": "private Python guard/adapter; includes preservation of monitor stop reason"
+  },
+  "default_promotion": false
+}
