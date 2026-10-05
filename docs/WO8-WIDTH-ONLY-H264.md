@@ -44,3 +44,15 @@ This does not claim a compiled or installed native build, headset test, or
 timing qualification. Until the separately pinned native source is built with
 the matching receiver inverse path, the candidate remains qualified only for
 CPU frame-bank and offline NVENC proxy work.
+
+## Offline controller
+
+The existing NVENC frame-bank controller exposes this one-cell plan through
+`python -m tools.xrbench.nvenc_framebank plan --width-only-h264`. It requires
+the same frozen source, crop geometry, fence rectangle, and crops arguments as
+`--revised-q3a`; supply `--foveation-implementation-revision` and
+`--foveation-implementation-source-sha256` as a pair to bind the plan to the
+exact CPU transform. The resulting descriptor records 2048x2784 per eye,
+4096 SBS, eight allocation-only bottom rows, `softness=0.5`, and the forced
+one-pixel Y footprint. Planning runs no encoder; the standard supervised
+`run` command remains the separate owner-controlled execution step.

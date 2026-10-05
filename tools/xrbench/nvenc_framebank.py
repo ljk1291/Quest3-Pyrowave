@@ -441,7 +441,10 @@ def build_q3_extension_nvenc_plan(source: Path, vertical_pixels_per_degree: floa
     return base
 
 
-def build_width_only_h264_plan(source: Path, vertical_pixels_per_degree: float, **kwargs) -> dict:
+def build_width_only_h264_plan(source: Path, vertical_pixels_per_degree: float, *,
+                               implementation_revision: str | None = None,
+                               implementation_source_sha256: str | None = None,
+                               **kwargs) -> dict:
     """Plan one opt-in H.264 P7 width-only WO-8 comparison.
 
     The source crop stays 2624x2776. Eight bottom-edge rows are replicated
@@ -453,7 +456,10 @@ def build_width_only_h264_plan(source: Path, vertical_pixels_per_degree: float, 
     base = build_revised_q3a_plan(source, vertical_pixels_per_degree, **kwargs)
     crop = next(row for row in base["cells"] if row["label"] == "h264-dual-p7-400")
     from .foveation import FoveationConfig, encoded_size
-    transform = foveation_transform_descriptor(profile="h264width", softness=.5, blur_only=False)
+    transform = foveation_transform_descriptor(
+        profile="h264width", softness=.5, blur_only=False,
+        implementation_revision=implementation_revision,
+        implementation_source_sha256=implementation_source_sha256)
     source_eye = (2624, 2776); expanded_eye = (2624, 2784)
     width, height = encoded_size(*expanded_eye, FoveationConfig("h264width", .5, False))
     if width * 2 != 4096 or height != expanded_eye[1]:
@@ -1645,6 +1651,8 @@ def main(argv=None):
     mode.add_argument("--width-only-h264", action="store_true", help="freeze the opt-in WO-8 2048x2784-per-eye H.264 cell")
     p.add_argument("--crop-geometry", help="JSON from fence_metrics.crop_geometry (required with --revised-q3a)")
     p.add_argument("--fence-rectangle", help="frozen Q3 fence rectangle JSON (required with --revised-q3a)")
+    p.add_argument("--foveation-implementation-revision", help="WO-8 source revision; must be paired with its SHA-256")
+    p.add_argument("--foveation-implementation-source-sha256", help="WO-8 source SHA-256; must be paired with its revision")
     r = sub.add_parser("run")
     for name in ("plan", "source", "private-out", "report", "window", "ffmpeg", "ffprobe", "psnr-hvs-m-h", "tools-metadata"):
         r.add_argument("--" + name, required=True)
@@ -1664,7 +1672,10 @@ def main(argv=None):
                 projection_evidence=args.projection_evidence, crop_evidence=args.crop_evidence,
                 crop_geometry=json.loads(Path(args.crop_geometry).read_text(encoding="utf-8")),
                 fence_rectangle=json.loads(Path(args.fence_rectangle).read_text(encoding="utf-8")),
-                crops=_crops_argument(args.crops))
+                crops=_crops_argument(args.crops),
+                **({"implementation_revision": args.foveation_implementation_revision,
+                    "implementation_source_sha256": args.foveation_implementation_source_sha256}
+                   if args.width_only_h264 else {}))
         else:
             if args.crop_geometry or args.fence_rectangle:
                 parser.error("crop geometry and fence rectangle require --revised-q3a or --width-only-h264")
