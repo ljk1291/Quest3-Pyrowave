@@ -96,6 +96,18 @@
       "old": null,
       "new": "10087a15c4a936028ccf5bf4668d482e84adbb03eced7631ad63e5ac4ae1438f",
       "role": "encoder_capability_preflight_inactive_only"
+    },
+    {
+      "path": "patches.foveated_staging_correctness.path",
+      "old": null,
+      "new": "patches/foveated-staging-correctness.patch",
+      "role": "alvr_presentation_and_geometry_only"
+    },
+    {
+      "path": "patches.foveated_staging_correctness.sha256",
+      "old": null,
+      "new": "5979a86c5a3ce5f0bb70166e858731bb2b67a27b67581bdb2c4eb4d07c10e091",
+      "role": "alvr_presentation_and_geometry_only"
     }
   ]
 }

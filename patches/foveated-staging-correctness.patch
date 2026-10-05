@@ -1,0 +1,348 @@
+diff --git a/alvr/client_openxr/src/stream.rs b/alvr/client_openxr/src/stream.rs
+index 91c7fbbaefbb52b77040538da1ec58da28c83d8a..0f9b7f530b069c4f838edfaa734ae575e78c177f 100644
+--- a/alvr/client_openxr/src/stream.rs
++++ b/alvr/client_openxr/src/stream.rs
+@@ -73,7 +73,8 @@ impl ParsedStreamConfig {
+             // Only use the inverse mapping when the matching server negotiated it.
+             // A stale local dashboard setting cannot warp a full-frame stream.
+             foveated_encoding_config: (config.negotiated_config.enable_foveated_encoding)
+-                .then(|| config.settings.video.foveated_encoding.as_option().cloned())
++                .then(|| config.settings.video.foveated_encoding.as_option()
++                    .filter(|c| !c.blur_only).map(|c| c.resolved_geometry()))
+                 .flatten(),
+             clientside_foveation_config: None,
+             upscaling: config.settings.video.upscaling.as_option().cloned(),
+@@ -366,6 +367,10 @@ impl StreamContext {
+             self.pre_wait_last_log = Instant::now();
+             self.released_eye_images_valid = false;
+             self.renderer.set_import_copy_sync(codec == CodecType::PyroWave);
++            self.renderer.set_staging_isolation(
++                codec == CodecType::PyroWave && crate::extra_extensions::perf_settings::system_property(
++                    "debug.q3pw.staging_isolation") == "1",
++            );
+             self.renderer.set_direct_eye_copy(
+                 codec == CodecType::PyroWave && alvr_system_info::platform() == Platform::Quest3
+                     && crate::extra_extensions::perf_settings::system_property("debug.q3pw.direct_eye_copy") == "1",
+diff --git a/alvr/graphics/src/staging.rs b/alvr/graphics/src/staging.rs
+index 779de33ca83d78d9b52c92193b54f60b00056503..12f198dffa0da7ba465ada2d08ca95075fd0ce73 100644
+--- a/alvr/graphics/src/staging.rs
++++ b/alvr/graphics/src/staging.rs
+@@ -2,7 +2,7 @@ use super::{ck, GraphicsContext};
+ use crate::GL_TEXTURE_EXTERNAL_OES;
+ use alvr_common::glam::{IVec2, UVec2};
+ use glow::{self as gl, HasContext};
+-use std::{ffi::c_void, rc::Rc};
++use std::{cell::Cell, ffi::c_void, rc::Rc};
+ 
+ fn create_program(
+     gl: &gl::Context,
+@@ -55,6 +55,7 @@ pub struct StagingRenderer {
+     surface_texture: gl::Texture,
+     framebuffers: [gl::Framebuffer; 2],
+     viewport_size: IVec2,
++    isolated_vertex_array: Cell<Option<gl::VertexArray>>,
+ }
+ 
+ impl StagingRenderer {
+@@ -112,24 +113,39 @@ impl StagingRenderer {
+                 view_idx_uloc,
+                 framebuffers: framebuffers.try_into().unwrap(),
+                 viewport_size: view_resolution.as_ivec2(),
++                isolated_vertex_array: Cell::new(None),
+             }
+         }
+     }
+ 
+     #[allow(unused_variables)]
+     pub unsafe fn render(&self, hardware_buffer: *mut c_void, wait_for_copy: bool) {
+-        let gl = &self.context.gl_context;
+         self.context.make_current();
+ 
+         self.context.render_ahardwarebuffer_using_texture(
+             hardware_buffer,
+             self.surface_texture,
+-            || unsafe {
++            || unsafe { self.draw_copy(wait_for_copy); },
++        );
++    }
++
++    unsafe fn draw_copy(&self, wait_for_copy: bool) {
++        let gl = &self.context.gl_context;
+                 ck!(gl.use_program(Some(self.program)));
+ 
+                 ck!(gl.viewport(0, 0, self.viewport_size.x, self.viewport_size.y));
+                 ck!(gl.disable(gl::SCISSOR_TEST));
+                 ck!(gl.disable(gl::STENCIL_TEST));
++                if let Some(vao) = self.isolated_vertex_array.get() {
++                    // Opt-in PyroWave copy isolation. Raw GL must not inherit
++                    // masks, culling, blend/depth state or a foreign VAO.
++                    ck!(gl.bind_vertex_array(Some(vao)));
++                    for state in [gl::DEPTH_TEST, gl::BLEND, gl::CULL_FACE,
++                        gl::RASTERIZER_DISCARD, gl::SAMPLE_ALPHA_TO_COVERAGE] {
++                        ck!(gl.disable(state));
++                    }
++                    ck!(gl.color_mask(true, true, true, true));
++                }
+ 
+                 for (i, framebuffer) in self.framebuffers.iter().enumerate() {
+                     ck!(gl.bind_framebuffer(gl::DRAW_FRAMEBUFFER, Some(*framebuffer)));
+@@ -137,6 +153,14 @@ impl StagingRenderer {
+                     ck!(gl.active_texture(gl::TEXTURE0));
+                     ck!(gl.bind_texture(GL_TEXTURE_EXTERNAL_OES, Some(self.surface_texture)));
+                     ck!(gl.bind_sampler(0, None));
++                    if self.isolated_vertex_array.get().is_some() {
++                        ck!(gl.tex_parameter_i32(GL_TEXTURE_EXTERNAL_OES, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32));
++                        ck!(gl.tex_parameter_i32(GL_TEXTURE_EXTERNAL_OES, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32));
++                        ck!(gl.tex_parameter_i32(GL_TEXTURE_EXTERNAL_OES, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32));
++                        ck!(gl.tex_parameter_i32(GL_TEXTURE_EXTERNAL_OES, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32));
++                        assert_eq!(gl.check_framebuffer_status(gl::DRAW_FRAMEBUFFER), gl::FRAMEBUFFER_COMPLETE,
++                            "PyroWave staging framebuffer incomplete");
++                    }
+                     ck!(gl.uniform_1_i32(Some(&self.view_idx_uloc), i as i32));
+                     ck!(gl.draw_arrays(gl::TRIANGLE_STRIP, 0, 4));
+                 }
+@@ -145,8 +169,35 @@ impl StagingRenderer {
+                 if wait_for_copy {
+                     ck!(gl.finish());
+                 }
+-            },
+-        );
++                if self.isolated_vertex_array.get().is_some() {
++                    ck!(gl.bind_vertex_array(None));
++                    ck!(gl.bind_framebuffer(gl::DRAW_FRAMEBUFFER, None));
++                }
++    }
++
++    pub fn set_isolation(&self, enabled: bool) {
++        self.context.make_current();
++        let gl = &self.context.gl_context;
++        unsafe {
++            if enabled && self.isolated_vertex_array.get().is_none() {
++                self.isolated_vertex_array.set(Some(gl.create_vertex_array().unwrap()));
++            } else if !enabled {
++                if let Some(vao) = self.isolated_vertex_array.take() { gl.delete_vertex_array(vao); }
++            }
++        }
++        crate::log_quest_experiment(format!("[Q3PW_STAGING] isolation={} copy_eye={}x{}",
++            enabled, self.viewport_size.x, self.viewport_size.y));
++    }
++
++    #[cfg(test)]
++    pub(crate) unsafe fn render_egl_image_for_test(&self, image: super::egl::EGLImage) {
++        self.context.make_current();
++        let gl = &self.context.gl_context;
++        gl.active_texture(gl::TEXTURE0);
++        gl.bind_texture(GL_TEXTURE_EXTERNAL_OES, Some(self.surface_texture));
++        (self.context.image_target_texture_2d)(GL_TEXTURE_EXTERNAL_OES, image);
++        self.draw_copy(true);
++        crate::check_error(gl, "software staging EGLImage draw");
+     }
+ }
+ 
+@@ -156,6 +207,7 @@ impl Drop for StagingRenderer {
+         self.context.make_current();
+ 
+         unsafe {
++            if let Some(vao) = self.isolated_vertex_array.take() { gl.delete_vertex_array(vao); }
+             ck!(gl.delete_program(self.program));
+             ck!(gl.delete_texture(self.surface_texture));
+             for framebuffer in &self.framebuffers {
+diff --git a/alvr/graphics/src/stream.rs b/alvr/graphics/src/stream.rs
+index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..f2de3d6e7f5d29312fc1668215cfe80f26990ceb 100644
+--- a/alvr/graphics/src/stream.rs
++++ b/alvr/graphics/src/stream.rs
+@@ -345,6 +345,10 @@ impl StreamRenderer {
+         }
+     }
+ 
++    pub fn set_staging_isolation(&self, requested: bool) {
++        self.staging_renderer.set_isolation(requested && self.wait_for_import_copy);
++    }
++
+     pub fn last_copy_was_direct(&self) -> bool { self.last_copy_direct.get() }
+ 
+     pub fn poll_import_copy(&self) -> (bool, Option<f32>) {
+@@ -720,3 +724,104 @@ pub fn compute_target_view_resolution(
+     }
+     target_resolution.as_uvec2()
+ }
++
++// Software GLES test of production staging + production WGSL + projection.
++// EGLImage is created from an owned GL texture; Android AHB import and Qualcomm
++// driver behavior are deliberately not claimed by this test.
++#[cfg(all(test, target_os = "linux"))]
++mod staging_correctness_tests {
++    use super::*;
++    use crate::egl;
++    use alvr_session::FoveationProfile;
++    use glow::HasContext;
++
++    fn config(profile: FoveationProfile) -> FoveatedEncodingConfig {
++        FoveatedEncodingConfig { force_enable: false, profile,
++            center_size_x: 0.2, center_size_y: 0.178,
++            center_shift_x: 0., center_shift_y: 0.,
++            edge_ratio_x: 3., edge_ratio_y: 4.,
++            peripheral_softness: 0.5, blur_only: false, follow_gaze: false }
++            .resolved_geometry()
++    }
++
++    unsafe fn texture(gl: &glow::Context, width: u32, height: u32, data: Option<&[u8]>) -> glow::Texture {
++        gl.bind_buffer(glow::PIXEL_UNPACK_BUFFER,None);
++        let tex=gl.create_texture().unwrap();
++        gl.bind_texture(glow::TEXTURE_2D,Some(tex));
++        gl.tex_parameter_i32(glow::TEXTURE_2D,glow::TEXTURE_MIN_FILTER,glow::LINEAR as i32);
++        gl.tex_parameter_i32(glow::TEXTURE_2D,glow::TEXTURE_MAG_FILTER,glow::LINEAR as i32);
++        gl.tex_image_2d(glow::TEXTURE_2D,0,glow::RGBA8 as i32,width as i32,height as i32,0,
++            glow::RGBA,glow::UNSIGNED_BYTE,glow::PixelUnpackData::Slice(data));
++        tex
++    }
++
++    #[test]
++    fn software_gles_staging_both_eyes_survive_fixed_profile_inverse_and_gl_state() {
++        assert_eq!(std::env::var("LIBGL_ALWAYS_SOFTWARE").as_deref(),Ok("1"),
++            "run this gate only in the explicitly software-rendered CI environment");
++        let context=Rc::new(GraphicsContext::new_gl());
++        let gl=&context.gl_context;
++        for profile in [FoveationProfile::Light,FoveationProfile::Medium,FoveationProfile::H264Fit] {
++            for isolated in [false,true] {
++                let cfg=config(profile.clone());
++                let expanded=UVec2::new(160,160);
++                let (packed,_) = foveated_encoding_shader_constants(expanded,cfg.clone());
++                let colors=[[192u8,48,32,255],[16u8,144,224,255]];
++                let pixels=(0..packed.y).flat_map(|_| (0..packed.x*2)
++                    .flat_map(|x| colors[usize::from(x>=packed.x)])).collect::<Vec<_>>();
++                unsafe {
++                    context.make_current();
++                    let source=texture(gl,packed.x*2,packed.y,Some(&pixels));
++                    let targets=[texture(gl,160,160,None),texture(gl,160,160,None)];
++                    gl.finish();
++                    let image=(context.create_image)(context.egl_display.as_ptr(),
++                        context.egl_context.as_ptr(),0x30B1, // EGL_GL_TEXTURE_2D_KHR
++                        source.0.get() as usize as *mut _,ptr::null());
++                    assert!(!image.is_null(),"software EGLImage source creation failed");
++                    let mut renderer=StreamRenderer::new(Rc::clone(&context),expanded,expanded,
++                        [vec![targets[0].0.get()],vec![targets[1].0.get()]],glow::RGBA8,
++                        Some(cfg),false,false,1.0,None);
++                    renderer.set_import_copy_sync(true);
++                    renderer.set_staging_isolation(isolated);
++                    if isolated {
++                        // Poison foreign state to verify the opt-in copy restores
++                        // it rather than relying on what the previous draw left.
++                        gl.enable(glow::BLEND); gl.blend_func(glow::ZERO,glow::ZERO);
++                        gl.enable(glow::CULL_FACE); gl.cull_face(glow::FRONT_AND_BACK);
++                        gl.color_mask(false,false,false,false);
++                    }
++                    renderer.staging_renderer.render_egl_image_for_test(image);
++                    (context.destroy_image)(context.egl_display.as_ptr(),image);
++                    let fov=Fov {left:-0.7,right:0.7,up:0.7,down:-0.7};
++                    renderer.render(ptr::null_mut(),[
++                        StreamViewParams {swapchain_index:0,reprojection_rotation:Quat::IDENTITY,fov},
++                        StreamViewParams {swapchain_index:0,reprojection_rotation:Quat::IDENTITY,fov}],None);
++                    gl.finish();
++                    let fbo=gl.create_framebuffer().unwrap();
++                    for eye in 0..2 {
++                        gl.bind_framebuffer(glow::READ_FRAMEBUFFER,Some(fbo));
++                        gl.framebuffer_texture_2d(glow::READ_FRAMEBUFFER,glow::COLOR_ATTACHMENT0,
++                            glow::TEXTURE_2D,Some(targets[eye]),0);
++                        assert_eq!(gl.check_framebuffer_status(glow::READ_FRAMEBUFFER),glow::FRAMEBUFFER_COMPLETE);
++                        let mut readback=vec![0u8;160*160*4];
++                        gl.bind_buffer(glow::PIXEL_PACK_BUFFER,None);
++                        gl.read_pixels(0,0,160,160,glow::RGBA,glow::UNSIGNED_BYTE,
++                            glow::PixelPackData::Slice(Some(&mut readback)));
++                        crate::check_error(gl,"software production stream readback");
++                        for (pixel_index,pixel) in readback.chunks_exact(4).enumerate() {
++                            for c in 0..4 {
++                                assert!((i16::from(pixel[c])-i16::from(colors[eye][c])).abs()<=1,
++                                    "profile={profile:?} isolated={isolated} eye={eye} pixel={pixel_index} channel={c} actual={pixel:?} expected={:?}",colors[eye]);
++                            }
++                        }
++                    }
++                    gl.bind_framebuffer(glow::FRAMEBUFFER,None);
++                    gl.delete_framebuffer(fbo);
++                    drop(renderer);
++                    gl.delete_texture(source);
++                    for target in targets { gl.delete_texture(target); }
++                }
++            }
++        }
++    }
++}
+diff --git a/alvr/server_core/src/connection.rs b/alvr/server_core/src/connection.rs
+index d537f8f5f1f5b8c73f2629bf553f69730e8926a2..003726ed1c1f1d8150bcdc29d5a009c54ead52f7 100644
+--- a/alvr/server_core/src/connection.rs
++++ b/alvr/server_core/src/connection.rs
+@@ -139,7 +139,8 @@ fn openvr_config_with_env(
+     let (enable_foveated_encoding, foveation_center_size_x, foveation_center_size_y,
+         foveation_center_shift_x, foveation_center_shift_y, foveation_edge_ratio_x,
+         foveation_edge_ratio_y, foveation_peripheral_softness, foveation_blur_only) =
+-        if let Switch::Enabled(config) = &settings.video.foveated_encoding {
++        if let Switch::Enabled(raw_config) = &settings.video.foveated_encoding {
++            let config = raw_config.resolved_geometry();
+             let (center, edge, shift) = match config.profile {
+                 // These named profiles are deliberately fixed-centre. The shader mirrors
+                 // right-eye UVs itself, so a zero shift is the live profile baseline.
+diff --git a/alvr/session/src/settings.rs b/alvr/session/src/settings.rs
+index 6e2b1882009887b5d67836e394df9be8e2ab1267..c90595116aad8bf654f24c7df1ff625da4acc523 100644
+--- a/alvr/session/src/settings.rs
++++ b/alvr/session/src/settings.rs
+@@ -574,6 +574,60 @@ pub struct FoveatedEncodingConfig {
+     pub follow_gaze: bool,
+ }
+ 
++impl FoveatedEncodingConfig {
++    /// Resolve fixed profiles identically on both sides of the stream. Never
++    /// mutate persisted raw Custom fields or silently change a Custom request.
++    pub fn resolved_geometry(&self) -> Self {
++        let mut result = self.clone();
++        let (center, edge) = match self.profile {
++            FoveationProfile::Light => (0.8, 1.5),
++            FoveationProfile::Medium => (0.6, 2.0),
++            FoveationProfile::H264Fit => (0.5, 2.0),
++            FoveationProfile::Custom => return result,
++        };
++        result.center_size_x = center;
++        result.center_size_y = center;
++        result.edge_ratio_x = edge;
++        result.edge_ratio_y = edge;
++        result.center_shift_x = 0.0;
++        result.center_shift_y = 0.0;
++        // These named profiles are fixed-centre; only Custom may follow gaze.
++        result.follow_gaze = false;
++        result
++    }
++}
++
++#[cfg(test)]
++mod fixed_profile_geometry_tests {
++    use super::*;
++    fn stale(profile: FoveationProfile) -> FoveatedEncodingConfig {
++        FoveatedEncodingConfig { force_enable: false, profile,
++            center_size_x: 0.2, center_size_y: 0.178,
++            center_shift_x: 0.25, center_shift_y: -0.1,
++            edge_ratio_x: 3.0, edge_ratio_y: 4.0,
++            peripheral_softness: 0.5, blur_only: false, follow_gaze: true }
++    }
++    #[test]
++    fn fixed_profiles_resolve_stale_fields_without_mutating_the_session() {
++        for (profile, center, edge) in [(FoveationProfile::Light,0.8,1.5),
++            (FoveationProfile::Medium,0.6,2.0),(FoveationProfile::H264Fit,0.5,2.0)] {
++            let raw=stale(profile); let resolved=raw.resolved_geometry();
++            assert_eq!((resolved.center_size_x,resolved.center_size_y),(center,center));
++            assert_eq!((resolved.edge_ratio_x,resolved.edge_ratio_y),(edge,edge));
++            assert_eq!((resolved.center_shift_x,resolved.center_shift_y),(0.0,0.0));
++            assert!(!resolved.follow_gaze);
++            assert_eq!(resolved.peripheral_softness,raw.peripheral_softness);
++            assert_eq!(raw.center_size_x,0.2);
++            assert!(raw.follow_gaze);
++        }
++    }
++    #[test]
++    fn custom_asymmetric_geometry_is_preserved_exactly() {
++        let raw=stale(FoveationProfile::Custom);
++        assert!(raw == raw.resolved_geometry());
++    }
++}
++
+ #[repr(C)]
+ #[derive(SettingsSchema, Clone, Copy, Serialize, Deserialize, Pod, Zeroable)]
+ pub struct ColorCorrectionConfig {
