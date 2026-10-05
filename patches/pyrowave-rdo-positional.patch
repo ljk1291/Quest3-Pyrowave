@@ -1,22 +1,31 @@
 diff --git a/pyrowave_encoder.cpp b/pyrowave_encoder.cpp
-index c21165b..2b2d60a 100644
+index c21165b4278d45a74905c9efa1774f70b612d1cc..5b419c7b11c7445ae2b2b7319fb21c64c5f30e07 100644
 --- a/pyrowave_encoder.cpp
 +++ b/pyrowave_encoder.cpp
-@@ -37,6 +37,13 @@ struct QuantizerPushData
+@@ -8,6 +8,7 @@
+ #include "pyrowave_common.hpp"
+ #include "pyrowave_rdo_density.hpp"
+ #include <algorithm>
++#include <cstddef>
+ #include <cstdlib>
+ #include <cmath>
+ 
+@@ -37,7 +38,14 @@ struct QuantizerPushData
  	int32_t block_offset;
  	int32_t block_stride;
  	float rdo_distortion_scale;
 +	int32_t rdo_local_mode;
 +	float rdo_requested_ppd;
 +	float rdo_uniform_cpd;
-+	float rdo_reserved;
++	float rdo_uv_y_scale;
 +	alignas(16) vec4 rdo_tangent_x;
 +	vec4 rdo_tangent_y;
  };
 +static_assert(offsetof(QuantizerPushData, rdo_tangent_x) == 64 && offsetof(QuantizerPushData, rdo_tangent_y) == 80 && sizeof(QuantizerPushData) == 96, "Quantizer push layout must match GLSL.");
  
  struct BlockPackingPushData
-@@ -109,6 +115,7 @@ struct Encoder::Impl final : public WaveletBuffers
+ {
+@@ -109,6 +117,7 @@ struct Encoder::Impl final : public WaveletBuffers
  
  	uint32_t sequence_count = 0;
  	RDODensity rdo_density = {};
@@ -24,7 +33,7 @@ index c21165b..2b2d60a 100644
  };
  
  float Encoder::Impl::get_quant_rdo_distortion_scale(int level, int component, int band) const
-@@ -480,6 +487,14 @@ bool Encoder::Impl::quant(CommandBuffer &cmd, float quant_scale)
+@@ -480,6 +489,14 @@ bool Encoder::Impl::quant(CommandBuffer &cmd, float quant_scale)
  				push.input_layer = float(band);
  				push.quant_resolution = 1.0f / decode_quant(encode_quant(1.0f / quant_res));
  				push.rdo_distortion_scale = get_quant_rdo_distortion_scale(level, component, band) * (1.0f / 256.0f);
@@ -33,13 +42,13 @@ index c21165b..2b2d60a 100644
 +				float horiz = (band & 1) ? 0.75f : 0.25f;
 +				float vert = (band & 2) ? 0.75f : 0.25f;
 +				push.rdo_uniform_cpd = std::sqrt(horiz * horiz + vert * vert) * rdo_cpd_nyquist(rdo_density) * std::exp2(-float(level));
-+				push.rdo_reserved = 0.0f;
++				push.rdo_uv_y_scale = float(aligned_height) / float(height);
 +				push.rdo_tangent_x = vec4(-1.17589234f, 0.71649807f, -0.71649807f, 1.17589234f);
 +				push.rdo_tangent_y = vec4(-1.22520507f, 0.83088732f, -1.22520507f, 0.83088732f);
  
  				int blocks_x = (push.resolution.x + 31) / 32;
  				int blocks_y = (push.resolution.y + 31) / 32;
-@@ -1257,11 +1272,30 @@ bool Encoder::init(Device *device, int width_, int height_, ChromaSubsampling ch
+@@ -1257,11 +1274,30 @@ bool Encoder::init(Device *device, int width_, int height_, ChromaSubsampling ch
  		     requested_rdo_density ? requested_rdo_density : "");
  		return false;
  	}
@@ -71,10 +80,10 @@ index c21165b..2b2d60a 100644
  	auto ops = device->get_device_features().vk11_props.subgroupSupportedOperations;
  	constexpr VkSubgroupFeatureFlags required_features =
 diff --git a/pyrowave_rdo_density.hpp b/pyrowave_rdo_density.hpp
-index 774a115..1cf8499 100644
+index 774a1150cefafbd5a5e6e46fe35f8c611194b143..57f5dd12a825cfaa8b29e3bbeead6942404d531f 100644
 --- a/pyrowave_rdo_density.hpp
 +++ b/pyrowave_rdo_density.hpp
-@@ -26,6 +26,40 @@ struct RDODensity
+@@ -26,6 +26,52 @@ struct RDODensity
  	bool legacy_equivalent = true;
  };
  
@@ -112,14 +121,26 @@ index 774a115..1cf8499 100644
 +	return local;
 +}
 +
++inline void rdo_tangent_from_uv(float u, float v, float padded_y_scale, const RDOProjection &p, float &tx, float &ty)
++{
++	tx = p.left + (p.right - p.left) * u;
++	ty = p.top + (p.bottom - p.top) * std::min(1.0f, v * padded_y_scale);
++}
++inline float rdo_postscale_csf_ratio(float raw_cpd, float density_ratio)
++{
++	auto csf = [](float cpd) { return 2.6f * (0.0192f + 0.114f * cpd) * std::exp(-std::pow(0.114f * cpd, 1.1f)); };
++	float ratio = csf(std::max(8.0f, raw_cpd * density_ratio)) / csf(std::max(8.0f, raw_cpd));
++	return ratio * ratio;
++}
++
  inline RDODensity parse_rdo_pixels_per_degree(const char *requested)
  {
  	RDODensity density = {};
 diff --git a/pyrowave_rdo_density_test.cpp b/pyrowave_rdo_density_test.cpp
-index 0bd6466..d19a411 100644
+index 0bd64660cdbcb335507be9e0684e6fea50714f1a..ff16c9264bb2909898afe8bd58f3793f9165395f 100644
 --- a/pyrowave_rdo_density_test.cpp
 +++ b/pyrowave_rdo_density_test.cpp
-@@ -59,6 +59,26 @@ int main()
+@@ -59,6 +59,40 @@ int main()
  	for (const char *invalid : { "0", "-1", "nan", "inf", "36x", "10001" })
  		ASSERT_THAT(!parse_rdo_pixels_per_degree(invalid).valid);
  
@@ -142,12 +163,26 @@ index 0bd6466..d19a411 100644
 +	ASSERT_THAT(parse_rdo_local_mode("1") == RDOLocalMode::Tangent);
 +	ASSERT_THAT(parse_rdo_local_mode("2") == RDOLocalMode::TangentEccentricity);
 +	ASSERT_THAT(parse_rdo_local_mode("bad") == RDOLocalMode::Disabled);
++	float tx = 0.0f, ty = 0.0f;
++	constexpr float padded = 2784.0f / 2776.0f;
++	rdo_tangent_from_uv(0.0f, 0.0f, padded, left, tx, ty);
++	ASSERT_THAT(tx == left.left && ty == left.top);
++	rdo_tangent_from_uv(1.0f, 1.0f, padded, left, tx, ty);
++	ASSERT_THAT(std::fabs(tx-left.right) < 1e-6f && std::fabs(ty-left.bottom) < 1e-6f);
++	rdo_tangent_from_uv((-left.left)/(left.right-left.left), left.top/(left.top-left.bottom)/padded, padded, left, tx, ty);
++	ASSERT_THAT(std::fabs(tx) < 1e-5f && std::fabs(ty) < 1e-5f);
++	float rtx = 0.0f, rty = 0.0f; rdo_tangent_from_uv(0.379f, 0.4f, padded, right, rtx, rty);
++	rdo_tangent_from_uv(0.621f, 0.4f, padded, left, tx, ty);
++	ASSERT_THAT(std::fabs(tx + rtx) < 0.01f && std::fabs(ty-rty) < 1e-5f);
++	ASSERT_THAT(float_bits(rdo_postscale_csf_ratio(2.0f, 2.0f)) == float_bits(1.0f));
++	ASSERT_THAT(rdo_postscale_csf_ratio(6.0f, 2.0f) != 1.0f);
++	ASSERT_THAT(float_bits(rdo_postscale_csf_ratio(10.0f, 1.0f)) == float_bits(1.0f));
 +
  	std::puts("PYROWAVE_RDO_PX_PER_DEG default parity and validation passed.");
  	return 0;
  }
 diff --git a/shaders/wavelet_quant.comp b/shaders/wavelet_quant.comp
-index 70794e7..da87e47 100644
+index 70794e754d478a1accb1198cf06d4c4a8cfe0d7e..d401ec111d954c1c0e4066ee892ca4e66c0498e8 100644
 --- a/shaders/wavelet_quant.comp
 +++ b/shaders/wavelet_quant.comp
 @@ -67,8 +67,44 @@ layout(push_constant) uniform Registers
@@ -157,7 +192,7 @@ index 70794e7..da87e47 100644
 +    int rdo_local_mode;
 +    float rdo_requested_ppd;
 +    float rdo_uniform_cpd;
-+    float rdo_reserved;
++    float rdo_uv_y_scale;
 +    vec4 rdo_tangent_x;
 +    vec4 rdo_tangent_y;
  } registers;
@@ -176,7 +211,7 @@ index 70794e7..da87e47 100644
 +    float left = right ? registers.rdo_tangent_x.z : registers.rdo_tangent_x.x;
 +    float right_edge = right ? registers.rdo_tangent_x.w : registers.rdo_tangent_x.y;
 +    float tx = mix(left, right_edge, eye_u);
-+    float ty = mix(registers.rdo_tangent_y.y, registers.rdo_tangent_y.x, uv.y);
++    float ty = mix(registers.rdo_tangent_y.y, registers.rdo_tangent_y.x, clamp(uv.y * registers.rdo_uv_y_scale, 0.0, 1.0));
 +    float rdo_tangent_factor = 1.0 + tx * tx + ty * ty;
 +    float ppdx = 2624.0 / (right_edge - left) * rdo_tangent_factor / sqrt(1.0 + ty * ty) * 0.017453292519943295;
 +    float ppdy = 2776.0 / (registers.rdo_tangent_y.y - registers.rdo_tangent_y.x) * rdo_tangent_factor / sqrt(1.0 + tx * tx) * 0.017453292519943295;
@@ -204,3 +239,10 @@ index 70794e7..da87e47 100644
  }
  
  struct QuantResult
+@@ -313,4 +349,4 @@ void main()
+     bool in_bounds = all(lessThan(block_index, registers.resolution_8x8_blocks));
+     if (in_bounds)
+         encode_payload(block_index, mat2x4(scaled_texels0, scaled_texels1));
+-}
+\ No newline at end of file
++}
