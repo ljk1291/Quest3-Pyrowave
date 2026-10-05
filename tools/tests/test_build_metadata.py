@@ -19,7 +19,7 @@ def load_metadata_tool():
 def make_pyrowave(root):
     shader_dir = root / "pyrowave/shaders"
     shader_dir.mkdir(parents=True, exist_ok=True)
-    files = ("wavelet_dequant.comp", "dwt_quant_scale.h", "constants.h", "idwt.comp", "idwt_haar_fused.comp",
+    files = ("wavelet_quant.comp", "wavelet_dequant.comp", "dwt_quant_scale.h", "constants.h", "idwt.comp", "idwt_haar_fused.comp",
              "dwt.comp", "dwt_common.h", "dwt_swizzle.h", "slangmosh.json", "slangmosh.hpp")
     hashes = {}
     for name in files:

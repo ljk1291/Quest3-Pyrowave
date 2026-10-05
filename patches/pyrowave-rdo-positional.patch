@@ -137,10 +137,10 @@ index 774a1150cefafbd5a5e6e46fe35f8c611194b143..9a67c0c7b1b51c9ba4d9dfbe02d4f1d4
  {
  	RDODensity density = {};
 diff --git a/pyrowave_rdo_density_test.cpp b/pyrowave_rdo_density_test.cpp
-index 0bd64660cdbcb335507be9e0684e6fea50714f1a..ff16c9264bb2909898afe8bd58f3793f9165395f 100644
+index 0bd64660cdbcb335507be9e0684e6fea50714f1a..cb235be015ae74584c8625c2097850200714dd5c 100644
 --- a/pyrowave_rdo_density_test.cpp
 +++ b/pyrowave_rdo_density_test.cpp
-@@ -59,6 +59,40 @@ int main()
+@@ -59,6 +59,44 @@ int main()
  	for (const char *invalid : { "0", "-1", "nan", "inf", "36x", "10001" })
  		ASSERT_THAT(!parse_rdo_pixels_per_degree(invalid).valid);
  
@@ -175,7 +175,11 @@ index 0bd64660cdbcb335507be9e0684e6fea50714f1a..ff16c9264bb2909898afe8bd58f3793f
 +	rdo_tangent_from_uv(0.621f, 0.4f, padded, left, tx, ty);
 +	ASSERT_THAT(std::fabs(tx + rtx) < 0.01f && std::fabs(ty-rty) < 1e-5f);
 +	ASSERT_THAT(float_bits(rdo_postscale_csf_ratio(2.0f, 2.0f)) == float_bits(1.0f));
-+	ASSERT_THAT(rdo_postscale_csf_ratio(6.0f, 2.0f) != 1.0f);
++	// The floor is applied after multiplying the raw band frequency: 2*2
++	// remains at the 8 cpd floor, while 6*2 compares CSF(12) to CSF(8).
++	auto csf = [](float cpd) { return 2.6f * (0.0192f + 0.114f * cpd) * std::exp(-std::pow(0.114f * cpd, 1.1f)); };
++	const float raw6_ratio = rdo_postscale_csf_ratio(6.0f, 2.0f);
++	ASSERT_THAT(std::fabs(raw6_ratio - std::pow(csf(12.0f) / csf(8.0f), 2.0f)) < 1.0e-6f);
 +	ASSERT_THAT(float_bits(rdo_postscale_csf_ratio(10.0f, 1.0f)) == float_bits(1.0f));
 +
  	std::puts("PYROWAVE_RDO_PX_PER_DEG default parity and validation passed.");
