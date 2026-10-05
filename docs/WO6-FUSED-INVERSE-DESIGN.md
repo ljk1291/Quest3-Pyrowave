@@ -47,3 +47,27 @@ Qualification gates before any production activation are:
    the retained all-90 decoded-frame hash gate unchanged.
 5. Any device timing requires a separate armed measurement. CPU or software
    Vulkan correctness does not establish a performance gain.
+
+## Separate CDF 9/7 CPU proof, no activation
+
+The 9/7 candidate now has a deliberately separate literal CPU model in
+`tools/xrbench/wo6_cdf97_model.py`. It models the pinned `idwt.comp` inverse
+order exactly: scale even coefficients by `K` and odd coefficients by `1/K`,
+then apply Delta, Gamma, Beta, Alpha over the 16-sample apron. Arithmetic is
+rounded to float32 and the kept eight samples are stored as FP16. The 2D model
+interleaves LL, x-high, y-high and HH as `(even,even)`, `(odd,even)`,
+`(even,odd)`, `(odd,odd)`, performs the horizontal FP16 shared-tile writeback,
+then performs the vertical pass. Random, impulse, zero, alternating and large
+finite-coefficient tests compare this reference with the fused candidate model.
+
+The boundary model also records the candidate's explicit mapping: the low/even
+band maps near `-1` to `1` and uses the half-sample far rule; high/odd maps
+near `-1` to `0` and uses the whole-sample far rule. The fused candidate uses
+`texelFetch` after this index resolution. The library shader instead reaches
+its coefficient layers through `generate_mirror_uv()` and mirrored-repeat
+texture gathers. The complete two-dimensional gather component order, swizzle,
+and coordinate-to-layer proof has not been independently derived from the
+pinned shader source. This remains an open proof: the CPU model establishes
+only the stated apron lifting, FP16 ordering, layer convention and endpoint
+assumptions. It does not qualify the fused shader, regenerate a header, enable
+a runtime setting, or claim output parity or performance.
