@@ -1,0 +1,707 @@
+diff --git a/alvr/client_openxr/src/stream.rs b/alvr/client_openxr/src/stream.rs
+index 846bbe9e267726088e1ccdce07bd8ed7a219de87..906c8fdddbd9480d14fcab11f939f2d979900ca2 100644
+--- a/alvr/client_openxr/src/stream.rs
++++ b/alvr/client_openxr/src/stream.rs
+@@ -43,6 +43,7 @@ pub struct ParsedStreamConfig {
+     pub enable_hdr: bool,
+     pub passthrough: Option<PassthroughMode>,
+     pub foveated_encoding_config: Option<FoveatedEncodingConfig>,
++    pub configured_foveation: Option<FoveatedEncodingConfig>,
+     pub clientside_foveation_config: Option<ClientsideFoveationConfig>,
+     pub upscaling: Option<UpscalingConfig>,
+     pub force_software_decoder: bool,
+@@ -76,6 +77,7 @@ impl ParsedStreamConfig {
+                 .then(|| config.settings.video.foveated_encoding.as_option()
+                     .filter(|c| !c.blur_only).map(|c| c.resolved_geometry()))
+                 .flatten(),
++            configured_foveation: config.settings.video.foveated_encoding.as_option().cloned(),
+             clientside_foveation_config: None,
+             upscaling: config.settings.video.upscaling.as_option().cloned(),
+             force_software_decoder: config.settings.video.force_software_decoder,
+@@ -388,6 +390,8 @@ impl StreamContext {
+                     .parse::<i32>().unwrap_or(0).clamp(0, 2000),
+                 crate::extra_extensions::perf_settings::system_property("debug.q3pw.raw_srgb_copy") == "1",
+                 crate::extra_extensions::perf_settings::system_property("debug.q3pw.image_cache") == "1",
++                crate::extra_extensions::perf_settings::system_property("debug.q3pw.direct_eye_foveation") == "1",
++                self.config.configured_foveation.as_ref(),
+             );
+             let (mut sink, source) = video_decoder::create_decoder(
+                 config.clone(),
+diff --git a/alvr/graphics/resources/direct_eye_foveation.glsl b/alvr/graphics/resources/direct_eye_foveation.glsl
+new file mode 100644
+index 0000000000000000000000000000000000000000..e862a4a76b8736d34374f20540b7ff56a77ddb62
+--- /dev/null
++++ b/alvr/graphics/resources/direct_eye_foveation.glsl
+@@ -0,0 +1,40 @@
++// MIT: ALVR v20.13.0 inverse, translated from this fork's stream.wgsl.
++// Shader injection mechanism adapted from JMS1717/Quest3-Pyrowave
++// 2de8ad13973ed9c3a8e72f4c85a79e1e7e5d085a. WO-8 geometry is unchanged.
++uniform highp int view_idx;
++uniform vec2 ffe_expanded;
++uniform vec2 ffe_packed;
++uniform vec2 ffe_view_ratio;
++uniform vec2 ffe_edge_ratio;
++uniform vec2 ffe_c2;
++// Exactly the four vec4s for the current eye in WGSL FfeParams.
++uniform vec4 ffe_p[4];
++
++vec2 direct_foveated_uv(vec2 stereo_uv) {
++    vec2 corrected_uv = vec2(stereo_uv.x * 2.0 - float(view_idx), stereo_uv.y);
++    vec2 c1 = ffe_p[0].xy;
++    vec2 lo_bound = ffe_p[0].zw;
++    vec2 hi_bound = ffe_p[1].xy;
++    vec2 a_left = ffe_p[1].zw;
++    vec2 b_left = ffe_p[2].xy;
++    vec2 a_right = ffe_p[2].zw;
++    vec2 b_right = ffe_p[3].xy;
++    vec2 c_right = ffe_p[3].zw;
++    if (view_idx == 1) corrected_uv.x = 1.0 - corrected_uv.x;
++    vec2 intercept_px = c1 * ffe_expanded;
++    vec2 sample_phase_px = floor(intercept_px + vec2(0.5 - 1e-4)) - intercept_px;
++    corrected_uv -= sample_phase_px / ffe_expanded;
++    vec2 center = (corrected_uv - c1) * ffe_edge_ratio / ffe_c2;
++    vec2 left_edge = (-b_left + sqrt(b_left * b_left + 4.0 * a_left * corrected_uv)) / (2.0 * a_left);
++    vec2 right_edge = (-b_right + sqrt(b_right * b_right - 4.0 * (c_right - a_right * corrected_uv))) / (2.0 * a_right);
++    corrected_uv = vec2(
++        corrected_uv.x < lo_bound.x ? left_edge.x : (corrected_uv.x > hi_bound.x ? right_edge.x : center.x),
++        corrected_uv.y < lo_bound.y ? left_edge.y : (corrected_uv.y > hi_bound.y ? right_edge.y : center.y));
++    corrected_uv *= ffe_view_ratio;
++    if (view_idx == 1) corrected_uv.x = 1.0 - corrected_uv.x;
++    // WGSL samples separate clamp-to-edge eye textures. Match those bounds
++    // before converting back to SBS, including padding and the stereo seam.
++    vec2 half_texel = 0.5 / ffe_packed;
++    corrected_uv = clamp(corrected_uv, half_texel, vec2(1.0) - half_texel);
++    return vec2((corrected_uv.x + float(view_idx)) * 0.5, corrected_uv.y);
++}
+diff --git a/alvr/graphics/resources/direct_eye_fragment.glsl b/alvr/graphics/resources/direct_eye_fragment.glsl
+index 986cf174090318cd5387b7b39f4fa5e39a33803e..3503607d81dbf7b945d5c6cce5242a523bf06477 100644
+--- a/alvr/graphics/resources/direct_eye_fragment.glsl
++++ b/alvr/graphics/resources/direct_eye_fragment.glsl
+@@ -7,8 +7,13 @@ uniform int srgb_correction;
+ uniform float encoding_gamma;
+ in vec2 uv;
+ out vec4 out_color;
++// Q3PW_FOVEATION_FUNCTION
+ void main() {
+-    vec3 color = texture(tex, uv).rgb;
++    vec2 sample_uv = uv;
++#ifdef Q3PW_FFE
++    sample_uv = direct_foveated_uv(uv);
++#endif
++    vec3 color = texture(tex, sample_uv).rgb;
+     if (fix_limited_range != 0)
+         color = vec3(16.0 / 255.0) + (219.0 / 255.0) * color;
+     if (srgb_correction != 0) {
+diff --git a/alvr/graphics/src/direct_eye.rs b/alvr/graphics/src/direct_eye.rs
+index e3257fec20a0549858ed07fcd29fe40525029daf..ec87a02f99c7f8277e465f28d3ae9dcc7f558c72 100644
+--- a/alvr/graphics/src/direct_eye.rs
++++ b/alvr/graphics/src/direct_eye.rs
+@@ -1,4 +1,4 @@
+-//! Opt-in SDR, unwarped PyroWave AHB -> acquired OpenXR eye-image copy.
++//! Opt-in SDR PyroWave AHB -> acquired OpenXR eye-image copy.
+ //! Vulkan decoding retains its consumer lease until BOTH eyes finish sampling.
+ //! An opt-in GL fence allows CPU overlap; the default remains synchronous.
+ use super::{egl, GraphicsContext, GL_TEXTURE_EXTERNAL_OES};
+@@ -44,6 +44,37 @@ pub struct DirectEyeConfig {
+     pub encoding_gamma: f32,
+ }
+ 
++/// Static values and per-eye uniforms come from the production WGSL derivation.
++/// Do not introduce a second profile table or a server mapping here.
++#[derive(Clone, Debug)]
++pub(super) struct DirectEyeFoveation {
++    pub packed: UVec2,
++    pub expanded: UVec2,
++    pub view_ratio: [f32; 2],
++    pub edge_ratio: [f32; 2],
++    pub c2: [f32; 2],
++    pub params: [[f32; 16]; 2],
++}
++
++impl DirectEyeFoveation {
++    pub fn new(expanded: UVec2, config: alvr_session::FoveatedEncodingConfig) -> Self {
++        let (packed, constants) = super::stream::foveated_encoding_shader_constants(expanded, config.clone());
++        let pair = |x: &str, y: &str| [constants[x] as f32, constants[y] as f32];
++        let params = super::stream::foveated_encoding_dynamic_params(expanded, config.clone(),
++            alvr_common::glam::vec2(config.center_shift_x, config.center_shift_y));
++        Self { packed, expanded,
++            view_ratio: pair("VIEW_WIDTH_RATIO", "VIEW_HEIGHT_RATIO"),
++            edge_ratio: pair("EDGE_X_RATIO", "EDGE_Y_RATIO"),
++            c2: pair("C2_X", "C2_Y"), params: [params; 2] }
++    }
++
++    pub fn valid(&self) -> bool {
++        self.packed.x > 0 && self.packed.y > 0
++            && self.view_ratio.iter().chain(&self.edge_ratio).chain(&self.c2)
++                .chain(self.params.iter().flatten()).all(|v| v.is_finite())
++    }
++}
++
+ pub struct DirectEyeRenderer {
+     context: Rc<GraphicsContext>,
+     program: gl::Program,
+@@ -54,6 +85,7 @@ pub struct DirectEyeRenderer {
+     view_idx: gl::UniformLocation,
+     flip_y: gl::UniformLocation,
+     flip: bool,
++    ffe_params: Option<(gl::UniformLocation, Cell<[[f32; 16]; 2]>)>,
+     asynchronous: Cell<bool>,
+     copy_wait_ns: i32,
+     bypass_srgb: bool,
+@@ -62,7 +94,7 @@ pub struct DirectEyeRenderer {
+     pending: RefCell<Option<(gl::Fence, Instant)>>,
+ }
+ 
+-unsafe fn compile_program(gl: &gl::Context) -> Result<gl::Program, String> {
++unsafe fn compile_program(gl: &gl::Context, foveation: bool) -> Result<gl::Program, String> {
+     let program = gl.create_program()?;
+     let mut shaders = Vec::new();
+     let result = (|| {
+@@ -72,7 +104,13 @@ unsafe fn compile_program(gl: &gl::Context) -> Result<gl::Program, String> {
+         ] {
+             let shader = gl.create_shader(kind)?;
+             shaders.push(shader);
+-            gl.shader_source(shader, source);
++            // Mechanism adapted from JMS1717/Quest3-Pyrowave at
++            // 2de8ad13973ed9c3a8e72f4c85a79e1e7e5d085a (MIT).
++            let source = if kind == gl::FRAGMENT_SHADER && foveation {
++                source.replace("#version 300 es", "#version 300 es\n#define Q3PW_FFE")
++                    .replace("// Q3PW_FOVEATION_FUNCTION", include_str!("../resources/direct_eye_foveation.glsl"))
++            } else { source.to_owned() };
++            gl.shader_source(shader, &source);
+             gl.compile_shader(shader);
+             if !gl.get_shader_compile_status(shader) {
+                 return Err(gl.get_shader_info_log(shader));
+@@ -92,10 +130,15 @@ unsafe fn compile_program(gl: &gl::Context) -> Result<gl::Program, String> {
+ 
+ impl DirectEyeRenderer {
+     /// Any compile/import-target failure leaves the existing renderer usable.
+-    pub fn new(context: Rc<GraphicsContext>, config: &DirectEyeConfig,
+-               flip: bool, asynchronous: bool, copy_wait_us: i32, raw_srgb_requested: bool, image_cache_requested: bool) -> Result<Self, String> {
++    #[expect(clippy::too_many_arguments)]
++    pub(super) fn new(context: Rc<GraphicsContext>, config: &DirectEyeConfig,
++               flip: bool,
++    ffe_params: Option<(gl::UniformLocation, Cell<[[f32; 16]; 2]>)>, asynchronous: bool, copy_wait_us: i32, raw_srgb_requested: bool, image_cache_requested: bool, foveation: Option<&DirectEyeFoveation>) -> Result<Self, String> {
+         context.make_current();
+         let gl = &context.gl_context;
++        if foveation.is_some() && !gl.supported_extensions().contains("GL_OES_EGL_image_external_essl3") {
++            return Err("missing_external_image_essl3".into());
++        }
+         unsafe {
+             // Removing the paired transfer functions is valid only for the
+             // existing SDR identity-gamma path with an sRGB destination.
+@@ -106,7 +149,7 @@ impl DirectEyeRenderer {
+             import_diagnostic(4, format!("[Q3PW_COLOR_COPY] requested={} active={} srgb_target={} correction={} gamma={}",
+                 raw_srgb_requested, bypass_srgb, config.srgb_target,
+                 config.srgb_correction, config.encoding_gamma));
+-            let program = compile_program(gl)?;
++            let program = compile_program(gl, foveation.is_some())?;
+             let source_texture = match gl.create_texture() {
+                 Ok(texture) => texture,
+                 Err(e) => { gl.delete_program(program); return Err(e); }
+@@ -130,6 +173,15 @@ impl DirectEyeRenderer {
+                 gl.uniform_1_i32(Some(&location("fix_limited_range")?), config.fix_limited_range as i32);
+                 gl.uniform_1_i32(Some(&location("srgb_correction")?), (config.srgb_correction && !bypass_srgb) as i32);
+                 gl.uniform_1_f32(Some(&location("encoding_gamma")?), if bypass_srgb { 0.0 } else { config.encoding_gamma });
++                let ffe_params = if let Some(ffe) = foveation {
++                    for (name, pair) in [
++                        ("ffe_expanded", [ffe.expanded.x as f32, ffe.expanded.y as f32]),
++                        ("ffe_packed", [ffe.packed.x as f32, ffe.packed.y as f32]),
++                        ("ffe_view_ratio", ffe.view_ratio), ("ffe_edge_ratio", ffe.edge_ratio),
++                        ("ffe_c2", ffe.c2),
++                    ] { gl.uniform_2_f32(Some(&location(name)?), pair[0], pair[1]); }
++                    Some((location("ffe_p[0]")?, Cell::new(ffe.params)))
++                } else { None };
+                 for eye in 0..2 {
+                     if config.textures[eye].is_empty() {
+                         return Err("Direct eye copy empty swapchain".into());
+@@ -147,14 +199,14 @@ impl DirectEyeRenderer {
+                         }
+                     }
+                 }
+-                Ok((view_idx, flip_y))
++                Ok((view_idx, flip_y, ffe_params))
+             })();
+             gl.bind_framebuffer(gl::DRAW_FRAMEBUFFER, None);
+             gl.use_program(None);
+             match setup {
+-                Ok((view_idx, flip_y)) => Ok(Self { context, program, source_texture,
++                Ok((view_idx, flip_y, ffe_params)) => Ok(Self { context, program, source_texture,
+                     vertex_array, framebuffers, resolution: config.resolution,
+-                    view_idx, flip_y, flip, asynchronous: Cell::new(asynchronous),
++                    view_idx, flip_y, flip, ffe_params, asynchronous: Cell::new(asynchronous),
+                     image_cache_enabled: Cell::new(image_cache_requested && cfg!(target_os = "android")),
+                     image_cache: RefCell::new(Vec::new()), pending: RefCell::new(None), copy_wait_ns: copy_wait_us.clamp(0, 2000) * 1000, bypass_srgb }),
+                 Err(e) => {
+@@ -288,7 +340,33 @@ impl DirectEyeRenderer {
+         let started = Instant::now();
+         let cached = self.cached_source_texture(buffer);
+         let source_texture = cached.unwrap_or(self.source_texture);
+-        let draw = || {
++        let draw = || self.draw(source_texture, indices, started);
++        if cached.is_some() { draw(); }
++        else { self.context.render_ahardwarebuffer_using_texture(buffer, self.source_texture, draw); }
++    }
++
++    pub fn set_foveation_params(&self, params: [[f32; 16]; 2]) {
++        if let Some((_, stored)) = &self.ffe_params { stored.set(params); }
++    }
++
++    #[cfg(all(test, target_os = "linux"))]
++    pub(super) fn ffe_params_for_test(&self) -> [[f32; 16]; 2] {
++        self.ffe_params.as_ref().unwrap().1.get()
++    }
++
++    /// Same draw, external sampler and completion as Android; only the source
++    /// EGLImage creation is replaced by an owned software GL fixture.
++    #[cfg(all(test, target_os = "linux"))]
++    pub(super) unsafe fn render_egl_image_for_test(&self, image: super::egl::EGLImage) {
++        self.drain_copy();
++        self.context.make_current();
++        let gl = &self.context.gl_context;
++        gl.bind_texture(GL_TEXTURE_EXTERNAL_OES, Some(self.source_texture));
++        (self.context.image_target_texture_2d)(GL_TEXTURE_EXTERNAL_OES, image);
++        self.draw(self.source_texture, [0, 0], Instant::now());
++    }
++
++    unsafe fn draw(&self, source_texture: gl::Texture, indices: [u32; 2], started: Instant) {
+             gl.use_program(Some(self.program));
+             gl.bind_vertex_array(Some(self.vertex_array));
+             gl.viewport(0, 0, self.resolution.x as i32, self.resolution.y as i32);
+@@ -313,6 +391,9 @@ impl DirectEyeRenderer {
+             for (eye, &index) in indices.iter().enumerate() {
+                 gl.bind_framebuffer(gl::DRAW_FRAMEBUFFER, Some(self.framebuffers[eye][index as usize]));
+                 gl.uniform_1_i32(Some(&self.view_idx), eye as i32);
++                if let Some((location, params)) = &self.ffe_params {
++                    gl.uniform_4_f32_slice(Some(location), &params.get()[eye]);
++                }
+                 gl.draw_arrays(gl::TRIANGLE_STRIP, 0, 4);
+             }
+             // Restore the legacy state for WGPU/lobby/overlay users. This
+@@ -337,10 +418,8 @@ impl DirectEyeRenderer {
+             }
+             gl.bind_framebuffer(gl::DRAW_FRAMEBUFFER, None);
+             gl.bind_vertex_array(None);
+-        };
+-        if cached.is_some() { draw(); }
+-        else { self.context.render_ahardwarebuffer_using_texture(buffer, self.source_texture, draw); }
+     }
++
+ }
+ 
+ impl Drop for DirectEyeRenderer {
+diff --git a/alvr/graphics/src/stream.rs b/alvr/graphics/src/stream.rs
+index 1f41570fd3179c0ba5ec72cae005b0170ff64e0b..cebb764beacac8f381eab425c0a6b06f4653d9dc 100644
+--- a/alvr/graphics/src/stream.rs
++++ b/alvr/graphics/src/stream.rs
+@@ -1,9 +1,9 @@
+-use super::{direct_eye::{DirectEyeConfig, DirectEyeRenderer}, staging::StagingRenderer, GraphicsContext, MAX_PUSH_CONSTANTS_SIZE};
++use super::{direct_eye::{DirectEyeConfig, DirectEyeFoveation, DirectEyeRenderer}, staging::StagingRenderer, GraphicsContext, MAX_PUSH_CONSTANTS_SIZE};
+ use alvr_common::{
+     glam::{self, Mat4, Quat, UVec2, Vec3, Vec4},
+     Fov,
+ };
+-use alvr_session::{FoveatedEncodingConfig, PassthroughMode, UpscalingConfig};
++use alvr_session::{FoveationProfile, FoveatedEncodingConfig, PassthroughMode, UpscalingConfig};
+ use glow::HasContext;
+ use std::{cell::Cell, collections::HashMap, ffi::c_void, iter, mem, ptr, rc::Rc};
+ use wgpu::{
+@@ -77,6 +77,9 @@ pub struct StreamRenderer {
+     foveated_encoding: Option<(UVec2, FoveatedEncodingConfig)>,
+     wait_for_import_copy: bool,
+     direct_eye_config: Option<DirectEyeConfig>,
++    direct_eye_ineligible_reason: &'static str,
++    presentation_path: Cell<Option<&'static str>>,
++    presentation_geometry: (UVec2, UVec2),
+     direct_eye_renderer: Option<DirectEyeRenderer>,
+     direct_eye_enabled: bool,
+     leased_pyrowave_buffer: Cell<*mut c_void>,
+@@ -99,9 +102,13 @@ impl StreamRenderer {
+     ) -> Self {
+         let device = &context.device;
+ 
+-        let direct_eye_config = (base_view_resolution == target_view_resolution
+-            && foveated_encoding.is_none() && upscaling.is_none()
+-            && matches!(target_format, glow::SRGB8_ALPHA8 | glow::RGBA8))
++        // A candidate config does not enable direct rendering. The default
++        // still excludes every foveated stream in set_direct_eye_copy below.
++        let direct_eye_ineligible_reason = if upscaling.is_some() { "upscaling" }
++            else if base_view_resolution != target_view_resolution { "resolution_mismatch" }
++            else if !matches!(target_format, glow::SRGB8_ALPHA8 | glow::RGBA8) { "unsupported_format" }
++            else { "eligible" };
++        let direct_eye_config = (direct_eye_ineligible_reason == "eligible")
+             .then(|| DirectEyeConfig { textures: swapchain_textures.clone(),
+                 resolution: target_view_resolution, srgb_correction: enable_srgb_correction,
+                 srgb_target: target_format == glow::SRGB8_ALPHA8,
+@@ -328,6 +335,9 @@ impl StreamRenderer {
+             foveated_encoding: foveated_encoding.map(|c| (base_view_resolution, c)),
+             wait_for_import_copy: false,
+             direct_eye_config,
++            direct_eye_ineligible_reason,
++            presentation_path: Cell::new(None),
++            presentation_geometry: (staging_resolution, base_view_resolution),
+             direct_eye_renderer: None,
+             direct_eye_enabled: false,
+             leased_pyrowave_buffer: Cell::new(ptr::null_mut()),
+@@ -345,21 +355,60 @@ impl StreamRenderer {
+         self.direct_eye_enabled = false;
+     }
+ 
+-    pub fn set_direct_eye_copy(&mut self, requested: bool, flip_y: bool, asynchronous: bool, copy_wait_us: i32, raw_srgb_requested: bool, image_cache_requested: bool) {
++    #[expect(clippy::too_many_arguments)]
++    pub fn set_direct_eye_copy(&mut self, requested: bool, flip_y: bool, asynchronous: bool,
++        copy_wait_us: i32, raw_srgb_requested: bool, image_cache_requested: bool,
++        foveation_requested: bool, configured_foveation: Option<&FoveatedEncodingConfig>) {
+         self.direct_eye_enabled = false;
+-        crate::log_quest_experiment(format!(
+-            "[Q3PW_PRESENTATION] direct_requested={} direct_eligible={} pyrowave_import_sync={} foveation={}",
+-            requested, self.direct_eye_config.is_some(), self.wait_for_import_copy,
+-            self.foveated_encoding.is_some()));
+-        if !requested || !self.wait_for_import_copy { return; }
+-        let Some(config) = &self.direct_eye_config else { return; };
+-        // Re-create only on stream/decoder initialization; errors fall back.
+-        match DirectEyeRenderer::new(Rc::clone(&self.context), config, flip_y, asynchronous, copy_wait_us, raw_srgb_requested, image_cache_requested) {
+-            Ok(renderer) => {
+-                self.direct_eye_renderer = Some(renderer);
+-                self.direct_eye_enabled = true;
++        self.presentation_path.set(None);
++        let reason = direct_ffe_eligibility(foveation_requested, requested,
++            self.wait_for_import_copy, asynchronous, self.direct_eye_ineligible_reason,
++            configured_foveation, self.foveated_encoding.is_some());
++        let ffe = if reason == "eligible" {
++            self.foveated_encoding.as_ref().map(|(resolution, config)|
++                DirectEyeFoveation::new(*resolution, config.clone()))
++        } else { None };
++        let mut reason = reason;
++        if ffe.as_ref().is_some_and(|f| !f.valid()) { reason = "invalid_geometry"; }
++        let default_eligible = self.foveated_encoding.is_none();
++        let enable = requested && self.wait_for_import_copy
++            && if foveation_requested { reason == "eligible" } else { default_eligible };
++        if enable {
++            if let Some(config) = &self.direct_eye_config {
++                // Re-create only on stream/decoder initialization; errors fall back.
++                match DirectEyeRenderer::new(Rc::clone(&self.context), config, flip_y,
++                    asynchronous, copy_wait_us, raw_srgb_requested, image_cache_requested, ffe.as_ref()) {
++                    Ok(renderer) => {
++                        self.direct_eye_renderer = Some(renderer);
++                        self.direct_eye_enabled = true;
++                    }
++                    Err(error) => {
++                        reason = "renderer_support_or_initialization_failed";
++                        alvr_common::error!("Direct eye copy unavailable; using staging: {error}");
++                    }
++                }
+             }
+-            Err(error) => alvr_common::error!("Direct eye copy unavailable; using staging: {error}"),
++        }
++        let (packed, expanded) = self.presentation_geometry;
++        let profile = configured_foveation.map_or("Off", |c| match c.profile {
++            FoveationProfile::Light => "Light", FoveationProfile::Medium => "Medium",
++            FoveationProfile::H264Fit => "H264Fit", FoveationProfile::Custom => "Custom",
++        });
++        crate::log_quest_experiment(format!(
++            "[Q3PW_DIRECT_FFE] requested={} effective={} profile={} packed_eye={}x{} expanded_eye={}x{} reason={}",
++            foveation_requested, foveation_requested && self.direct_eye_enabled, profile,
++            packed.x, packed.y, expanded.x, expanded.y, reason));
++        crate::log_quest_experiment(format!(
++            "[Q3PW_PRESENTATION] direct_requested={} direct_eligible={} direct_effective={} pyrowave_import_sync={} foveation={}",
++            requested, self.direct_eye_config.is_some() && (default_eligible || reason == "eligible"),
++            self.direct_eye_enabled, self.wait_for_import_copy, self.foveated_encoding.is_some()));
++    }
++
++    fn record_presentation_path(&self, direct: bool) {
++        let path = if direct && self.foveated_encoding.is_some() { "direct_eye_ffe" }
++            else if direct { "direct_eye" } else { "staging" };
++        if self.presentation_path.replace(Some(path)) != Some(path) {
++            crate::log_quest_experiment(format!("[Q3PW_PRESENTATION] path={path} rendered=true"));
+         }
+     }
+ 
+@@ -429,14 +478,12 @@ impl StreamRenderer {
+             return;
+         };
+ 
+-        self.context.queue.write_buffer(
+-            &self.ffe_params_buffer,
+-            0,
+-            &ffe_params_bytes([
+-                foveated_encoding_dynamic_params(*resolution, config.clone(), center_shift[0]),
+-                foveated_encoding_dynamic_params(*resolution, config.clone(), center_shift[1]),
+-            ]),
+-        );
++        let params = [
++            foveated_encoding_dynamic_params(*resolution, config.clone(), center_shift[0]),
++            foveated_encoding_dynamic_params(*resolution, config.clone(), center_shift[1]),
++        ];
++        self.context.queue.write_buffer(&self.ffe_params_buffer, 0, &ffe_params_bytes(params));
++        if let Some(renderer) = &self.direct_eye_renderer { renderer.set_foveation_params(params); }
+     }
+ 
+     /// # Safety
+@@ -462,9 +509,11 @@ impl StreamRenderer {
+             if let Some(renderer) = &self.direct_eye_renderer {
+                 renderer.render(source, [view_params[0].swapchain_index, view_params[1].swapchain_index]);
+                 self.last_copy_direct.set(true);
++                self.record_presentation_path(true);
+                 return;
+             }
+         }
++        self.record_presentation_path(false);
+         self.drain_import_copy();
+         // if hardware_buffer is available copy stream to staging texture
+         // A direct-only prior frame has no staging copy: use its protected
+@@ -538,6 +587,21 @@ impl StreamRenderer {
+     }
+ }
+ 
++/// Pure activation policy: rejected requests always retain the staging path.
++fn direct_ffe_eligibility(requested: bool, direct_copy: bool, sync: bool, asynchronous: bool,
++    target_reason: &'static str, config: Option<&FoveatedEncodingConfig>, has_inverse: bool) -> &'static str {
++    if !requested { return "not_requested"; }
++    if !direct_copy { return "direct_eye_copy_required"; }
++    if !sync { return "pyrowave_synchronous_import_required"; }
++    if asynchronous { return "asynchronous_copy"; }
++    if target_reason != "eligible" { return target_reason; }
++    let Some(config) = config else { return "foveation_off"; };
++    if config.blur_only { return "blur_only"; }
++    if config.profile == FoveationProfile::Custom { return "custom_profile"; }
++    if !has_inverse { return "missing_inverse_support"; }
++    "eligible"
++}
++
+ fn set_passthrough_push_constants(render_pass: &mut RenderPass, config: Option<&PassthroughMode>) {
+     const DEG_TO_NORM: f32 = 1. / 360.;
+ 
+@@ -860,7 +924,7 @@ mod staging_correctness_tests {
+             fn flush(&self) {}
+         }
+         static DIAGNOSTICS: Diagnostics=Diagnostics;
+-        log::set_logger(&DIAGNOSTICS).unwrap();
++        let _ = log::set_logger(&DIAGNOSTICS);
+         log::set_max_level(log::LevelFilter::Debug);
+         let context=Rc::new(GraphicsContext::new_gl());
+         let adapter=context.adapter.get_info();
+@@ -984,4 +1048,223 @@ mod staging_correctness_tests {
+           }
+         }
+     }
++
++    unsafe fn read_eye(context: &GraphicsContext, target: glow::Texture, size: UVec2) -> Vec<u8> {
++        context.make_current();
++        let gl = &context.gl_context;
++        let fbo = gl.create_framebuffer().unwrap();
++        gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(fbo));
++        gl.framebuffer_texture_2d(glow::READ_FRAMEBUFFER, glow::COLOR_ATTACHMENT0,
++            glow::TEXTURE_2D, Some(target), 0);
++        assert_eq!(gl.check_framebuffer_status(glow::READ_FRAMEBUFFER), glow::FRAMEBUFFER_COMPLETE);
++        gl.bind_buffer(glow::PIXEL_PACK_BUFFER, None);
++        gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
++        gl.pixel_store_i32(glow::PACK_ROW_LENGTH, 0);
++        gl.pixel_store_i32(glow::PACK_SKIP_ROWS, 0);
++        gl.pixel_store_i32(glow::PACK_SKIP_PIXELS, 0);
++        let mut bytes = vec![0; (size.x * size.y * 4) as usize];
++        gl.read_pixels(0, 0, size.x as i32, size.y as i32, glow::RGBA, glow::UNSIGNED_BYTE,
++            glow::PixelPackData::Slice(Some(&mut bytes)));
++        crate::check_error(gl, "software direct FFE readback");
++        gl.bind_framebuffer(glow::READ_FRAMEBUFFER, None);
++        gl.delete_framebuffer(fbo);
++        bytes
++    }
++
++    #[test]
++    fn software_gles_direct_ffe_matches_production_wgsl_spatial_both_eyes_and_center_update() {
++        assert_eq!(std::env::var("LIBGL_ALWAYS_SOFTWARE").as_deref(), Ok("1"));
++        let context = Rc::new(GraphicsContext::new_gl());
++        assert_eq!(context.adapter.get_info().device_type, wgpu::DeviceType::Cpu);
++        let gl = &context.gl_context;
++        let version = unsafe { gl.get_parameter_string(glow::VERSION) };
++        assert!(version.starts_with("OpenGL ES"), "external-image regression requires real GLES, got {version}");
++        // Includes a half-texel Light phase, unequal axes and allocation padding.
++        let expanded = UVec2::new(176, 160);
++        for profile in [FoveationProfile::Light, FoveationProfile::Medium, FoveationProfile::H264Fit] {
++          for format in [glow::RGBA8, glow::SRGB8_ALPHA8] {
++            let cfg = config(profile.clone());
++            let (packed, _) = foveated_encoding_shader_constants(expanded, cfg.clone());
++            unsafe {
++                context.make_current();
++                let staging_targets = [texture(gl, expanded.x, expanded.y, format, None),
++                    texture(gl, expanded.x, expanded.y, format, None)];
++                let direct_targets = [texture(gl, expanded.x, expanded.y, format, None),
++                    texture(gl, expanded.x, expanded.y, format, None)];
++                let make_renderer = |targets: [glow::Texture; 2]| StreamRenderer::new(
++                    Rc::clone(&context), expanded, expanded,
++                    [vec![targets[0].0.get()], vec![targets[1].0.get()]], format, Some(cfg.clone()),
++                    format == glow::SRGB8_ALPHA8, false, 1.0, None);
++                let mut staging = make_renderer(staging_targets);
++                staging.set_import_copy_sync(true);
++                staging.set_staging_initialization(true);
++                staging.set_staging_isolation(true);
++                let mut direct = make_renderer(direct_targets);
++                direct.set_import_copy_sync(true);
++                // Explicit off control: a requested plain copy cannot warp FFE.
++                direct.set_direct_eye_copy(true, true, false, 0, false, false, false, Some(&cfg));
++                assert!(!direct.direct_eye_enabled);
++                direct.set_direct_eye_copy(true, true, false, 0, false, false, true, Some(&cfg));
++                assert!(direct.direct_eye_enabled, "profile={profile:?} format={format}");
++                for frame in 0..3u32 {
++                    // The actual StreamRenderer update entry point writes BOTH paths.
++                    // Frame 2 is a repeat of frame 1's centre; no local gaze derivation.
++                    if frame < 2 {
++                        let shifts = if frame == 0 { [glam::Vec2::ZERO; 2] } else {
++                            [glam::vec2(0.21, -0.17), glam::vec2(-0.23, 0.19)]
++                        };
++                        staging.set_foveation_center(shifts);
++                        direct.set_foveation_center(shifts);
++                        let stored = direct.direct_eye_renderer.as_ref().unwrap().ffe_params_for_test();
++                        assert_eq!(stored, [foveated_encoding_dynamic_params(expanded, cfg.clone(), shifts[0]),
++                            foveated_encoding_dynamic_params(expanded, cfg.clone(), shifts[1])]);
++                        if frame == 1 { assert_ne!(stored[0], stored[1]); }
++                    }
++                    context.make_current();
++                    let mut pixels = Vec::new();
++                    for y in 0..packed.y { for x in 0..packed.x * 2 {
++                        let eye = x / packed.x;
++                        let px = x % packed.x;
++                        // Smooth gradients, one-texel lines, asymmetric per-eye
++                        // structure, every edge/seam and changing frame content.
++                        let r = 32 + (px * 160 / packed.x) as u8;
++                        let g = 32 + (y * 160 / packed.y) as u8;
++                        let b = if (px + eye * 5 + frame * 3) % 13 == 0 || y % 17 == eye {
++                            224
++                        } else { 48 + (eye * 96 + frame * 12) as u8 };
++                        pixels.extend_from_slice(&[r, g, b, 255]);
++                    }}
++                    let source = texture(gl, packed.x * 2, packed.y, glow::RGBA8, Some(&pixels));
++                    gl.bind_texture(glow::TEXTURE_2D, None);
++                    gl.finish();
++                    let attrs = super::super::image_import_attributes(true).unwrap();
++                    let image = (context.create_image)(context.egl_display.as_ptr(), context.egl_context.as_ptr(),
++                        0x30B1, source.0.get() as usize as *mut _, attrs.as_ptr());
++                    assert!(!image.is_null());
++                    staging.staging_renderer.render_egl_image_for_test(image);
++                    let fov = Fov { left: -0.7, right: 0.7, up: 0.7, down: -0.7 };
++                    staging.render(ptr::null_mut(), [
++                        StreamViewParams { swapchain_index: 0, reprojection_rotation: Quat::IDENTITY, fov },
++                        StreamViewParams { swapchain_index: 0, reprojection_rotation: Quat::IDENTITY, fov }], None);
++                    context.make_current();
++                    direct.direct_eye_renderer.as_ref().unwrap().render_egl_image_for_test(image);
++                    for eye in 0..2 {
++                        let reference = read_eye(&context, staging_targets[eye], expanded);
++                        let actual = read_eye(&context, direct_targets[eye], expanded);
++                        assert!(reference.chunks_exact(4).any(|p| p[0] > 100 && p[1] > 100),
++                            "spatial reference must be populated");
++                        for (index, (a, b)) in actual.iter().zip(&reference).enumerate() {
++                            assert!((i16::from(*a) - i16::from(*b)).abs() <= 2,
++                                "profile={profile:?} format={format} frame={frame} eye={eye} x={} y={} channel={} direct={a} wgsl={b}",
++                                index / 4 % expanded.x as usize, index / 4 / expanded.x as usize, index % 4);
++                        }
++                        // The explicit flip control must change this asymmetric image.
++                        assert_ne!(&actual[..expanded.x as usize * 4],
++                            &actual[actual.len() - expanded.x as usize * 4..]);
++                    }
++                    (context.destroy_image)(context.egl_display.as_ptr(), image);
++                    gl.delete_texture(source);
++                }
++                drop(direct); drop(staging);
++                context.make_current();
++                for target in staging_targets.into_iter().chain(direct_targets) { gl.delete_texture(target); }
++            }
++          }
++        }
++    }
++
++}
++
++
++#[cfg(test)]
++mod direct_eye_foveation_policy_tests {
++    use super::*;
++
++    fn config(profile: FoveationProfile) -> FoveatedEncodingConfig {
++        FoveatedEncodingConfig { force_enable: false, profile,
++            center_size_x: 0.2, center_size_y: 0.178, center_shift_x: 0.3, center_shift_y: -0.4,
++            edge_ratio_x: 3., edge_ratio_y: 4., peripheral_softness: 0.5,
++            blur_only: false, follow_gaze: true }.resolved_geometry()
++    }
++
++    #[test]
++    fn default_off_and_ineligible_requests_cannot_select_direct_ffe() {
++        let cfg = config(FoveationProfile::Medium);
++        let policy = |req, direct, sync, asynchronous, target, cfg, inverse|
++            direct_ffe_eligibility(req, direct, sync, asynchronous, target, cfg, inverse);
++        assert_eq!(policy(false, true, true, false, "eligible", Some(&cfg), true), "not_requested");
++        assert_eq!(policy(true, false, true, false, "eligible", Some(&cfg), true), "direct_eye_copy_required");
++        assert_eq!(policy(true, true, false, false, "eligible", Some(&cfg), true), "pyrowave_synchronous_import_required");
++        assert_eq!(policy(true, true, true, true, "eligible", Some(&cfg), true), "asynchronous_copy");
++        for target in ["upscaling", "resolution_mismatch", "unsupported_format"] {
++            assert_eq!(policy(true, true, true, false, target, Some(&cfg), true), target);
++        }
++        assert_eq!(policy(true, true, true, false, "eligible", None, false), "foveation_off");
++        assert_eq!(policy(true, true, true, false, "eligible", Some(&cfg), false), "missing_inverse_support");
++        let mut blur = cfg.clone(); blur.blur_only = true;
++        assert_eq!(policy(true, true, true, false, "eligible", Some(&blur), false), "blur_only");
++        let custom = config(FoveationProfile::Custom);
++        assert_eq!(policy(true, true, true, false, "eligible", Some(&custom), true), "custom_profile");
++        for profile in [FoveationProfile::Light, FoveationProfile::Medium, FoveationProfile::H264Fit] {
++            let cfg = config(profile);
++            assert!(!cfg.follow_gaze);
++            assert_eq!((cfg.center_shift_x, cfg.center_shift_y), (0., 0.));
++            assert_eq!(policy(true, true, true, false, "eligible", Some(&cfg), true), "eligible");
++        }
++    }
++
++    #[test]
++    fn shader_constants_match_wgsl_and_independent_wo8_geometry_fixtures() {
++        // Expected allocations independently evaluated by the WO-8 Python /
++        // server reference, including Light's centre-phase regression crop.
++        for (expanded, expected) in [
++            (UVec2::new(176, 160), [(192,160), (160,128), (160,128)]),
++            (UVec2::new(2624, 2752), [(2464,2592), (2112,2208), (1984,2080)]),
++            (UVec2::new(3072, 3232), [(2880,3040), (2464,2592), (2304,2432)]),
++        ] {
++          for (index, profile) in [FoveationProfile::Light, FoveationProfile::Medium, FoveationProfile::H264Fit].into_iter().enumerate() {
++            let cfg = config(profile);
++            let ffe = DirectEyeFoveation::new(expanded, cfg.clone());
++            assert!(ffe.valid());
++            assert_eq!((ffe.packed.x, ffe.packed.y), expected[index]);
++            let (packed, wgsl) = foveated_encoding_shader_constants(expanded, cfg.clone());
++            assert_eq!(packed, ffe.packed);
++            for (actual, x, y) in [
++                (ffe.view_ratio, "VIEW_WIDTH_RATIO", "VIEW_HEIGHT_RATIO"),
++                (ffe.edge_ratio, "EDGE_X_RATIO", "EDGE_Y_RATIO"),
++                (ffe.c2, "C2_X", "C2_Y"),
++            ] {
++                assert_eq!([actual[0].to_bits(), actual[1].to_bits()],
++                    [(wgsl[x] as f32).to_bits(), (wgsl[y] as f32).to_bits()]);
++            }
++            // Independent scalar f64 derivation checks the actual uniform
++            // values, beyond checking that the two consumers share a helper.
++            for axis in 0..2 {
++                let n = [expanded.x, expanded.y][axis] as f64;
++                let enc = [ffe.packed.x, ffe.packed.y][axis] as f64;
++                let c = cfg.center_size_x as f64;
++                let r = cfg.edge_ratio_x as f64;
++                let aligned = 1. - ((n - c * n) / (r * 2.)).ceil() * r * 2. / n;
++                let expected_ratio = (aligned + (1. - aligned) / r) * n / enc;
++                assert!((ffe.view_ratio[axis] as f64 - expected_ratio).abs() < 1e-6);
++                assert!((ffe.c2[axis] as f64 - ((r - 1.) * aligned + 1.)).abs() < 1e-6);
++            }
++            let initial = foveated_encoding_dynamic_params(expanded, cfg.clone(), glam::Vec2::ZERO);
++            assert_eq!(ffe.params, [initial; 2]);
++            let bytes = ffe_params_bytes(ffe.params);
++            for eye in 0..2 { for (i, value) in ffe.params[eye].iter().enumerate() {
++                let offset = (eye * 16 + i) * 4;
++                assert_eq!(&bytes[offset..offset + 4], &value.to_le_bytes());
++            }}
++            if expanded.x == 2624 {
++                let intercept = ffe.params[0][0] * expanded.x as f32;
++                let phase = (intercept + (0.5 - 1e-4)).floor() - intercept;
++                let expected = if index == 0 { -0.5 } else { 0. };
++                assert!((phase - expected).abs() < 5e-4, "Light phase must survive uniform delivery");
++            }
++          }
++        }
++        let invalid = DirectEyeFoveation::new(UVec2::ZERO, config(FoveationProfile::Light));
++        assert!(!invalid.valid());
++    }
+ }

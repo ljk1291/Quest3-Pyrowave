@@ -19,7 +19,7 @@ SUSTAINED_RATE_WINDOW_SECONDS = 300
 ENDURANCE_WINDOW_SECONDS = 300
 SELECTED_OUTPUT_SOURCE = 'selected_nonnull_post_render_release_v1'
 EXPERIMENT_PROPERTIES = (
-    'debug.q3pw.direct_eye_copy', 'debug.q3pw.async_eye_copy', 'debug.q3pw.copy_wait_us',
+    'debug.q3pw.direct_eye_copy','debug.q3pw.direct_eye_foveation', 'debug.q3pw.async_eye_copy', 'debug.q3pw.copy_wait_us',
     'debug.q3pw.raw_srgb_copy', 'debug.q3pw.image_cache', 'debug.q3pw.frame_wait_us',
     'debug.q3pw.pre_wait_poll', 'debug.q3pw.repeat_render', 'debug.q3pw.decode_workers',
     'debug.q3pw.decode_handoff', 'debug.q3pw.direct_flip_y',
@@ -353,6 +353,8 @@ def experiment_effective(state):
     integer=lambda name: int(value(name)) if value(name).strip().lstrip('-').isdigit() else 0
     enabled={
         'direct_eye_copy':value('debug.q3pw.direct_eye_copy')=='1',
+        # Requested state only; activation requires the native DIRECT_FFE marker.
+        'direct_eye_foveation':value('debug.q3pw.direct_eye_foveation')=='1',
         'async_eye_copy':value('debug.q3pw.async_eye_copy')=='1',
         'copy_wait':integer('debug.q3pw.copy_wait_us') != 0,
         'raw_srgb_copy':value('debug.q3pw.raw_srgb_copy')=='1',

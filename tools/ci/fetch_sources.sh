@@ -65,6 +65,12 @@ actual_presentation_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.s
 [ "$actual_presentation_patch" = "$expected_presentation_patch" ] || { echo "Presentation filter patch hash differs" >&2; exit 1; }
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/presentation-filters.patch"
 
+# T1 direct-eye foveation overlay touches files disjoint from T2's overlay.
+expected_direct_ffe_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value direct_eye_foveation_patch_sha256)
+actual_direct_ffe_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/direct-eye-foveation.patch")
+[ "$actual_direct_ffe_patch" = "$expected_direct_ffe_patch" ] || { echo "Direct eye foveation patch hash differs" >&2; exit 1; }
+apply_patch "$dest/ALVR-20.13.0" "$repo/patches/direct-eye-foveation.patch"
+
 checkout "$PYROWAVE_URL" "$dest/pyrowave" "$PYROWAVE_BASE"
 # pyrowave's checkout_granite.sh pins a newer Granite (9d44761), which spiked encoder p99 to 14 ms;
 # the measurements used 842d9d5, cloned here with all of its submodules.

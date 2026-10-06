@@ -55,6 +55,10 @@
     "presentation_filters": {
       "path": "patches/presentation-filters.patch",
       "sha256": "3316be0e1fb9ec453d1c40a4e7584baa8a621be901c77080b7a55061d166c044"
+    },
+    "direct_eye_foveation": {
+      "path": "patches/direct-eye-foveation.patch",
+      "sha256": "07ae473652f1f25492ff1270ccbafd0aeb87d703d85c3c6e6edf82197fc4cc5e"
     }
   },
   "rust": "1.97.1",

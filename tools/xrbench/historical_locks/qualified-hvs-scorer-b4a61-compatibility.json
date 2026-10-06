@@ -108,6 +108,18 @@
       "old": null,
       "new": "5669391d973c8b399f053d93335bd796ab2107a6476b6d8674b18187bb9c75ee",
       "role": "alvr_presentation_and_geometry_only"
+    },
+    {
+      "path": "patches.direct_eye_foveation.path",
+      "old": null,
+      "new": "patches/direct-eye-foveation.patch",
+      "role": "alvr_presentation_and_geometry_only"
+    },
+    {
+      "path": "patches.direct_eye_foveation.sha256",
+      "old": null,
+      "new": "07ae473652f1f25492ff1270ccbafd0aeb87d703d85c3c6e6edf82197fc4cc5e",
+      "role": "alvr_presentation_and_geometry_only"
     }
   ]
 }

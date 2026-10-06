@@ -1133,3 +1133,27 @@ uncommitted because the sandbox denies the linked worktree's external Git index
 lock. No hardware, GPU benchmark, install, arm or system/headset/VR setting action
 occurred. Runtime acceptance, standalone decode budget and sustained live 90 Hz
 are separately unverified. Owner-supervised in-headset sign-off remains required.
+
+### 2026-10-06 — T1 direct-eye foveation source candidate
+
+Prepared the default-off `debug.q3pw.direct_eye_foveation` overlay on
+`codex/t1-direct-eye-foveation`, base `6ee1ba5`. It reuses WO-8's production
+constants and per-eye centre parameters in the direct-eye fragment draw,
+including Light's centre phase; the server and existing default paths are
+unchanged. Native requested/effective/geometry/reason and actual draw-path
+markers distinguish activation from staging fallback. Upstream MIT mechanism
+attribution is pinned to `2de8ad13973ed9c3a8e72f4c85a79e1e7e5d085a`.
+
+The [source evidence](../results/t1-direct-eye-foveation-source-2026-10-06.json)
+records local CPU/reference checks, exact overlay reconstruction and remaining
+gates. The existing PR #58 software GLES gate now contains spatial patterns,
+all three profiles, both eyes, two formats, a non-zero per-eye centre update and
+a retained-centre repeat; Rust policy/constants checks precede it. Native
+compilation and software GLES execution remain for the orchestrator's manual
+`.github/workflows/ci.yml` dispatch (`cpu_only=false`), followed by matching-pair
+verification and the separately authorized owner-supervised chart check in
+[the checklist](Q3-HEADSET-CHECKLIST.md). The checklist was absent at this branch
+base and is carried forward from the main checkout with authorization text intact.
+No ADB, install, device/VR/GPU work, settings changes, arm-file operation, push or
+PR occurred. Runtime rate acceptance, standalone decode budget and sustained
+live VR remain unverified; no profile or default is promoted.
