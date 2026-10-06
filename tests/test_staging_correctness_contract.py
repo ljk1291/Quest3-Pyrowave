@@ -28,6 +28,9 @@ class StagingCorrectnessContract(unittest.TestCase):
                      'default_import_is_unchanged_and_preservation_is_explicit',
                      'pub fn set_staging_initialization',
                      'raw copy must be correct before WGPU',
+                     'software source upload must be correct before EGL import',
+                     'gl.pixel_store_i32(glow::UNPACK_ROW_LENGTH,0)',
+                     'gl.pixel_store_i32(glow::PACK_ROW_LENGTH,0)',
                      'Explicit reproduction control, not a correctness pass.',
                      '.filter(|c| !c.blur_only).map(|c| c.resolved_geometry())'):
             self.assertIn(text,patch)

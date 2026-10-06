@@ -69,6 +69,11 @@ Rust staging draw, actual WGSL
 inverse mapping and actual projection transform. An owned GL texture becomes
 an explicitly **preserved** EGLImage source; without that attribute a GL-texture
 source's existing pixels are undefined and cannot form a correctness oracle.
+The fixture also resets pixel-unpack row stride before its CPU source upload:
+the one-texel WGPU initialization leaves that stride at one. A source-pixel check
+precedes EGL import. Each frame uses a fresh GL source, avoiding recreation from
+an existing EGLImage sibling. These are fixture corrections, not changes to
+the Vulkan/AHB producer or evidence of a live encoder fault.
 It checks every output pixel for both eyes for all three
 fixed profiles and both output formats, with initialization and isolation off
 and on across two changing frames. Initialization-off's first black frame is

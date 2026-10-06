@@ -253,7 +253,7 @@ index 779de33ca83d78d9b52c92193b54f60b00056503..0e8eca139857ba340782300824f20555
              ck!(gl.delete_texture(self.surface_texture));
              for framebuffer in &self.framebuffers {
 diff --git a/alvr/graphics/src/stream.rs b/alvr/graphics/src/stream.rs
-index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..07293fb2d075a57d845fcadc82acf68e34dd3ea7 100644
+index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..1f41570fd3179c0ba5ec72cae005b0170ff64e0b 100644
 --- a/alvr/graphics/src/stream.rs
 +++ b/alvr/graphics/src/stream.rs
 @@ -4,6 +4,7 @@ use alvr_common::{
@@ -375,7 +375,7 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..07293fb2d075a57d845fcadc82acf68e
      pub fn last_copy_was_direct(&self) -> bool { self.last_copy_direct.get() }
  
      pub fn poll_import_copy(&self) -> (bool, Option<f32>) {
-@@ -720,3 +776,195 @@ pub fn compute_target_view_resolution(
+@@ -720,3 +776,212 @@ pub fn compute_target_view_resolution(
      }
      target_resolution.as_uvec2()
  }
@@ -401,6 +401,10 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..07293fb2d075a57d845fcadc82acf68e
 +
 +    unsafe fn texture(gl: &glow::Context, width: u32, height: u32, format: u32, data: Option<&[u8]>) -> glow::Texture {
 +        gl.bind_buffer(glow::PIXEL_UNPACK_BUFFER,None);
++        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT,1);
++        gl.pixel_store_i32(glow::UNPACK_ROW_LENGTH,0);
++        gl.pixel_store_i32(glow::UNPACK_SKIP_ROWS,0);
++        gl.pixel_store_i32(glow::UNPACK_SKIP_PIXELS,0);
 +        let tex=gl.create_texture().unwrap();
 +        gl.bind_texture(glow::TEXTURE_2D,Some(tex));
 +        gl.tex_parameter_i32(glow::TEXTURE_2D,glow::TEXTURE_MIN_FILTER,glow::LINEAR as i32);
@@ -420,6 +424,10 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..07293fb2d075a57d845fcadc82acf68e
 +            raw
 +        });
 +        context.make_current();
++        raw_texture_pixel(context, raw, x, y)
++    }
++
++    unsafe fn raw_texture_pixel(context: &GraphicsContext, raw: glow::Texture, x: i32, y: i32) -> [u8; 4] {
 +        let gl = &context.gl_context;
 +        let fbo = gl.create_framebuffer().unwrap();
 +        gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(fbo));
@@ -427,6 +435,10 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..07293fb2d075a57d845fcadc82acf68e
 +            glow::TEXTURE_2D, Some(raw), 0);
 +        assert_eq!(gl.check_framebuffer_status(glow::READ_FRAMEBUFFER), glow::FRAMEBUFFER_COMPLETE);
 +        gl.bind_buffer(glow::PIXEL_PACK_BUFFER, None);
++        gl.pixel_store_i32(glow::PACK_ALIGNMENT,1);
++        gl.pixel_store_i32(glow::PACK_ROW_LENGTH,0);
++        gl.pixel_store_i32(glow::PACK_SKIP_ROWS,0);
++        gl.pixel_store_i32(glow::PACK_SKIP_PIXELS,0);
 +        let mut pixel = [0; 4];
 +        gl.read_pixels(x, y, 1, 1, glow::RGBA, glow::UNSIGNED_BYTE,
 +            glow::PixelPackData::Slice(Some(&mut pixel)));
@@ -470,7 +482,6 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..07293fb2d075a57d845fcadc82acf68e
 +                let (packed,_) = foveated_encoding_shader_constants(expanded,cfg.clone());
 +                unsafe {
 +                    context.make_current();
-+                    let source=texture(gl,packed.x*2,packed.y,glow::RGBA8,None);
 +                    let targets=[texture(gl,160,160,format,None),texture(gl,160,160,format,None)];
 +                    let mut renderer=StreamRenderer::new(Rc::clone(&context),expanded,expanded,
 +                        [vec![targets[0].0.get()],vec![targets[1].0.get()]],format,
@@ -485,16 +496,22 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..07293fb2d075a57d845fcadc82acf68e
 +                    } else { [[32u8,176,80,255],[208u8,64,144,255]] };
 +                    let pixels=(0..packed.y).flat_map(|_| (0..packed.x*2)
 +                        .flat_map(|x| colors[usize::from(x>=packed.x)])).collect::<Vec<_>>();
-+                    gl.bind_buffer(glow::PIXEL_UNPACK_BUFFER,None);
-+                    gl.bind_texture(glow::TEXTURE_2D,Some(source));
-+                    gl.tex_sub_image_2d(glow::TEXTURE_2D,0,0,0,(packed.x*2) as i32,
-+                        packed.y as i32,glow::RGBA,glow::UNSIGNED_BYTE,
-+                        glow::PixelUnpackData::Slice(Some(&pixels)));
++                    // WGPU's one-texel initialization leaves UNPACK_ROW_LENGTH=1.
++                    // A CPU-uploaded fixture must reset unpack state explicitly;
++                    // the actual Vulkan/AHB producer does not use this upload.
++                    // A fresh GL source also avoids recreating an EGLImage from
++                    // an existing GL-texture sibling on the next frame.
++                    let source=texture(gl,packed.x*2,packed.y,glow::RGBA8,Some(&pixels));
 +                    // The real producer is Vulkan/AHB, not a GL source bound in
 +                    // this context. Do not carry a fixture-only 2D binding into
 +                    // the production external-texture draw.
 +                    gl.bind_texture(glow::TEXTURE_2D,None);
 +                    gl.finish();
++                    for eye in 0..2 {
++                        let x=(eye as u32*packed.x+packed.x/2) as i32;
++                        assert_eq!(raw_texture_pixel(&context,source,x,(packed.y/2) as i32),colors[eye],
++                            "software source upload must be correct before EGL import");
++                    }
 +                    let image_attributes = super::super::image_import_attributes(true).unwrap();
 +                    let image=(context.create_image)(context.egl_display.as_ptr(),
 +                        context.egl_context.as_ptr(),0x30B1, // EGL_GL_TEXTURE_2D_KHR
@@ -512,6 +529,7 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..07293fb2d075a57d845fcadc82acf68e
 +                    }
 +                    renderer.staging_renderer.render_egl_image_for_test(image);
 +                    (context.destroy_image)(context.egl_display.as_ptr(),image);
++                    gl.delete_texture(source);
 +                    let init_control = !initialize && !isolated && fresh_frame == 0
 +                        && profile == FoveationProfile::Light && format == glow::RGBA8;
 +                    if init_control {
@@ -562,7 +580,6 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..07293fb2d075a57d845fcadc82acf68e
 +                    gl.delete_framebuffer(fbo);
 +                   }
 +                    drop(renderer);
-+                    gl.delete_texture(source);
 +                    for target in targets { gl.delete_texture(target); }
 +                }
 +            }
