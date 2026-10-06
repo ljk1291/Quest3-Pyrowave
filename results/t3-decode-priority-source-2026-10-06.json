@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "kind": "source_cpu_check_record",
+  "date": "2026-10-06",
+  "branch": "codex/t3-decode-priority",
+  "base_commit": "6ee1ba5",
+  "adapted_from": {
+    "repository": "JMS1717/Quest3-Pyrowave",
+    "commit": "8fb4656c3949b9538b22286a9a2068b98fa0ed75",
+    "file": "tools/pyroclient/pyroclient.cpp",
+    "mechanism": "Vulkan global-priority queue create info, KHR/EXT selection and default device retry",
+    "license": "MIT"
+  },
+  "review_reference": "2de8ad13973ed9c3a8e72f4c85a79e1e7e5d085a",
+  "checks": [
+    {
+      "command": "python -B -m unittest discover -s tests -q",
+      "environment": "existing benchmark Python environment",
+      "passed": 111,
+      "skipped": 1,
+      "failed": 0,
+      "skip_reason": "No host g++ or clang++ on PATH; native decode_priority_test.cpp remains a CI gate"
+    },
+    {
+      "command": "python -B -m pytest tools/tests/test_ci_pins.py tools/tests/test_build_metadata.py tools/tests/test_build_scripts.py -q",
+      "environment": "existing validation Python environment",
+      "passed": 33,
+      "skipped": 4,
+      "failed": 0,
+      "skip_reason": "External reconstructed source directories/workspace layout unavailable locally"
+    },
+    {
+      "command": "python -B -m pytest tools/tests/test_markdown_links.py tools/tests/test_privacy.py tools/tests/test_readme_toggles.py -q",
+      "passed": 3,
+      "skipped": 1,
+      "failed": 4,
+      "scope": "extra legacy checks outside the changed behavior",
+      "preexisting_failures": [
+        "22 archived relative links in unchanged docs/UPSTREAM-README.md",
+        "README experiment-controls table missing from the fork README",
+        "README advanced-controls table missing from the fork README",
+        "Old upstream PyroWave 4:4:4 recommended-profile expectation"
+      ],
+      "verification": "Relevant README and test files byte-identical to 6ee1ba5 after line-ending normalization"
+    },
+    {"check": "changed Markdown relative links", "result": "pass"},
+    {"check": "git diff --check", "result": "pass"}
+  ],
+  "ci": {
+    "workflow": ".github/workflows/ci.yml",
+    "dispatch_input": {"cpu_only": false},
+    "required_jobs": ["tests", "client", "streamer", "matching-pair"],
+    "status": "not dispatched; no push or PR authorized"
+  },
+  "hardware_actions": 0,
+  "performance_claim": null,
+  "t3_runtime_90hz_acceptance": null,
+  "t3_standalone_decode_budget_pass": null,
+  "t3_sustained_live_90_fresh_per_second": null,
+  "defaults_changed": false,
+  "protocol": "owner-supervised same-scene default/low/default; 5 seconds settle excluded, 20 seconds measured per arm; primary fresh post-render/release submissions per wall second and decode-to-fence p50/p95"
+}

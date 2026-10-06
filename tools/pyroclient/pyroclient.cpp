@@ -2,6 +2,7 @@
 // the Adreno 740; the harness stays as the record and the scoring tool.
 #include "pyroclient.h"
 #include "decode_path.h"
+#include "decode_priority.h"
 #include "gpu_failure_policy.h"
 #include "pass_profile.h"
 
@@ -105,13 +106,14 @@ struct pyroclient {
     VkApplicationInfo app_info{};
     VkInstanceCreateInfo instance_info{};
     float queue_priority = 1.0f;
+    VkDeviceQueueGlobalPriorityCreateInfoKHR queue_global_priority{};
     VkDeviceQueueCreateInfo queue_info{};
     VkPhysicalDeviceVulkan13Features f13{};
     VkPhysicalDeviceVulkan12Features f12{};
     VkPhysicalDeviceVulkan11Features f11{};
     VkPhysicalDeviceFeatures2 f2{};
     VkDeviceCreateInfo device_info{};
-    const char *device_extensions[2] = {
+    std::vector<const char *> device_extensions = {
         VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME,
         VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
     };
@@ -250,9 +252,62 @@ bool pyroclient::create_device() {
     device_info.pNext = &f2;
     device_info.queueCreateInfoCount = 1;
     device_info.pQueueCreateInfos = &queue_info;
-    device_info.enabledExtensionCount = 2;
-    device_info.ppEnabledExtensionNames = device_extensions;
-    VK_TRY(vkCreateDevice(gpu, &device_info, nullptr, &device));
+    // Read once for this decoder, including standalone pyroclient_test. Unset/default
+    // leaves the existing graphics-family queue and both original extensions unchanged.
+    char priority_property[PROP_VALUE_MAX] = {};
+    __system_property_get("debug.q3pw.decode_priority", priority_property);
+    const auto requested_priority = parse_decode_priority(priority_property);
+    const char *available_priority_extension = nullptr;
+    bool extension_query_failed = false;
+    if (requested_priority.priority != DecodeQueuePriority::Default) {
+        uint32_t count = 0;
+        VkResult enumerated = vkEnumerateDeviceExtensionProperties(gpu, nullptr, &count, nullptr);
+        std::vector<VkExtensionProperties> available;
+        // Enumeration may grow between calls. Retry VK_INCOMPLETE, with a finite bound.
+        for (unsigned attempt = 0; enumerated == VK_SUCCESS && attempt < 3; ++attempt) {
+            available.resize(count);
+            enumerated = vkEnumerateDeviceExtensionProperties(gpu, nullptr, &count, available.data());
+            if (enumerated != VK_INCOMPLETE) break;
+            if (attempt < 2)
+                enumerated = vkEnumerateDeviceExtensionProperties(gpu, nullptr, &count, nullptr);
+        }
+        if (enumerated == VK_SUCCESS && count <= available.size()) {
+            bool khr = false, ext = false;
+            for (uint32_t i = 0; i < count; ++i) {
+                khr |= !strcmp(available[i].extensionName, VK_KHR_GLOBAL_PRIORITY_EXTENSION_NAME);
+                ext |= !strcmp(available[i].extensionName, VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME);
+            }
+            available_priority_extension = decode_priority_extension(khr, ext);
+        } else {
+            extension_query_failed = true;
+            LOGE("[Q3PW_DECODE_PRIORITY] extension enumeration failed result=%d", int(enumerated));
+        }
+    }
+    // All create-info storage survives the borrowed PyroWave device. A failed priority
+    // attempt retries once with the original pNext and extension list, never a partial device.
+    const size_t default_extension_count = device_extensions.size();
+    const auto priority = create_decode_priority_device(requested_priority, available_priority_extension,
+        [&](DecodeQueuePriority choice, const char *extension) -> int32_t {
+            device_extensions.resize(default_extension_count);
+            queue_info.pNext = nullptr;
+            if (extension) {
+                queue_global_priority = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO_KHR };
+                queue_global_priority.globalPriority = choice == DecodeQueuePriority::Low ? VK_QUEUE_GLOBAL_PRIORITY_LOW_KHR :
+                    choice == DecodeQueuePriority::High ? VK_QUEUE_GLOBAL_PRIORITY_HIGH_KHR : VK_QUEUE_GLOBAL_PRIORITY_MEDIUM_KHR;
+                queue_info.pNext = &queue_global_priority;
+                device_extensions.push_back(extension);
+            }
+            device_info.enabledExtensionCount = uint32_t(device_extensions.size());
+            device_info.ppEnabledExtensionNames = device_extensions.data();
+            device = VK_NULL_HANDLE;
+            return int32_t(vkCreateDevice(gpu, &device_info, nullptr, &device));
+        });
+    LOGI("[Q3PW_DECODE_PRIORITY] requested=%s effective=%s extension=%s fallback=%s applied=%d "
+         "family=%u queue_index=0 local_priority=%.1f first_result=%d result=%d proof=vkCreateDevice",
+         requested_priority.name, priority.effective, priority.extension,
+         extension_query_failed ? "extension_query_failed" : priority.fallback, int(priority.applied),
+         family, queue_priority, int(priority.first_result), int(priority.result));
+    VK_TRY(static_cast<VkResult>(priority.result));
     vkGetDeviceQueue(device, family, 0, &queue);
 
     // Experiment 2: debug.xrwired.pyro_precision = 0|1|2 selects PyroWave's math /

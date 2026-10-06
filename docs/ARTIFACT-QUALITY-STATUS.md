@@ -1083,3 +1083,26 @@ remain fixed; current codec and historical scorer lock identities stay separate.
 Eight new cells, the combined 32-row report, stable-signed pair verification and
 final owner checklist remain pending. No headset, settings or installed-pair
 operation occurred. The baseline remains unchanged.
+
+### 2026-10-06 — T3 opt-in decode queue priority source checkpoint
+
+On `codex/t3-decode-priority`, based on `6ee1ba5`, added native initialization-only
+`debug.q3pw.decode_priority=low|medium|high`. Unset/default preserves the existing
+queue; missing/refused extensions fall back to original MEDIUM with
+`[Q3PW_DECODE_PRIORITY]` requested/effective/extension/fallback and Vulkan results.
+The upstream request/retry adaptation is pinned in NOTICE to
+`8fb4656c3949b9538b22286a9a2068b98fa0ed75`; review reference is
+`2de8ad13973ed9c3a8e72f4c85a79e1e7e5d085a`.
+[Policy, source audit and owner-supervised off/on/off proposal](DECODE-PRIORITY.md).
+Frame-wait/pre-wait defaults remain unchanged; LPAC, eye invalidate and XR thread
+hints were reviewed only and have no upstream hardware result at that reference.
+Local CPU/software checks: 111 passed/one compiler skip in the full unittest suite;
+33 passed/four external-layout skips in pin/metadata/build-script pytest checks.
+Extra legacy checks retain four pre-existing README/link failures; changed links
+and diff whitespace pass. [Check record](../results/t3-decode-priority-source-2026-10-06.json).
+Native host/Android compilation and full `tests/client/streamer/matching-pair` CI
+remain pending. No push/PR, ADB, installation, VR/GPU run, settings or arm use.
+LOW is an A/B candidate: upstream reduced eye-copy waits but lengthened decode,
+so our completion-bound Godlike workload may regress. Runtime acceptance,
+standalone 11.11-ms completion and sustained live 90 fresh/s remain separate,
+unverified T3 gates. No default or active-queue promotion.

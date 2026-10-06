@@ -23,6 +23,7 @@ EXPERIMENT_PROPERTIES = (
     'debug.q3pw.raw_srgb_copy', 'debug.q3pw.image_cache', 'debug.q3pw.frame_wait_us',
     'debug.q3pw.pre_wait_poll', 'debug.q3pw.repeat_render', 'debug.q3pw.decode_workers',
     'debug.q3pw.decode_handoff', 'debug.q3pw.direct_flip_y',
+    'debug.q3pw.decode_priority',
     'debug.oculus.forceDisplayScaling', 'debug.oculus.refreshRate',
     'debug.q3pw.haar_fused','debug.q3pw.dequant_batch','debug.q3pw.convert_compute',
     'debug.q3pw.fragment_min_usage','debug.q3pw.optimal_ahb_usage','debug.q3pw.loop_probe',
@@ -361,6 +362,7 @@ def experiment_effective(state):
         'repeat_render':value('debug.q3pw.repeat_render')=='1',
         'decode_workers':value('debug.q3pw.decode_workers')=='2',
         'decode_handoff':value('debug.q3pw.decode_handoff')=='1',
+        'decode_priority':value('debug.q3pw.decode_priority') in ('low', 'medium', 'high'),
         'display_scaling':(value('debug.oculus.forceDisplayScaling') == '1'
                            or value('debug.oculus.refreshRate') != ''),
         'haar_fused':value('debug.q3pw.haar_fused')=='1',
@@ -376,6 +378,8 @@ def experiment_effective(state):
     }
     # direct_flip_y is recorded but not treated as an opt-in experiment: source defaults it true.
     return {'raw':raw,'verified':True,'enabled':enabled,
+            # Property readback proves only the request; use the native marker for the grant.
+            'requested_decode_priority':value('debug.q3pw.decode_priority') or 'unset',
             'effective_decode_workers':2 if enabled['decode_workers'] else 1,
             'effective_direct_flip_y':value('debug.q3pw.direct_flip_y')!='0',
             'effective_pyro_precision':value('debug.xrwired.pyro_precision') or '1',
