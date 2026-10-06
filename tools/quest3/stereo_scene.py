@@ -5,6 +5,7 @@ Requires: pip install numpy opencv-python openvr glfw PyOpenGL
 """
 import argparse
 import json
+import math
 import time
 from pathlib import Path
 
@@ -146,6 +147,9 @@ def build_parser():
                         help='Pin source-eye texture geometry instead of querying SteamVR')
     parser.add_argument('--pulse', action='store_true', help='Add a changing 10 Hz counter to detect stale imported pixels; separate from FPS measurement')
     parser.add_argument('--stop-file', type=Path, help='End gracefully when this file appears; duration remains a hard limit')
+    parser.add_argument('--sway', type=float, default=0, metavar='PIXELS',
+                        help='Move the whole chart smoothly (sub-pixel, bilinear): PIXELS horizontal amplitude over 1.2 s, '
+                             'half that vertically over 1.7 s. Gives inter-frame codecs real motion to code.')
     return parser
 
 
@@ -162,6 +166,8 @@ def validate_args(parser, args):
         parser.error('--source-eye WIDTH HEIGHT must both be positive')
     if args.stop_file and args.stop_file.exists():
         parser.error('Stop file already exists; use a fresh path')
+    if not 0 <= args.sway <= 512:
+        parser.error('--sway must be 0-512 pixels')
     return args
 
 
@@ -176,6 +182,7 @@ def scene_metadata(args, width, height, projections):
         'normalized_chart': args.normalized_chart,
         'reference_canvas_eye': list(REFERENCE_CANVAS_EYE) if args.normalized_chart else None,
         'pulse': args.pulse,
+        'sway_pixels': args.sway,
         'projections': projections,
     }
 
@@ -202,6 +209,7 @@ def main():
         width, height = args.source_eye or system.getRecommendedRenderTargetSize()
         textures = []
         pulse_textures = []
+        sway_targets = []
         projections = []
         for eye, label, color in [(openvr.Eye_Left, 'LEFT', (32, 32, 200)),
                                   (openvr.Eye_Right, 'RIGHT', (200, 64, 32))]:
@@ -222,8 +230,26 @@ def main():
             GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
             GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA8, width, height, 0,
                             GL.GL_RGB, GL.GL_UNSIGNED_BYTE, np.ascontiguousarray(image[:, :, ::-1]))
+            submitted = texture
+            if args.sway:
+                # Draw the chart through an FBO with shifted, wrapping texture coordinates each frame.
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_REPEAT)
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_REPEAT)
+                submitted = GL.glGenTextures(1)
+                GL.glBindTexture(GL.GL_TEXTURE_2D, submitted)
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
+                GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA8, width, height, 0,
+                                GL.GL_RGB, GL.GL_UNSIGNED_BYTE, None)
+                fbo = GL.glGenFramebuffers(1)
+                GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, fbo)
+                GL.glFramebufferTexture2D(GL.GL_FRAMEBUFFER, GL.GL_COLOR_ATTACHMENT0, GL.GL_TEXTURE_2D, submitted, 0)
+                if GL.glCheckFramebufferStatus(GL.GL_FRAMEBUFFER) != GL.GL_FRAMEBUFFER_COMPLETE:
+                    raise RuntimeError('Sway framebuffer incomplete')
+                GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+                sway_targets.append((texture, fbo))
             vr_texture = openvr.Texture_t()
-            vr_texture.handle = int(texture)
+            vr_texture.handle = int(submitted)
             vr_texture.eType = openvr.TextureType_OpenGL
             vr_texture.eColorSpace = openvr.ColorSpace_Gamma
             textures.append((eye, vr_texture))
@@ -255,6 +281,21 @@ def main():
                         GL.glTexSubImage2D(GL.GL_TEXTURE_2D, 0, x, y, 512, 112,
                                           GL.GL_RGB, GL.GL_UNSIGNED_BYTE, patch)
                     pulse_events.append({'tick':tick, 'uploaded_unix_ns':time.time_ns()})
+            if sway_targets:
+                t = time.monotonic() - start
+                du = args.sway * math.sin(2 * math.pi * t / 1.2) / width
+                dv = 0.5 * args.sway * math.sin(2 * math.pi * t / 1.7) / height
+                GL.glViewport(0, 0, width, height)
+                GL.glEnable(GL.GL_TEXTURE_2D)
+                for source, fbo in sway_targets:
+                    GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, fbo)
+                    GL.glBindTexture(GL.GL_TEXTURE_2D, source)
+                    GL.glBegin(GL.GL_QUADS)
+                    for u, v, x, y in ((0, 0, -1, -1), (1, 0, 1, -1), (1, 1, 1, 1), (0, 1, -1, 1)):
+                        GL.glTexCoord2f(u + du, v + dv)
+                        GL.glVertex2f(x, y)
+                    GL.glEnd()
+                GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
             for eye, texture in textures:
                 compositor.submit(eye, texture, bounds)
             GL.glFlush(); frames += 1
