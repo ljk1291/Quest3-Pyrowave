@@ -87,6 +87,18 @@ def test_live_rdo_readback_patches_are_pinned_and_applied_after_their_stacks():
             < script.index('apply_patch "$dest/ALVR-20.13.0" "$repo/patches/alvr-pyrowave-rdo-session-setting.patch"'))
 
 
+def test_frame_loss_overlay_is_pinned_and_applied_last():
+    import hashlib
+
+    expected = LOCK['patches']['frame_loss_diagnostics']
+    assert expected['path'] == 'patches/frame-loss-diagnostics.patch'
+    assert expected['sha256'] == hashlib.sha256((REPO / expected['path']).read_bytes()).hexdigest()
+    script = (REPO / 'tools/ci/fetch_sources.sh').read_text()
+    assert script.index('apply_patch "$dest/ALVR-20.13.0" "$repo/patches/foveation-shader-linkage.patch"') < script.index(
+        '--value frame_loss_diagnostics_patch_sha256') < script.index(
+        'apply_patch "$dest/ALVR-20.13.0" "$repo/patches/frame-loss-diagnostics.patch"')
+
+
 def test_foveation_linkage_fix_is_pinned_and_checked_in_cpu_ci():
     import hashlib
 

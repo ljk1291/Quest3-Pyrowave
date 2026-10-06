@@ -1,5 +1,19 @@
 # Patches
 
+## `frame-loss-diagnostics.patch`: default-off frame accounting
+
+Additive overlay after `foveation-shader-linkage.patch`, SHA-256 pinned in
+`sources.lock.json`. `ALVR_FRAME_LOSS=1` (server) and
+`debug.q3pw.frame_loss=1` (client) enable cumulative per-second counters from
+encode through eye release and statistics joins. The separate client property
+`debug.q3pw.stats_source_ts=1` reports the original received timestamp to the
+statistics manager when the display timestamp was clamped. Both default off;
+no pacing, selection, decoder buffering or protocol defaults change.
+See [FRAME-LOSS-DIAGNOSIS](../docs/FRAME-LOSS-DIAGNOSIS.md) for evidence,
+counter meanings, limitations, and settings-only confirmation cells.
+The overlay extends the existing ALVR/PyroWave and JMS1717-derived paths;
+all upstream credits remain unchanged.
+
 ## `foveation-shader-linkage.patch`: server FFR fullscreen shader interface fix
 
 Additive overlay after `direct-eye-foveation.patch`, pinned in `sources.lock.json`.
