@@ -69,6 +69,12 @@ struct Warp {
         check(device->CreatePixelShader(blob->GetBufferPointer(),blob->GetBufferSize(),nullptr,&result));
         return result;
     }
+    void fullscreenVertexShader(const std::string &path) {
+        ComPtr<ID3DBlob> blob;std::wstring wide(path.begin(),path.end());
+        check(D3DReadFileToBlob(wide.c_str(),&blob));
+        check(device->CreateVertexShader(blob->GetBufferPointer(),blob->GetBufferSize(),
+                                        nullptr,vs.ReleaseAndGetAddressOf()));
+    }
     ComPtr<ID3D11Buffer> buffer(const std::vector<float> &data) {
         D3D11_BUFFER_DESC desc={};desc.ByteWidth=UINT(data.size()*sizeof(float));
         desc.Usage=D3D11_USAGE_IMMUTABLE;desc.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
@@ -103,6 +109,8 @@ struct Warp {
         for (unsigned i=0;i<targets;i++) {
             check(device->CreateTexture2D(&desc,nullptr,&textures[i]));
             check(device->CreateRenderTargetView(textures[i].Get(),nullptr,&rt[i]));pointers.push_back(rt[i].Get());
+            const float sentinel[]={.91f,.91f,.91f,1.f};
+            context->ClearRenderTargetView(rt[i].Get(),sentinel);
         }
         context->OMSetRenderTargets(targets,pointers.data(),nullptr);
         D3D11_VIEWPORT vp={0,0,float(dw),float(dh),0,1};context->RSSetViewports(1,&vp);
@@ -128,7 +136,7 @@ struct Warp {
 
 int main(int argc,char **argv) {
     try {
-        require(argc==5,"expected area, dither, foveation and adaptive CSO paths");Warp w;
+        require(argc==6,"expected area, dither, foveation, adaptive and fullscreen vertex CSO paths");Warp w;
         auto area=w.shader(argv[1]),dither=w.shader(argv[2]),foveated=w.shader(argv[3]);
         auto adaptive=w.shader(argv[4]);
         const std::vector<float> params={1,0,0,0,0,0,1,1,0,0,1,1},uv={0,0,1,1};
@@ -182,11 +190,17 @@ int main(int argc,char **argv) {
 
         // Execute the exact embedded WO-8 shader through WARP. targetResolution
         // and optimizedResolution are uint2 fields, hence their raw bit values.
+        // Use the actual production QuadVertexShader.cso. The layer fixture VS
+        // above exports UV in a different register and concealed broken linkage.
+        auto layerVertex=w.vs;
+        w.fullscreenVertexShader(argv[5]);
         // This is only a numerical shader/readback gate, never a GPU timing test.
         const std::vector<float> foveation={u32bits(8),u32bits(8),u32bits(8),u32bits(8),
             1,1,.8f,.8f,0,0,0,0,1.5f,1.5f,1,0};
-        auto fdc=w.draw(foveated.Get(),std::vector<float>(128,.37f),16,8,16,8,foveation,uv)[0];
-        for(float x:fdc) require(std::abs(x-.37f)<1e-6f,"foveation DC changed");
+        for(float level:{.37f,.73f,.11f}) {
+            auto fdc=w.draw(foveated.Get(),std::vector<float>(128,level),16,8,16,8,foveation,uv)[0];
+            for(float x:fdc) require(std::abs(x-level)<1e-6f,"foveation DC changed/unwritten");
+        }
         // c=.285714... yields loBound=.3125, exactly a pixel centre on this
         // 8-pixel eye. This catches the historical strict-predicate join hole.
         auto fjoin=foveation; fjoin[6]=fjoin[7]=2.f/7.f;
@@ -202,17 +216,12 @@ int main(int argc,char **argv) {
             204.f/224.f,204.f/224.f,.59375f,.59375f,0,0,0,0,2,2,1,0};
         std::vector<float> compressedStereo(512*256,.25f);
         for(unsigned y=0;y<256;y++) for(unsigned x=256;x<512;x++) compressedStereo[y*512+x]=.75f;
-        // Render the two compositor viewports separately, as production does.
-        // The synthetic full-screen vertex shader otherwise assigns its exact
-        // UV=.5 centre boundary pixel to the left branch. Both logical eye
-        // edges include aligned padding, so this catches a cross-eye read.
-        auto fleft=w.draw(foveated.Get(),compressedStereo,512,256,224,224,
-                          compressedFoveation,{0,0,.5f,1})[0];
-        auto fright=w.draw(foveated.Get(),compressedStereo,512,256,224,224,
-                           compressedFoveation,{.5f,0,1,1})[0];
-        for(float value:fleft) require(std::abs(value-.25f)<1e-5f,"foveation left eye crossed seam");
-        for(unsigned y=0;y<224;y++) for(unsigned x=0;x<224;x++)
-            require(std::abs(fright[y*224+x]-.75f)<1e-5f,"foveation right eye crossed seam");
+        // FFR renders both eyes in one full-output draw, unlike layer composition.
+        auto fstereo=w.draw(foveated.Get(),compressedStereo,512,256,448,224,
+                            compressedFoveation,uv)[0];
+        for(unsigned y=0;y<224;y++) for(unsigned x=0;x<448;x++)
+            require(std::abs(fstereo[y*448+x]-(x<224?.25f:.75f))<1e-5f,
+                    "foveation crossed eye seam or left output unwritten");
         // A non-flat eye proves the compressed UV/local squeeze path is active.
         // At the outer ring the Medium mapping samples farther toward the source
         // edge than identity output UV would. The 9x9 footprint is also active
@@ -222,12 +231,12 @@ int main(int argc,char **argv) {
             const float eyeX=float(x % 256)/255.f;
             compressedGradient[y*512+x]=(x<256 ? .10f+.30f*eyeX : .60f+.20f*eyeX);
         }
-        auto fgradient=w.draw(foveated.Get(),compressedGradient,512,256,224,224,
-                              compressedFoveation,{0,0,.5f,1})[0];
+        auto fgradient=w.draw(foveated.Get(),compressedGradient,512,256,448,224,
+                              compressedFoveation,uv)[0];
         const float identityLeft=.10f+.30f*((8.f+.5f)/224.f);
-        if (std::abs(fgradient[112*224+8]-identityLeft) <= .005f) {
+        if (std::abs(fgradient[112*448+8]-identityLeft) <= .005f) {
             std::cerr << "compressed foveation did not apply its outer local squeeze: "
-                      << fgradient[112*224+8] << " identity " << identityLeft << '\n'; return 1;
+                      << fgradient[112*448+8] << " identity " << identityLeft << '\n'; return 1;
         }
         // Reduced Light geometry with a half-integral aligned central intercept:
         // target=512, c=.8/r=1.5 -> aligned c=407/512, pre-align output=477,
@@ -243,15 +252,16 @@ int main(int argc,char **argv) {
             const float rampX=float(x % 512)/511.f;
             lightGradient[y*1024+x]=(x<512 ? rampX : .5f+.5f*rampX);
         }
-        auto lightOut=w.draw(foveated.Get(),lightGradient,1024,512,480,480,
-                             lightPhase,{0,0,.5f,1})[0];
+        auto lightOut=w.draw(foveated.Get(),lightGradient,1024,512,960,480,
+                             lightPhase,uv)[0];
         const float correctedLight=257.f/511.f;
         const float uncorrectedLight=257.5f/511.f;
-        const float observedLight=lightOut[240*480+240];
+        const float observedLight=lightOut[240*960+240];
         require(std::abs(observedLight-correctedLight)<2e-5f,
                 "Light central phase did not sample the aligned source texel centre");
         require(std::abs(observedLight-uncorrectedLight)>.0004f,
                 "Light central phase still averaged neighbouring texels");
+        w.vs=layerVertex;
 
         std::vector<float> ramp(24);for(unsigned y=0;y<4;y++)for(unsigned x=0;x<6;x++)ramp[y*6+x]=float(x)/5;
         auto fractional=w.draw(area.Get(),ramp,6,4,4,4,params,uv)[0];

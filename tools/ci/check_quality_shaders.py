@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import subprocess
 
+from check_foveation_linkage import check as check_foveation_linkage
+
 REPO = Path(__file__).resolve().parents[2]
 MANIFEST = REPO / 'tools/windows/quality-shaders.json'
 SHADER = 'alvr/server_openvr/cpp/alvr_server/shader/'
@@ -24,6 +26,7 @@ def main():
     p.add_argument('alvr',type=Path);p.add_argument('--fxc',type=Path)
     p.add_argument('--compile-out',type=Path);p.add_argument('--write',action='store_true')
     a=p.parse_args(); actual=hashes(a.alvr)
+    check_foveation_linkage(a.alvr)
     if (a.alvr/SHADER/'FrameRenderPSAdaptive.hlsl').read_bytes() != (REPO/'tools/downsample/frame_downsample.hlsl').read_bytes():
         raise SystemExit('Embedded Adaptive source differs from canonical HLSL')
     if a.write:

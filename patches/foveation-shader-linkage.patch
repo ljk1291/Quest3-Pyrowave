@@ -1,0 +1,40 @@
+diff --git a/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl b/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl
+index 81ad436ae4c49182b4394026f6e355f7de04c30c..bfd0ebd535b23c013dab2b07617d31b5ab34f54c 100644
+--- a/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl
++++ b/alvr/server_openvr/cpp/alvr_server/shader/CompressAxisAlignedPixelShader.hlsl
+@@ -12,17 +12,10 @@ SamplerState trilinearSampler {
+ 	//AddressV = Wrap;
+ };
+ 
+-// Match the compositor's quad VS signature. Supplying only TEXCOORD leaves
+-// register linkage ambiguous in standalone D3D11 readback fixtures and does
+-// not describe the production PS_INPUT interface.
+-struct FoveationPixelInput {
+-	float4 position : SV_POSITION;
+-	float2 uv : TEXCOORD0;
+-	uint view : VIEW;
+-};
+-
+-float4 main(FoveationPixelInput input) : SV_Target {
+-	float2 uv = input.uv;
++// FFR uses d3d-render-utils/QuadVertexShader, which exports TEXCOORD0 in
++// register 0. Do not use the layer compositor's position/uv/view signature:
++// that places TEXCOORD0 in register 1 and breaks the fullscreen pass linkage.
++float4 main(float2 uv : TEXCOORD0) : SV_Target {
+ 	bool isRightEye = uv.x > 0.5;
+ 	float2 outputEyeUV = TextureToEyeUV(uv, isRightEye);
+ 	float2 eyeUV = outputEyeUV / eyeSizeRatio;
+diff --git a/alvr/server_openvr/cpp/platform/win32/CompressAxisAlignedPixelShader.cso b/alvr/server_openvr/cpp/platform/win32/CompressAxisAlignedPixelShader.cso
+index f303c9194d12ff9b22ec995ee0e0e5efbbfb9ecf..891e86d75000e3efed7389d2807f1f258455eb92 100644
+GIT binary patch
+delta 117
+zcmZ28o$1XqCL@;!C+DCgU)j`;*{iN*zwqVAgH2Nz85kIHx)~T)fwTz_?_g$Ncmu==
+zEDQ`6x;7ehF;6yNQQ%_+3Wc~vIQ#ntxiGArti@8t$S`>&i#{X6=9?__j6f=qEgVQq
+O-pFnY<UD0R-V6X5sv#=?
+
+delta 226
+zcmaDejcLtvCL@;!C+FpVO2nL`WtVPMKjEmE*E5@ufq`L7Hv<DJkTwD09n1_2IxGwf
+z2|z5+z0s(PxjqLd3>0PH0O9~31_6*ZkQfN?191$P1tCD<V0j=T6-gW<#srlM4vP=)
+z5B3c4^!H;3agA{H_YZPm2=jCeXIQ=3KiJ(*2dWNe=j7kaxr~gHGg<T*88^>lsb>UI
+Tl5F8XYH}gFF_5#A{dh9~_zETY
+

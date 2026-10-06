@@ -87,6 +87,22 @@ def test_live_rdo_readback_patches_are_pinned_and_applied_after_their_stacks():
             < script.index('apply_patch "$dest/ALVR-20.13.0" "$repo/patches/alvr-pyrowave-rdo-session-setting.patch"'))
 
 
+def test_foveation_linkage_fix_is_pinned_and_checked_in_cpu_ci():
+    import hashlib
+
+    expected = LOCK['patches']['foveation_shader_linkage']
+    assert expected['path'] == 'patches/foveation-shader-linkage.patch'
+    assert expected['sha256'] == hashlib.sha256((REPO / expected['path']).read_bytes()).hexdigest()
+    script = (REPO / 'tools/ci/fetch_sources.sh').read_text()
+    assert script.index('direct-eye-foveation.patch') < script.index('foveation-shader-linkage.patch')
+    assert script.index('--value foveation_shader_linkage_patch_sha256') < script.index(
+        'apply_patch "$dest/ALVR-20.13.0" "$repo/patches/foveation-shader-linkage.patch"')
+    workflow = (REPO / '.github/workflows/ci.yml').read_text()
+    assert 'python3 tools/ci/check_foveation_linkage.py' in workflow
+    warp = (REPO / 'tools/windows/check_quality_shaders.cmd').read_text()
+    assert 'QuadVertexShader.cso' in warp
+
+
 def test_light_phase_patch_is_pinned_and_verified_before_application():
     import hashlib
     expected = LOCK["patches"]["wo8_light_centre_phase"]

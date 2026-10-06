@@ -1,5 +1,17 @@
 # Patches
 
+## `foveation-shader-linkage.patch`: server FFR fullscreen shader interface fix
+
+Additive overlay after `direct-eye-foveation.patch`, pinned in `sources.lock.json`.
+WO-8's compression PS used the layer-compositor input order (UV register 1),
+but FFR binds ALVR's fullscreen `QuadVertexShader.cso` (UV register 0).
+Restore the original UV-only PS interface and regenerate its embedded DXBC with
+the recorded SDK FXC flags. Filtering and the default-off FFR setting are unchanged.
+The CPU gate checks the actual embedded signatures; the WARP gate now draws both
+eyes with the actual production fullscreen VS. See the
+[session 25 diagnosis](../docs/FOVEATION-FLASH-DIAGNOSIS.md) for evidence,
+validation and the remaining headset confirmation. Upstream credits are preserved.
+
 ## `presentation-filters.patch`: T2 compositor tokens and PC session downsample
 
 Additive overlay after `foveated-staging-correctness.patch`, on the complete locked

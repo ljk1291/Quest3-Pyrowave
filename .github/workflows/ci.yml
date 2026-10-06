@@ -43,6 +43,8 @@ jobs:
           sh tools/ci/fetch_sources.sh "$XRWIRED_INPUTS/research"
           g++ -std=c++17 -Wall -Wextra -Werror tools/nvenc_dimension_preflight_test.cpp -I "$XRWIRED_INPUTS/research/ALVR-20.13.0/alvr/server_openvr/cpp/platform/win32" -o /tmp/nvenc-dimension-preflight
           /tmp/nvenc-dimension-preflight
+      - name: Production FFR shader linkage (CPU only, embedded DXBC)
+        run: python3 tools/ci/check_foveation_linkage.py "$XRWIRED_INPUTS/research/ALVR-20.13.0"
       - name: Compositor token policy (CPU only, no OpenXR runtime)
         run: |
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal

@@ -59,6 +59,10 @@
     "direct_eye_foveation": {
       "path": "patches/direct-eye-foveation.patch",
       "sha256": "3c0e470ed3dee013614a7ba8b307c9d3199dd245babb16403ce2ec5e6fc4f259"
+    },
+    "foveation_shader_linkage": {
+      "path": "patches/foveation-shader-linkage.patch",
+      "sha256": "ce058af34dbc850d81005c3e7d1d90bdc415711e734a72b42830bdb5b972ed62"
     }
   },
   "rust": "1.97.1",
