@@ -1590,3 +1590,24 @@ CI passed for `80a1635`; later documentation commits do not change the pair's
 identity. Independent review verifies all 32 rows, correct score windows,
 high-rate limitations, provenance/privacy and clean lease closure. Current
 queue is owner review only. No new hardware test, install or default promotion.
+
+### 2026-10-06 — T4 offline 500 Mbps preflight stop
+
+The finite owner-away PC-only T4 run refused before opening a lease:
+`comfy_queue_active_or_unknown`, with backend process inventory unavailable.
+GPU load was 0% and free VRAM 12095 MiB; the 2048 MiB margin and all safety
+checks were retained. No codec/GPU jobs, lease or independent monitor started;
+zero owned jobs and cleanup errors. No hardware, VR/VD, network, settings,
+installation or arm-file work occurred. All seven 500 Mbps rows remain.
+
+[Sanitized report](../results/offline-500-rescore-2026-10-06.md) and
+[JSON evidence](../results/offline-500-rescore-2026-10-06.json) retain the
+400/700 H.264 and four 1000 Mbps Medium controls. Five CPU display fence
+diagnostics passed exact ordered 90-frame hashes and native metric parity.
+Panel-raster Lanczos downsampling still favours RDO24 over legacy for both
+retained Medium wavelets at 1000 Mbps. Display HVS and all deltas against the
+unmeasured VD-like 500 reference remain unavailable. This approximation does
+not model lenses or the Meta compositor; it cannot resolve the live Haar
+judgement or establish Quest decode budget, runtime acceptance or sustained
+90 Hz for the requested candidates. No preset is promoted. The authorization
+was stopped at its first failed precondition; no GPU retry was attempted.
