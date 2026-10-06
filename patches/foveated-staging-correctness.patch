@@ -1,5 +1,5 @@
 diff --git a/alvr/client_openxr/src/stream.rs b/alvr/client_openxr/src/stream.rs
-index 91c7fbbaefbb52b77040538da1ec58da28c83d8a..718c601bc0f603318c93e5844ede0e690135c6af 100644
+index 91c7fbbaefbb52b77040538da1ec58da28c83d8a..846bbe9e267726088e1ccdce07bd8ed7a219de87 100644
 --- a/alvr/client_openxr/src/stream.rs
 +++ b/alvr/client_openxr/src/stream.rs
 @@ -73,7 +73,8 @@ impl ParsedStreamConfig {
@@ -12,13 +12,17 @@ index 91c7fbbaefbb52b77040538da1ec58da28c83d8a..718c601bc0f603318c93e5844ede0e69
                  .flatten(),
              clientside_foveation_config: None,
              upscaling: config.settings.video.upscaling.as_option().cloned(),
-@@ -366,6 +367,14 @@ impl StreamContext {
+@@ -366,6 +367,18 @@ impl StreamContext {
              self.pre_wait_last_log = Instant::now();
              self.released_eye_images_valid = false;
              self.renderer.set_import_copy_sync(codec == CodecType::PyroWave);
 +            self.renderer.set_staging_initialization(
 +                codec == CodecType::PyroWave && crate::extra_extensions::perf_settings::system_property(
 +                    "debug.q3pw.staging_init") == "1",
++            );
++            self.renderer.set_staging_preservation(
++                codec == CodecType::PyroWave && crate::extra_extensions::perf_settings::system_property(
++                    "debug.q3pw.staging_preserve") == "1",
 +            );
 +            self.renderer.set_staging_isolation(
 +                codec == CodecType::PyroWave && crate::extra_extensions::perf_settings::system_property(
@@ -41,8 +45,68 @@ index 7bfba12ca0479598b4060b84664695a82c96411d..5fd8190ec28161d8953a8355bb0c9a94
  uniform samplerExternalOES tex;
  
  // Convert from limited colors to full
+diff --git a/alvr/graphics/src/lib.rs b/alvr/graphics/src/lib.rs
+index b0aaae7f38576af3e5bb01a7953521d59f55d460..4588b89cee3dd44a3a0d54cc4e80fada8a39294a 100644
+--- a/alvr/graphics/src/lib.rs
++++ b/alvr/graphics/src/lib.rs
+@@ -31,6 +31,19 @@ pub const SDR_FORMAT_GL: u32 = gl::RGBA8;
+ pub const GL_TEXTURE_EXTERNAL_OES: u32 = 0x8D65;
+ pub const MAX_PUSH_CONSTANTS_SIZE: u32 = 128;
+ 
++fn image_import_attributes(preserve: bool) -> Option<[egl::Int; 3]> {
++    preserve.then_some([0x30D2, 1, egl::NONE]) // EGL_IMAGE_PRESERVED_KHR = EGL_TRUE
++}
++
++#[cfg(test)]
++mod image_import_policy_tests {
++    #[test]
++    fn default_import_is_unchanged_and_preservation_is_explicit() {
++        assert_eq!(super::image_import_attributes(false), None);
++        assert_eq!(super::image_import_attributes(true), Some([0x30D2,1,super::egl::NONE]));
++    }
++}
++
+ type CreateImageFn = unsafe extern "C" fn(
+     egl::EGLDisplay,
+     egl::EGLContext,
+@@ -377,6 +390,18 @@ impl GraphicsContext {
+         buffer: *const c_void,
+         texture: gl::Texture,
+         render_cb: impl FnOnce(),
++    ) {
++        self.render_ahardwarebuffer_using_texture_preserved(buffer, texture, false, render_cb);
++    }
++
++    /// Same import/lease path, with an explicit opt-in pixel-preservation request.
++    /// A failed preservation request is fatal rather than silently discarding it.
++    pub unsafe fn render_ahardwarebuffer_using_texture_preserved(
++        &self,
++        buffer: *const c_void,
++        texture: gl::Texture,
++        preserve: bool,
++        render_cb: impl FnOnce(),
+     ) {
+         const EGL_NATIVE_BUFFER_ANDROID: u32 = 0x3140;
+ 
+@@ -384,13 +409,15 @@ impl GraphicsContext {
+             let client_buffer = (self.get_native_client_buffer)(buffer);
+             check_error(&self.gl_context, "get_native_client_buffer");
+ 
++            let attributes = image_import_attributes(preserve);
+             let image = (self.create_image)(
+                 self.egl_display.as_ptr(),
+                 egl::NO_CONTEXT,
+                 EGL_NATIVE_BUFFER_ANDROID,
+                 client_buffer,
+-                ptr::null(),
++                attributes.as_ref().map_or(ptr::null(), |attrs| attrs.as_ptr()),
+             );
++            assert!(!preserve || !image.is_null(), "[Q3PW_STAGING_PRESERVE] preserved EGL import failed");
+             check_error(&self.gl_context, "create_image");
+ 
+             self.gl_context
 diff --git a/alvr/graphics/src/staging.rs b/alvr/graphics/src/staging.rs
-index 779de33ca83d78d9b52c92193b54f60b00056503..d51c2750e698a61f047cb54e6f18135bfe1a93a4 100644
+index 779de33ca83d78d9b52c92193b54f60b00056503..0e8eca139857ba340782300824f20555be7f25ee 100644
 --- a/alvr/graphics/src/staging.rs
 +++ b/alvr/graphics/src/staging.rs
 @@ -2,7 +2,7 @@ use super::{ck, GraphicsContext};
@@ -54,16 +118,17 @@ index 779de33ca83d78d9b52c92193b54f60b00056503..d51c2750e698a61f047cb54e6f18135b
  
  fn create_program(
      gl: &gl::Context,
-@@ -55,6 +55,8 @@ pub struct StagingRenderer {
+@@ -55,6 +55,9 @@ pub struct StagingRenderer {
      surface_texture: gl::Texture,
      framebuffers: [gl::Framebuffer; 2],
      viewport_size: IVec2,
 +    isolated_vertex_array: Cell<Option<gl::VertexArray>>,
 +    srgb_target: bool,
++    preserve_image: Cell<bool>,
  }
  
  impl StagingRenderer {
-@@ -63,6 +65,7 @@ impl StagingRenderer {
+@@ -63,6 +66,7 @@ impl StagingRenderer {
          staging_textures: [gl::Texture; 2],
          view_resolution: UVec2,
          fix_limited_range: bool,
@@ -71,12 +136,13 @@ index 779de33ca83d78d9b52c92193b54f60b00056503..d51c2750e698a61f047cb54e6f18135b
      ) -> Self {
          let gl = &context.gl_context;
          context.make_current();
-@@ -112,24 +115,44 @@ impl StagingRenderer {
+@@ -112,24 +116,46 @@ impl StagingRenderer {
                  view_idx_uloc,
                  framebuffers: framebuffers.try_into().unwrap(),
                  viewport_size: view_resolution.as_ivec2(),
 +                isolated_vertex_array: Cell::new(None),
 +                srgb_target,
++                preserve_image: Cell::new(false),
              }
          }
      }
@@ -86,10 +152,12 @@ index 779de33ca83d78d9b52c92193b54f60b00056503..d51c2750e698a61f047cb54e6f18135b
 -        let gl = &self.context.gl_context;
          self.context.make_current();
  
-         self.context.render_ahardwarebuffer_using_texture(
+-        self.context.render_ahardwarebuffer_using_texture(
++        self.context.render_ahardwarebuffer_using_texture_preserved(
              hardware_buffer,
              self.surface_texture,
 -            || unsafe {
++            self.preserve_image.get(),
 +            || unsafe { self.draw_copy(wait_for_copy); },
 +        );
 +    }
@@ -118,7 +186,7 @@ index 779de33ca83d78d9b52c92193b54f60b00056503..d51c2750e698a61f047cb54e6f18135b
  
                  for (i, framebuffer) in self.framebuffers.iter().enumerate() {
                      ck!(gl.bind_framebuffer(gl::DRAW_FRAMEBUFFER, Some(*framebuffer)));
-@@ -137,6 +160,14 @@ impl StagingRenderer {
+@@ -137,6 +163,14 @@ impl StagingRenderer {
                      ck!(gl.active_texture(gl::TEXTURE0));
                      ck!(gl.bind_texture(GL_TEXTURE_EXTERNAL_OES, Some(self.surface_texture)));
                      ck!(gl.bind_sampler(0, None));
@@ -133,7 +201,7 @@ index 779de33ca83d78d9b52c92193b54f60b00056503..d51c2750e698a61f047cb54e6f18135b
                      ck!(gl.uniform_1_i32(Some(&self.view_idx_uloc), i as i32));
                      ck!(gl.draw_arrays(gl::TRIANGLE_STRIP, 0, 4));
                  }
-@@ -145,8 +176,35 @@ impl StagingRenderer {
+@@ -145,8 +179,40 @@ impl StagingRenderer {
                  if wait_for_copy {
                      ck!(gl.finish());
                  }
@@ -159,6 +227,11 @@ index 779de33ca83d78d9b52c92193b54f60b00056503..d51c2750e698a61f047cb54e6f18135b
 +            enabled, self.viewport_size.x, self.viewport_size.y));
 +    }
 +
++    pub fn set_preservation(&self, enabled: bool) {
++        self.preserve_image.set(enabled);
++        crate::log_quest_experiment(format!("[Q3PW_STAGING_PRESERVE] effective={enabled}"));
++    }
++
 +    #[cfg(test)]
 +    pub(crate) unsafe fn render_egl_image_for_test(&self, image: super::egl::EGLImage) {
 +        self.context.make_current();
@@ -171,7 +244,7 @@ index 779de33ca83d78d9b52c92193b54f60b00056503..d51c2750e698a61f047cb54e6f18135b
      }
  }
  
-@@ -156,6 +214,7 @@ impl Drop for StagingRenderer {
+@@ -156,6 +222,7 @@ impl Drop for StagingRenderer {
          self.context.make_current();
  
          unsafe {
@@ -180,7 +253,7 @@ index 779de33ca83d78d9b52c92193b54f60b00056503..d51c2750e698a61f047cb54e6f18135b
              ck!(gl.delete_texture(self.surface_texture));
              for framebuffer in &self.framebuffers {
 diff --git a/alvr/graphics/src/stream.rs b/alvr/graphics/src/stream.rs
-index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..e86c8bc58ef4c758265d22c898ece4b88a1d43fc 100644
+index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..07293fb2d075a57d845fcadc82acf68e34dd3ea7 100644
 --- a/alvr/graphics/src/stream.rs
 +++ b/alvr/graphics/src/stream.rs
 @@ -4,6 +4,7 @@ use alvr_common::{
@@ -257,12 +330,16 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..e86c8bc58ef4c758265d22c898ece4b8
          if !requested || !self.wait_for_import_copy { return; }
          let Some(config) = &self.direct_eye_config else { return; };
          // Re-create only on stream/decoder initialization; errors fall back.
-@@ -345,6 +363,40 @@ impl StreamRenderer {
+@@ -345,6 +363,44 @@ impl StreamRenderer {
          }
      }
  
 +    pub fn set_staging_isolation(&self, requested: bool) {
 +        self.staging_renderer.set_isolation(requested && self.wait_for_import_copy);
++    }
++
++    pub fn set_staging_preservation(&self, requested: bool) {
++        self.staging_renderer.set_preservation(requested && self.wait_for_import_copy);
 +    }
 +
 +    pub fn set_staging_initialization(&self, requested: bool) {
@@ -298,7 +375,7 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..e86c8bc58ef4c758265d22c898ece4b8
      pub fn last_copy_was_direct(&self) -> bool { self.last_copy_direct.get() }
  
      pub fn poll_import_copy(&self) -> (bool, Option<f32>) {
-@@ -720,3 +772,193 @@ pub fn compute_target_view_resolution(
+@@ -720,3 +776,195 @@ pub fn compute_target_view_resolution(
      }
      target_resolution.as_uvec2()
  }
@@ -418,9 +495,10 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..e86c8bc58ef4c758265d22c898ece4b8
 +                    // the production external-texture draw.
 +                    gl.bind_texture(glow::TEXTURE_2D,None);
 +                    gl.finish();
++                    let image_attributes = super::super::image_import_attributes(true).unwrap();
 +                    let image=(context.create_image)(context.egl_display.as_ptr(),
 +                        context.egl_context.as_ptr(),0x30B1, // EGL_GL_TEXTURE_2D_KHR
-+                        source.0.get() as usize as *mut _,ptr::null());
++                        source.0.get() as usize as *mut _,image_attributes.as_ptr());
 +                    assert!(!image.is_null(),"software EGLImage source creation failed");
 +                    if isolated {
 +                        // Poison foreign state to verify the opt-in copy restores
@@ -440,9 +518,10 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..e86c8bc58ef4c758265d22c898ece4b8
 +                        assert_eq!(staging_pixel(&context, &renderer.staging_textures[0],80,80), colors[0],
 +                            "raw copy must be correct before WGPU's first sampling");
 +                    }
-+                    if fresh_frame == 1 && profile == FoveationProfile::Light && format == glow::RGBA8 {
-+                        eprintln!("raw copy diagnostic: initialize={initialize} isolated={isolated} corner={:?} center={:?}",
++                    if profile == FoveationProfile::Light && format == glow::RGBA8 {
++                        eprintln!("raw copy diagnostic: initialize={initialize} isolated={isolated} fresh_frame={fresh_frame} corner={:?} x16={:?} center={:?}",
 +                            staging_pixel(&context,&renderer.staging_textures[0],0,0),
++                            staging_pixel(&context,&renderer.staging_textures[0],16,0),
 +                            staging_pixel(&context,&renderer.staging_textures[0],80,80));
 +                    }
 +                    let fov=Fov {left:-0.7,right:0.7,up:0.7,down:-0.7};

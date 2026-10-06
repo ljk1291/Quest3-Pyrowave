@@ -28,6 +28,17 @@ signing identity and baseline defaults. No install is performed.
 
 ## Candidate requiring a Quest check
 
+`debug.q3pw.staging_preserve=1` requests `EGL_IMAGE_PRESERVED_KHR=EGL_TRUE` for
+each staging AHB import. The direct-eye image-cache path already requests this;
+the legacy staging path passes no attributes. EGL's default does not guarantee
+that existing pixels survive image creation. This is a source difference and a
+Quest hypothesis, not a verified explanation of persistent flashing. The option
+is default-off, PyroWave-only, logs `[Q3PW_STAGING_PRESERVE]`, and fails fatally if
+the preserved image cannot be created rather than silently dropping the request.
+The native policy test preserves the legacy null-attribute path exactly when off.
+See [EGL image preservation](https://registry.khronos.org/EGL/extensions/KHR/EGL_KHR_image_base.txt)
+and [Android native-buffer attributes](https://registry.khronos.org/EGL/extensions/ANDROID/EGL_ANDROID_image_native_buffer.txt).
+
 `debug.q3pw.staging_init=1` opts PyroWave into a once-per-renderer WGPU-tracked
 partial texture write, submission and completion **before** the first external
 copy. Raw GLES writes do not update WGPU's initialization tracker. Its first
@@ -56,7 +67,9 @@ claim is unsupported by the source review.
 The Linux software test uses real Mesa GLES with a CPU adapter, the actual
 Rust staging draw, actual WGSL
 inverse mapping and actual projection transform. An owned GL texture becomes
-an EGLImage source. It checks every output pixel for both eyes for all three
+an explicitly **preserved** EGLImage source; without that attribute a GL-texture
+source's existing pixels are undefined and cannot form a correctness oracle.
+It checks every output pixel for both eyes for all three
 fixed profiles and both output formats, with initialization and isolation off
 and on across two changing frames. Initialization-off's first black frame is
 an explicit bug-reproduction control, **not a correctness pass**; its next frame
@@ -75,8 +88,8 @@ and reproduce the stale raw fields from the failed session.
 Before Metro or timing: independently verify a matching pair, obtain installation
 authorization, then run a finite supervised chart at a conservative diagnostic
 rate (500 Mbps or lower). The stationary Q4 continuation does not qualify nominal
-1000 Mbps. Compare initialization off/on first, then isolate GL state as a
-separate change, with native markers and decoded/staging
+1000 Mbps. Establish a usable preserved/initialized/isolated chart first, then
+vary preservation, initialization and GL state one at a time, with native markers and decoded/staging
 dimensions; ask the owner about labels, orientation, colours, moving content
 and corruption. Stop immediately on black/flashing. No optimization is promoted
 until this gate passes, followed by controlled timing and quality checks.

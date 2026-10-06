@@ -24,6 +24,8 @@ class StagingCorrectnessContract(unittest.TestCase):
                      'requested && self.wait_for_import_copy',
                      '"debug.q3pw.staging_isolation") == "1"',
                      '"debug.q3pw.staging_init") == "1"',
+                     '"debug.q3pw.staging_preserve") == "1"',
+                     'default_import_is_unchanged_and_preservation_is_explicit',
                      'pub fn set_staging_initialization',
                      'raw copy must be correct before WGPU',
                      'Explicit reproduction control, not a correctness pass.',
@@ -48,7 +50,7 @@ class StagingCorrectnessContract(unittest.TestCase):
 
     def test_both_experiments_are_observable_and_resettable(self):
         from tools.quest3 import bench, control
-        for prop in ('debug.q3pw.staging_init','debug.q3pw.staging_isolation'):
+        for prop in ('debug.q3pw.staging_init','debug.q3pw.staging_isolation','debug.q3pw.staging_preserve'):
             self.assertIn(prop,bench.EXPERIMENT_PROPERTIES)
             self.assertIn(prop,control.EXPERIMENT_PROPERTIES)
 

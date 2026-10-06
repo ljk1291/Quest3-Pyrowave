@@ -106,7 +106,7 @@
     {
       "path": "patches.foveated_staging_correctness.sha256",
       "old": null,
-      "new": "558be67ac67b81c37de632377e85c5916941173dadb4edcbfe9861161fac39e3",
+      "new": "ee428bcf76ee817c4cf70eb6212653a300e86ee9d757390e3535c7d3013662bb",
       "role": "alvr_presentation_and_geometry_only"
     }
   ]

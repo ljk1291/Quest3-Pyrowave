@@ -111,6 +111,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends libegl-dev libgles-dev libegl-mesa0 libgl1-mesa-dri libgles2 libudev-dev xvfb xauth patchelf
           xvfb-run -a sh tools/ci/build_gles_only_egl.sh
           cd "$XRWIRED_INPUTS/research/ALVR-20.13.0"
+          cargo +"$RUST_TOOLCHAIN" test -p alvr_graphics --lib image_import_policy_tests
           LD_LIBRARY_PATH="/tmp/q3pw-gles-only${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" xvfb-run -a cargo +"$RUST_TOOLCHAIN" test -p alvr_graphics --lib staging_correctness_tests -- --nocapture --test-threads=1
       - name: Compositor filter policy checks (no OpenXR runtime)
         run: |
