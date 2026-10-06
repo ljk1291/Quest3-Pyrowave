@@ -152,3 +152,22 @@ passed. The full 13-overlay stack applies to a fresh pinned ALVR checkout; all 1
 capture source files match the generation tree byte-for-byte, and reverse patch
 checks and `git diff --check` pass. Native parser/GLES tests are wired into CI but
 were not executable in the local sandbox.
+
+## 2026-10-06 range audit correction
+
+The later `frame-dump-range.patch` stacks immediately after `frame-dump.patch`.
+For stock full-range SDR hardware decoding, production already contracts external
+RGB with `16/255 + RGB*219/255`. The original diagnostic described above omitted
+that correction; its raw PSNR is not the headset's displayed contrast error.
+The range overlay applies the same correction before the dump's RGBA8 write,
+logs `[Q3PW_FRAME_DUMP_RANGE]`, and adds `legacy_range_remap` to the sidecar.
+The new `post_decode` is packed, after the production range correction (when the
+field is true), and still before gamma/FFE/presentation. Missing fields in old
+captures mean false. Capture stays default-off; ordinary rendering is unchanged.
+
+Score new captures as stored. For old verified full-range SDR stock captures,
+`score --decode-range-remap legacy-full-range` explicitly approximates the range
+correction and retains raw full-frame metrics. It rejects a second remap on new
+corrected captures. Old RGBA8 clipping cannot be recovered, and may have happened
+only in capture. See [H264-RANGE](H264-RANGE.md) for file:line evidence, the remaining
+live endpoint uncertainty, commands and validation.

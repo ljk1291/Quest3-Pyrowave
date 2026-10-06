@@ -24,6 +24,26 @@ def test_frame_dump_overlay_hash_and_order():
     assert result.stdout.strip() == pin['sha256']
 
 
+def test_frame_dump_range_overlay_is_pinned_after_capture_and_uses_renderer_policy():
+    pin = LOCK['patches']['frame_dump_range']
+    assert pin['path'] == 'patches/frame-dump-range.patch'
+    assert hashlib.sha256((REPO / pin['path']).read_bytes()).hexdigest() == pin['sha256']
+    script = (REPO / 'tools/ci/fetch_sources.sh').read_text()
+    assert script.index('apply_patch "$dest/ALVR-20.13.0" "$repo/patches/frame-dump.patch"') < script.index(
+        'apply_patch "$dest/ALVR-20.13.0" "$repo/patches/frame-dump-range.patch"')
+    assert '--value frame_dump_range_patch_sha256' in script
+    result = subprocess.run([sys.executable, 'tools/ci/source_lock.py', '--value', 'frame_dump_range_patch_sha256'],
+                            cwd=REPO, capture_output=True, text=True, check=True)
+    assert result.stdout.strip() == pin['sha256']
+    overlay = (REPO / pin['path']).read_text()
+    assert 'dump_legacy_range_remap: fix_limited_range' in overlay
+    assert 'self.presentation_geometry.0, self.dump_legacy_range_remap' in overlay
+    assert 'color.rgb = vec3(16.0 / 255.0) + (219.0 / 255.0) * color.rgb' in overlay
+    assert 'legacy_range_remap as i32' in overlay
+    assert 'image.legacy_range_remap' in overlay
+    assert '[Q3PW_FRAME_DUMP_RANGE]' in overlay
+
+
 def test_lock_has_full_source_revisions():
     for key in ("integration", "alvr", "pyrowave", "granite", "cargo_apk"):
         assert re.fullmatch(r"[0-9a-f]{40}", LOCK[key]["commit"]), key

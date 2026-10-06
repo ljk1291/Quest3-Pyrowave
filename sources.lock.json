@@ -67,6 +67,10 @@
     "frame_dump": {
       "path": "patches/frame-dump.patch",
       "sha256": "b45f80b0b8be93bc474f176c0cfe90c11bc0867a81d09dea54ba1efcfb9815f6"
+    },
+    "frame_dump_range": {
+      "path": "patches/frame-dump-range.patch",
+      "sha256": "02d880cf6942aa40a368d4cd8ed32fb87df42e9224bd14ed0923c72855a77143"
     }
   },
   "rust": "1.97.1",

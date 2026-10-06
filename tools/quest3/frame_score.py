@@ -57,6 +57,10 @@ def discover(directory, allowed_stages):
             raise ValueError(f'invalid size/row order: {path}')
         if meta.get('matrix') != 'bt709' or meta.get('range') not in ('full', 'limited'):
             raise ValueError(f'unknown color domain: {path}')
+        remapped = meta.get('legacy_range_remap', False)
+        if type(remapped) is not bool or (remapped and (meta['stage'] != 'post_decode' or
+                meta.get('format') not in ('rgba8', 'bgra8') or meta['range'] != 'full')):
+            raise ValueError(f'invalid legacy_range_remap metadata: {path}')
         raw = path.with_suffix('.raw')
         if not raw.is_file() or raw.stat().st_size != meta['bytes']:
             raise ValueError(f'missing/truncated raw dump: {path}')
@@ -67,21 +71,28 @@ def discover(directory, allowed_stages):
     return records
 
 
-def luma(record):
+def luma(record, *, legacy_range_remap=False):
     """Full-range BT.709 R'G'B' luma, or normalized exact encoder Y plane.
 
     MediaCodec's EGL external RGB color conversion and PyroWave's RGBA conversion
-    are part of the measured path. No gamma transform, rescaling or registration.
+    are part of the measured path. The explicit legacy remap models the stock
+    full-range SDR staging shader, without fitting away error. No gamma transform.
     """
     meta, path = record
     h, w = meta['height'], meta['width']
     pixels = np.fromfile(path, dtype=np.uint8)
     fmt = meta['format']
+    if legacy_range_remap and (meta['stage'] != 'post_decode' or
+                              fmt not in ('rgba8', 'bgra8') or meta['range'] != 'full'):
+        raise ValueError('legacy range remap requires full-range post_decode RGB')
+    if legacy_range_remap and meta.get('legacy_range_remap', False):
+        raise ValueError('dump already applied legacy range remap')
     if fmt in ('rgba8', 'bgra8'):
         if len(pixels) != h*w*4 or meta['range'] != 'full':
             raise ValueError('invalid RGBA extent/range')
         rgb = pixels.reshape(h, w, 4)[..., :3].astype(np.float32)
         if fmt == 'bgra8': rgb = rgb[..., ::-1]
+        if legacy_range_remap: rgb = np.rint(16 + rgb * (219/255))
         y = rgb @ np.array([.2126, .7152, .0722], dtype=np.float32)
     elif fmt in ('yuv420p', 'yuv444p'):
         expected = h*w*3 if fmt == 'yuv444p' else h*w*3//2
@@ -200,8 +211,11 @@ def temporal(reference, decoded, previous_reference, previous_decoded):
             'static_residual_p99': float(np.percentile(residual[static], 99)) if static.any() else None}
 
 
-def score_directories(server_dir, client_dir, *, grids=(8, 16, 32), crops=None, chart_projections=None):
+def score_directories(server_dir, client_dir, *, grids=(8, 16, 32), crops=None,
+                      chart_projections=None, decode_range_remap='none'):
     if not grids or any(type(g) is not int or g < 2 or g > 1024 for g in grids): raise ValueError('invalid grids')
+    if decode_range_remap not in ('none', 'legacy-full-range'): raise ValueError('invalid decode range remap')
+    remap = decode_range_remap == 'legacy-full-range'
     source = discover(server_dir, {'encoder_input'})
     client = discover(client_dir, STAGES-{'encoder_input'})
     source_ids = {ts for ts, _ in source}
@@ -214,17 +228,39 @@ def score_directories(server_dir, client_dir, *, grids=(8, 16, 32), crops=None, 
               'unmatched_client': sorted(decoded_ids-source_ids), 'pairs': [], 'presented': [],
               'psnr_hvs': {'measured': False, 'reason': 'WO-1 calibrated native HVS scorer requires projection/PPD and a qualified external run; no uncalibrated substitute'},
               'warnings': []}
+    report['decode_range_remap'] = decode_range_remap
+    if remap:
+        report['method'] += ' Decoded RGB uses the production legacy SDR remap: round(16 + RGB * 219/255), including RGBA8 readback quantization; no fitted coefficients. Raw full-frame metrics are retained separately.'
+        report['warnings'].append('Legacy remap requires verified stock full-range SDR hardware-decoder policy (Q3PW_COLOUR legacy_range_remap=true). Do not use for PyroWave, limited-range, HDR, or already corrected images. Old RGBA8 dumps may clip before the production remap; lost endpoints cannot be recovered. This is an approximation of staging input, not final eye pixels.')
+    else:
+        report['warnings'].append('post_decode with legacy_range_remap=false (including old sidecars without the field) precedes production range correction. All post_decode dumps precede gamma correction. PSNR alone is not a displayed-colour verdict; see docs/H264-RANGE.md.')
     previous = None
     aggregate = {}
     for ts in matched:
         r_record, d_record = source[(ts, 'encoder_input')], client[(ts, 'post_decode')]
-        r, d = luma(r_record), luma(d_record)
+        if remap and (r_record[0]['format'] not in ('rgba8', 'bgra8') or r_record[0]['range'] != 'full'):
+            raise ValueError('legacy range remap requires full-range RGB encoder input')
+        r, d = luma(r_record), luma(d_record, legacy_range_remap=remap)
         if r.shape != d.shape: raise ValueError(f'geometry mismatch at {ts}: {r.shape} != {d.shape}')
         if previous is not None and previous[1].shape != r.shape: raise ValueError('geometry drift within capture')
         boxes = fixed_crops(r.shape[1], r.shape[0], crops, chart_projections)
         row = {'timestamp_ns': ts, 'server_frame_index': r_record[0]['frame_index'],
-               'client_frame_index': d_record[0]['frame_index'], 'regions': {}, 'source_blank': blank(r), 'decoded_blank': blank(d),
+               'client_frame_index': d_record[0]['frame_index'],
+               'dump_legacy_range_remap': d_record[0].get('legacy_range_remap', False),
+               'regions': {}, 'source_blank': blank(r), 'decoded_blank': blank(d),
                'files': {'source_sha256': sha256_file(r_record[1]), 'decoded_sha256': sha256_file(d_record[1])}}
+        if remap:
+            raw = luma(d_record)
+            row['raw_post_decode'] = {'psnr_y_db': psnr(r, raw), 'ssim_y': ssim(r, raw),
+                                     'blank': blank(raw)}
+            # Luma endpoint counts are useful for neutral ramps. Coloured-channel
+            # clipping needs an RGB/device check, not a luma-only verdict.
+            row['range_endpoints_luma'] = {
+                'source_below_16_pixels': int(np.count_nonzero(r < 16)),
+                'source_above_235_pixels': int(np.count_nonzero(r > 235)),
+                'low_source_decoded_zero_pixels': int(np.count_nonzero((r < 16) & (raw == 0))),
+                'high_source_decoded_255_pixels': int(np.count_nonzero((r > 235) & (raw >= 254.999))),
+                'remapped_min': float(d.min()), 'remapped_max': float(d.max())}
         row['unexpected_black'] = row['decoded_blank']['black'] and not row['source_blank']['black']
         row['unexpected_blank'] = row['decoded_blank']['blank'] and not row['source_blank']['blank']
         row['eyes'] = {}
@@ -280,6 +316,7 @@ def score_directories(server_dir, client_dir, *, grids=(8, 16, 32), crops=None, 
 def markdown(report):
     a = report['aggregate']
     lines = [f"# Live lossless frame score\n\nPairs: {a['pair_count']}; unmatched server/client: {len(report['unmatched_server'])}/{len(report['unmatched_client'])}.",
+        f"Decoded range remap: {report['decode_range_remap']}.",
         f"Unexpected black/blank decoded pairs: {a['unexpected_black_pairs']}/{a['unexpected_blank_pairs']}; black presented eyes: {a['presented_black_images']}.",
         '\n| Region | PSNR-Y finite mean dB | SSIM-Y | Temporal residual mean |\n|---|---:|---:|---:|']
     for name, row in a['regions'].items():
@@ -303,6 +340,8 @@ def main(argv=None):
     score.add_argument('--grids', type=int, nargs='+', default=[8, 16, 32])
     score.add_argument('--crops', type=Path, help='JSON object: crop name -> [x,y,width,height] in packed SBS coordinates')
     score.add_argument('--chart-projections', type=Path, help='JSON left/right tangent arrays; ONLY unwarped normalized chart coordinates')
+    score.add_argument('--decode-range-remap', choices=['none', 'legacy-full-range'], default='none',
+                       help='Explicit production staging remap for verified full-range SDR stock hardware decoding; retains raw metrics')
     args = parser.parse_args(argv)
     try:
         if args.command == 'pull':
@@ -312,7 +351,8 @@ def main(argv=None):
             return 0
         report = score_directories(args.server, args.client, grids=args.grids,
             crops=json.loads(args.crops.read_text()) if args.crops else None,
-            chart_projections=json.loads(args.chart_projections.read_text()) if args.chart_projections else None)
+            chart_projections=json.loads(args.chart_projections.read_text()) if args.chart_projections else None,
+            decode_range_remap=args.decode_range_remap)
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(report, indent=2, allow_nan=False)+'\n', encoding='utf-8')
         args.out.with_suffix('.md').write_text(markdown(report), encoding='utf-8')

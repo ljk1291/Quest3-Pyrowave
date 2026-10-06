@@ -1,5 +1,15 @@
 # Patches
 
+## `frame-dump-range.patch`: capture the production SDR range correction
+
+Additive overlay immediately after `frame-dump.patch`, pinned in `sources.lock.json`.
+Uses the renderer's existing full-range SDR hardware-decoder remap before the
+capture RGBA8 write. Capture remains default-off and logs `Q3PW_FRAME_DUMP_RANGE`;
+sidecars mark corrected captures so the scorer rejects double remapping. Ordinary
+rendering and encoder signalling are unchanged. Includes a software-GLES regression
+in the existing capture test. See [H264-RANGE](../docs/H264-RANGE.md) for source
+evidence and the unverified live clipping question. Upstream credits are preserved.
+
 ## `foveation-shader-linkage.patch`: server FFR fullscreen shader interface fix
 
 Additive overlay after `direct-eye-foveation.patch`, pinned in `sources.lock.json`.

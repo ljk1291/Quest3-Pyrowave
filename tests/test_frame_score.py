@@ -66,6 +66,83 @@ class FrameScoreTests(unittest.TestCase):
         self.assertLess(f.ssim(r, d), 1)
         self.assertGreater(f.ssim(r, d), .99)
 
+    def test_legacy_staging_remap_cancels_expansion_in_interior(self):
+        source = np.tile(np.arange(16, 236, dtype=np.uint8), (64, 1))
+        decoded = np.rint((source.astype(np.float32)-16)*(255/219)).astype(np.uint8)
+        dump(self.server, 1, 'encoder_input', source)
+        dump(self.client, 1, 'post_decode', decoded)
+        raw = f.score_directories(self.server, self.client)
+        corrected = f.score_directories(self.server, self.client, decode_range_remap='legacy-full-range')
+        full = corrected['pairs'][0]['regions']['full']
+        self.assertTrue(full['identical'])
+        self.assertIsNone(full['psnr_y_db'])
+        self.assertLess(raw['pairs'][0]['regions']['full']['psnr_y_db'], 35)
+        self.assertEqual(corrected['pairs'][0]['raw_post_decode']['psnr_y_db'],
+                         raw['pairs'][0]['regions']['full']['psnr_y_db'])
+        self.assertIn('legacy-full-range', f.markdown(corrected))
+        json.dumps(corrected, allow_nan=False)
+        out = self.root/'remapped.json'
+        self.assertEqual(f.main(['score', '--server', str(self.server), '--client', str(self.client),
+                                '--decode-range-remap', 'legacy-full-range', '--out', str(out)]), 0)
+        self.assertEqual(json.loads(out.read_text())['decode_range_remap'], 'legacy-full-range')
+
+    def test_legacy_staging_remap_does_not_restore_clipped_endpoints(self):
+        source = np.tile(np.arange(256, dtype=np.uint8), (64, 1))
+        decoded = np.rint(np.clip((source.astype(np.float32)-16)*(255/219), 0, 255)).astype(np.uint8)
+        dump(self.server, 1, 'encoder_input', source)
+        record = dump(self.client, 1, 'post_decode', decoded)
+        corrected = f.luma(record, legacy_range_remap=True)
+        self.assertAlmostEqual(float(corrected.min()), 16)
+        self.assertAlmostEqual(float(corrected.max()), 235)
+        self.assertFalse(np.array_equal(corrected, source))
+        report = f.score_directories(self.server, self.client, decode_range_remap='legacy-full-range')
+        endpoints = report['pairs'][0]['range_endpoints_luma']
+        self.assertEqual(endpoints['low_source_decoded_zero_pixels'], 16*64)
+        self.assertEqual(endpoints['high_source_decoded_255_pixels'], 20*64)
+        self.assertIsNotNone(report['pairs'][0]['regions']['full']['psnr_y_db'])
+
+    def test_legacy_remap_is_per_rgb_channel_and_rejects_wrong_stage(self):
+        meta, raw = dump(self.client, 1, 'post_decode', self.image)
+        rgba = np.empty((64, 128, 4), np.uint8)
+        rgba[:] = [0, 100, 255, 0]
+        raw.write_bytes(rgba.tobytes())
+        expected = np.rint(16+np.array([0, 100, 255])*(219/255)) @ [.2126, .7152, .0722]
+        np.testing.assert_allclose(f.luma((meta, raw), legacy_range_remap=True), expected, atol=.0001)
+        meta['stage'] = 'presented_left'
+        with self.assertRaisesRegex(ValueError, 'post_decode RGB'):
+            f.luma((meta, raw), legacy_range_remap=True)
+        meta['stage'], meta['range'] = 'post_decode', 'limited'
+        with self.assertRaisesRegex(ValueError, 'post_decode RGB'):
+            f.luma((meta, raw), legacy_range_remap=True)
+
+    def test_remap_rejects_planar_encoder_and_unknown_mode(self):
+        dump(self.server, 1, 'encoder_input', self.image, fmt='yuv420p')
+        dump(self.client, 1, 'post_decode', self.image)
+        with self.assertRaisesRegex(ValueError, 'RGB encoder input'):
+            f.score_directories(self.server, self.client, decode_range_remap='legacy-full-range')
+        with self.assertRaisesRegex(ValueError, 'invalid decode range remap'):
+            f.score_directories(self.server, self.client, decode_range_remap='auto')
+
+    def test_remapped_capture_is_scored_once_and_metadata_is_validated(self):
+        dump(self.server, 1, 'encoder_input', self.image)
+        meta, raw = dump(self.client, 1, 'post_decode', self.image)
+        meta['legacy_range_remap'] = True
+        raw.with_suffix('.json').write_text(json.dumps(meta))
+        report = f.score_directories(self.server, self.client)
+        self.assertTrue(report['pairs'][0]['dump_legacy_range_remap'])
+        self.assertTrue(report['pairs'][0]['regions']['full']['identical'])
+        with self.assertRaisesRegex(ValueError, 'already applied'):
+            f.score_directories(self.server, self.client, decode_range_remap='legacy-full-range')
+        for value in [1, 'true', None]:
+            meta['legacy_range_remap'] = value
+            raw.with_suffix('.json').write_text(json.dumps(meta))
+            with self.assertRaisesRegex(ValueError, 'metadata'):
+                f.discover(self.client, f.STAGES)
+        meta['legacy_range_remap'], meta['stage'] = True, 'presented_left'
+        raw.with_suffix('.json').write_text(json.dumps(meta))
+        with self.assertRaisesRegex(ValueError, 'metadata'):
+            f.discover(self.client, f.STAGES)
+
     def test_block_grid_and_source_subtraction(self):
         r = np.full((64, 128), 100, np.float32)
         d = r.copy()

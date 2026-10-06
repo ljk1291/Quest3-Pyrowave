@@ -1,0 +1,148 @@
+diff --git a/alvr/graphics/resources/frame_dump_fragment.glsl b/alvr/graphics/resources/frame_dump_fragment.glsl
+index d6673d46ec77214a16a31c438f7dd5b3c203a205..acbd6548d73c827b9cd818d0c919d485174b69e2 100644
+--- a/alvr/graphics/resources/frame_dump_fragment.glsl
++++ b/alvr/graphics/resources/frame_dump_fragment.glsl
+@@ -4,5 +4,11 @@ precision highp float;
+ precision highp samplerExternalOES;
+ in highp vec2 uv;
+ uniform samplerExternalOES tex;
++uniform bool legacy_range_remap;
+ layout(location=0) out vec4 color;
+-void main() { color = texture(tex, uv); }
++void main() {
++    color = texture(tex, uv);
++    // Match production staging BEFORE RGBA8 can clip external RGB excursions.
++    if (legacy_range_remap)
++        color.rgb = vec3(16.0 / 255.0) + (219.0 / 255.0) * color.rgb;
++}
+diff --git a/alvr/graphics/src/frame_dump.rs b/alvr/graphics/src/frame_dump.rs
+index 99a29954ed12939e27e15b5d1811ac493000d75d..8366deebaa8405d20550a83b68f6aa4ec2fb1e54 100644
+--- a/alvr/graphics/src/frame_dump.rs
++++ b/alvr/graphics/src/frame_dump.rs
+@@ -6,7 +6,7 @@ use glow::{self as gl, HasContext};
+ use std::{ffi::c_void, fs, num::NonZeroU32, path::PathBuf, rc::Rc,
+     sync::mpsc::{self, SyncSender}, thread::{self, JoinHandle}, time::{Instant, SystemTime, UNIX_EPOCH}};
+ 
+-struct Image { stage: &'static str, size: UVec2, pixels: Vec<u8>, row_order: &'static str }
++struct Image { stage: &'static str, size: UVec2, pixels: Vec<u8>, row_order: &'static str, legacy_range_remap: bool }
+ struct Job { timestamp: u64, index: u64, images: Vec<Image> }
+ 
+ pub(super) struct FrameDump {
+@@ -43,9 +43,9 @@ impl FrameDump {
+                         fs::write(base.with_extension("raw"), &image.pixels)?;
+                         // Only a complete sidecar admits this frame to the scorer.
+                         fs::write(base.with_extension("json"), format!(
+-                            "{{\"schema\":1,\"timestamp_ns\":{},\"frame_index\":{},\"stage\":\"{}\",\"width\":{},\"height\":{},\"format\":\"rgba8\",\"range\":\"full\",\"matrix\":\"bt709\",\"row_order\":\"{}\",\"bytes\":{},\"complete\":true}}\n",
++                            "{{\"schema\":1,\"timestamp_ns\":{},\"frame_index\":{},\"stage\":\"{}\",\"width\":{},\"height\":{},\"format\":\"rgba8\",\"range\":\"full\",\"matrix\":\"bt709\",\"row_order\":\"{}\",\"bytes\":{},\"legacy_range_remap\":{},\"complete\":true}}\n",
+                             job.timestamp, job.index, image.stage, image.size.x, image.size.y,
+-                            image.row_order, image.pixels.len()))?;
++                            image.row_order, image.pixels.len(), image.legacy_range_remap))?;
+                         Ok(())
+                     })();
+                     marker(format!("timestamp_ns={} stage={} write={result:?}", job.timestamp, image.stage));
+@@ -62,7 +62,7 @@ impl FrameDump {
+     }
+ 
+     pub unsafe fn begin(&mut self, context: &Rc<GraphicsContext>, source: *mut c_void,
+-        timestamp: u64, packed: UVec2) {
++        timestamp: u64, packed: UVec2, legacy_range_remap: bool) {
+         self.pending = None;
+         if source.is_null() || self.last_timestamp == Some(timestamp) { return; }
+         self.last_timestamp = Some(timestamp);
+@@ -74,7 +74,7 @@ impl FrameDump {
+         let start = Instant::now();
+         // Preserve/sample the decoder output BEFORE the production renderer imports
+         // it (the legacy EGL import need not preserve contents).
+-        let result = read_decoded(context, source, packed, None);
++        let result = read_decoded(context, source, packed, None, legacy_range_remap);
+         let mut images = vec![];
+         match result {
+             Ok(image) => images.push(image),
+@@ -199,7 +199,7 @@ unsafe fn read_pixels(gl: &gl::Context, size: UVec2) -> Result<Vec<u8>, String>
+ }
+ 
+ unsafe fn read_decoded(context: &GraphicsContext, source: *mut c_void,
+-    packed: UVec2, test_image: Option<super::egl::EGLImage>) -> Result<Image, String> {
++    packed: UVec2, test_image: Option<super::egl::EGLImage>, legacy_range_remap: bool) -> Result<Image, String> {
+     let gl = &context.gl_context;
+     if !gl.supported_extensions().contains("GL_OES_EGL_image_external_essl3") { return Err("missing external-image ESSL3".into()); }
+     let _state = State::save(gl);
+@@ -243,8 +243,9 @@ unsafe fn read_decoded(context: &GraphicsContext, source: *mut c_void,
+     gl.viewport(0, 0, size.x as i32, size.y as i32);
+     gl.use_program(Some(program));
+     gl.uniform_1_i32(gl.get_uniform_location(program, "tex").as_ref(), 0);
++    gl.uniform_1_i32(gl.get_uniform_location(program, "legacy_range_remap").as_ref(), legacy_range_remap as i32);
+     gl.draw_arrays(gl::TRIANGLES, 0, 3);
+-    Ok(Image { stage: "post_decode", size, pixels: read_pixels(gl, size)?, row_order: "top_down" })
++    Ok(Image { stage: "post_decode", size, pixels: read_pixels(gl, size)?, row_order: "top_down", legacy_range_remap })
+ }
+ 
+ unsafe fn read_presented(context: &GraphicsContext, size: UVec2, textures: [u32; 2]) -> Result<Vec<Image>, String> {
+@@ -259,7 +260,7 @@ unsafe fn read_presented(context: &GraphicsContext, size: UVec2, textures: [u32;
+     for (stage, texture) in ["presented_left", "presented_right"].into_iter().zip(textures) {
+         let texture = name(texture as i32).ok_or("missing swapchain texture")?;
+         gl.framebuffer_texture_2d(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, Some(gl::NativeTexture(texture)), 0);
+-        images.push(Image { stage, size, pixels: read_pixels(gl, size)?, row_order: "bottom_up" });
++        images.push(Image { stage, size, pixels: read_pixels(gl, size)?, row_order: "bottom_up", legacy_range_remap: false });
+     }
+     Ok(images)
+ }
+@@ -304,7 +305,17 @@ mod frame_dump_gles_tests {
+             gl.pixel_store_i32(gl::PACK_SKIP_PIXELS, 3);
+             gl.active_texture(gl::TEXTURE3);
+             let before = State::save(gl);
+-            let decoded = read_decoded(&context, std::ptr::null_mut(), UVec2::new(32, 32), Some(image)).unwrap();
++            let decoded = read_decoded(&context, std::ptr::null_mut(), UVec2::new(32, 32), Some(image), false).unwrap();
++            let remapped = read_decoded(&context, std::ptr::null_mut(), UVec2::new(32, 32), Some(image), true).unwrap();
++            assert!(remapped.legacy_range_remap);
++            assert!(!decoded.legacy_range_remap);
++            for (actual, source) in remapped.pixels.chunks_exact(4).zip(pixels.chunks_exact(4)) {
++                for c in 0..3 {
++                    let expected = (16.0 + f32::from(source[c]) * (219.0 / 255.0)).round() as u8;
++                    assert!(actual[c].abs_diff(expected) <= 1, "range remap channel {c}");
++                }
++                assert_eq!(actual[3], source[3]);
++            }
+             let mut images = read_presented(&context, UVec2::new(64, 32), [texture.0.get(); 2]).unwrap();
+             images.push(decoded);
+             assert_eq!(images.len(), 3);
+diff --git a/alvr/graphics/src/stream.rs b/alvr/graphics/src/stream.rs
+index 5015670f73d75b16702c89febb3c89ae278b769b..e679d34e42fa3ffbe7a59ff91d980e410c20d607 100644
+--- a/alvr/graphics/src/stream.rs
++++ b/alvr/graphics/src/stream.rs
+@@ -70,6 +70,7 @@ pub struct StreamRenderer {
+     dump_swapchains: [Vec<u32>; 2],
+     dump_view_resolution: UVec2,
+     dump_sdr: bool,
++    dump_legacy_range_remap: bool,
+     context: Rc<GraphicsContext>,
+     staging_renderer: StagingRenderer,
+     pipeline: RenderPipeline,
+@@ -332,6 +333,7 @@ impl StreamRenderer {
+             frame_dump: RefCell::new(None),
+             dump_swapchains: swapchain_textures,
+             dump_view_resolution: target_view_resolution,
++            dump_legacy_range_remap: fix_limited_range,
+             dump_sdr: matches!(target_format, TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb),
+             context,
+             staging_renderer,
+@@ -466,6 +468,10 @@ impl StreamRenderer {
+             return;
+         }
+         *self.frame_dump.borrow_mut() = super::frame_dump::FrameDump::new(value);
++        if self.frame_dump.borrow().is_some() {
++            crate::log_quest_experiment(format!("[Q3PW_FRAME_DUMP_RANGE] legacy_range_remap={} before_rgba8=true",
++                self.dump_legacy_range_remap));
++        }
+     }
+ 
+     /// Read the selected decoder output before the presentation import.
+@@ -473,7 +479,7 @@ impl StreamRenderer {
+     /// `source` is a completed, leased AHardwareBuffer.
+     pub unsafe fn begin_frame_capture(&self, source: *mut c_void, timestamp: u64) {
+         if let Some(dump) = self.frame_dump.borrow_mut().as_mut() {
+-            dump.begin(&self.context, source, timestamp, self.presentation_geometry.0);
++            dump.begin(&self.context, source, timestamp, self.presentation_geometry.0, self.dump_legacy_range_remap);
+         }
+     }
+ 
