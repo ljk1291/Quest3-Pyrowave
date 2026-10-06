@@ -176,7 +176,7 @@ index 779de33ca83d78d9b52c92193b54f60b00056503..d51c2750e698a61f047cb54e6f18135b
              ck!(gl.delete_texture(self.surface_texture));
              for framebuffer in &self.framebuffers {
 diff --git a/alvr/graphics/src/stream.rs b/alvr/graphics/src/stream.rs
-index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..b38426ef83f116b6912e85ac53cd2e9485b76043 100644
+index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..d1c216c6f81bd93418e648ed3b06404da251e018 100644
 --- a/alvr/graphics/src/stream.rs
 +++ b/alvr/graphics/src/stream.rs
 @@ -182,6 +182,12 @@ impl StreamRenderer {
@@ -222,7 +222,7 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..b38426ef83f116b6912e85ac53cd2e94
      pub fn last_copy_was_direct(&self) -> bool { self.last_copy_direct.get() }
  
      pub fn poll_import_copy(&self) -> (bool, Option<f32>) {
-@@ -720,3 +735,128 @@ pub fn compute_target_view_resolution(
+@@ -720,3 +735,131 @@ pub fn compute_target_view_resolution(
      }
      target_resolution.as_uvec2()
  }
@@ -321,6 +321,9 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..b38426ef83f116b6912e85ac53cd2e94
 +                    renderer.render(ptr::null_mut(),[
 +                        StreamViewParams {swapchain_index:0,reprojection_rotation:Quat::IDENTITY,fov},
 +                        StreamViewParams {swapchain_index:0,reprojection_rotation:Quat::IDENTITY,fov}],None);
++                    // WGPU's EGL guard releases the context after submission.
++                    // Raw GLES readback needs to make the shared context current.
++                    context.make_current();
 +                    gl.finish();
 +                    let fbo=gl.create_framebuffer().unwrap();
 +                    for eye in 0..2 {
