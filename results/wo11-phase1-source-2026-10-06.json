@@ -1,0 +1,207 @@
+{
+  "schema": 1,
+  "work_order": "WO-11",
+  "date": "2026-10-06",
+  "phase": 1,
+  "status": "source_candidate_ci_pending",
+  "branch": "codex/wo11-dualstream-h264",
+  "base_commit": "c7513be438c8638f80c5ca79ab3aec5d044c0134",
+  "owner_decision": {
+    "date": "2026-10-06",
+    "explicit_start_authorized": true,
+    "original_design_trigger": "partly_met_owner_requested_implementation",
+    "evidence_source": "Owner-supplied codex/t4-offline-500: results/offline-500-rescore-2026-10-06.md",
+    "offline_500_mbps": [
+      {
+        "proxy": "full-density dual-eye H264 P7",
+        "fence_psnr_db": 45.14,
+        "temporal_p99": 6,
+        "hvs_db": 46.25
+      },
+      {
+        "proxy": "single H264Fit P7",
+        "fence_psnr_db": 46.26,
+        "temporal_p99": 5,
+        "hvs_db": 36.82
+      },
+      {
+        "proxy": "Medium 9/7 RDO24 PyroWave",
+        "fence_psnr_db": 37.27,
+        "temporal_p99": 16,
+        "hvs_db": 35.58
+      }
+    ],
+    "target": {
+      "per_eye_resolution": [
+        3072,
+        3232
+      ],
+      "fresh_stereo_hz": 90,
+      "total_mbps": 500,
+      "eye_mbps": [
+        250,
+        250
+      ]
+    },
+    "nvenc_h264_cap_geometry": [
+      4096,
+      4096
+    ],
+    "cap_evidence": "Owner-provided recorded RTX 5080 cap; not queried in this work",
+    "quality_is_offline_only": true
+  },
+  "protocol_version": "20.13.0-ljk1291.3",
+  "access_unit_version": 1,
+  "access_unit_header_bytes": 56,
+  "dual_default": false,
+  "dual_runtime_effective": false,
+  "dual_start_refusal": "pipeline_not_implemented",
+  "dual_live_encoder_decoder_presentation_wired": false,
+  "pairing_max_pending_pairs": 8,
+  "pairing_deadline": "Caller-supplied monotonic Duration; common for both eyes, never extended",
+  "pairing_recovery": "Flush all pending handles and both decoder queues; IDR both eyes; strictly newer generation required",
+  "compatibility": "Previous fork/stock protocol refused; dual requires exact stamped build identity and explicit matching AU version",
+  "source_lock_sha256": "83c57889e23c0cf30f7b5127196c9abb48ce713b481ee80ce064b1604d1d3da8",
+  "overlay": {
+    "path": "patches/dual-stream-h264-phase1.patch",
+    "sha256": "d0b4f12010f49595bfe727826125173364e76059562fe756189fa68f1d31bd1f",
+    "stack_position": "last after direct-eye-foveation.patch",
+    "regeneration": "git diff --no-index --binary --full-index --output between isolated reconstructions; snapshot path prefixes normalized",
+    "forward_apply": "pass",
+    "reverse_check": "pass",
+    "whitespace_error_apply": "pass",
+    "byte_exact_reconstructed_files": 553,
+    "changed_reconstructed_files": [
+      "Cargo.toml",
+      "alvr/client_core/src/connection.rs",
+      "alvr/client_core/src/lib.rs",
+      "alvr/client_core/src/stereo_pairing.rs",
+      "alvr/common/src/version.rs",
+      "alvr/packets/src/dual_stream.rs",
+      "alvr/packets/src/lib.rs",
+      "alvr/server_core/src/connection.rs",
+      "alvr/session/src/beta.rs",
+      "alvr/session/src/beta_tests.rs",
+      "alvr/session/src/settings.rs"
+    ],
+    "unchanged_reconstructed_files": 542,
+    "preceding_overlays_unchanged": true,
+    "reconstructed_file_sha256": {
+      "Cargo.toml": "8969407a21db4cbfbe59ccf5ff4eadf881b4bb8d03330f659af0a807ed7dcb5b",
+      "alvr/client_core/src/connection.rs": "872bb39c9293ba4411e1603b1d441db6c8cc5d826710bb2bda76a6096ce326db",
+      "alvr/client_core/src/lib.rs": "ae6b4e2b5bcfb3f0431f072bb8213db7353af8de8d36c0ded65c6086164b012a",
+      "alvr/client_core/src/stereo_pairing.rs": "fb56d5caac8909e594d70eac452cea07f6012f5ba31ec04640ab992a3b521a5a",
+      "alvr/common/src/version.rs": "795b14a7a25c1b6dc8ce381c56bacd3c48db63643ad3d29d42583ca57761de04",
+      "alvr/packets/src/dual_stream.rs": "8b1cb08aff042558116f1e57806f45730d3de3d11bf797b6c03cc05c3e205b96",
+      "alvr/packets/src/lib.rs": "22da9341b57d57038fcfbab4b6dde7bdec6410aac4ae960b3945a2453547fc8e",
+      "alvr/server_core/src/connection.rs": "67886fa7921dd7bd46c186d8c171d6858fe96c719e939799fa711666bb276382",
+      "alvr/session/src/beta.rs": "c7426734342304d63303661c087034f949b320cc6a9320649db98183673c2c10",
+      "alvr/session/src/beta_tests.rs": "91d24ff0405b0940c17d1b186a2720a90c89b55761b6b148329d9c958f8ebb75",
+      "alvr/session/src/settings.rs": "04388894388bb365cd149ba2d2790c2b80b53fbe11faa13a6d6c9e1324b95173"
+    }
+  },
+  "local_checks": [
+    {
+      "command": "Q3PW_WO11_TREE=<reconstruction> python -m unittest discover -s tests -v",
+      "result": "pass",
+      "run": 135,
+      "passed": 134,
+      "skipped": 1,
+      "skip_reason": "No host C++ compiler for existing decode-priority policy test; CI runs it"
+    },
+    {
+      "command": "python -m pytest tools/tests/test_ci_pins.py tools/tests/test_build_metadata.py -q",
+      "result": "pass",
+      "passed": 17
+    },
+    {
+      "command": "python -m unittest tools.tests.test_dualstream_h264_design tools.tests.test_nvenc_dimension_preflight -v",
+      "result": "pass",
+      "passed": 5
+    },
+    {
+      "command": "Q3PW_WO11_TREE=<reconstruction> python -m unittest discover -s tests -p test_dualstream_phase1_contract.py -v",
+      "result": "pass",
+      "passed": 7,
+      "included_in_135": true
+    },
+    {
+      "command": "sh -n tools/ci/fetch_sources.sh",
+      "result": "pass"
+    },
+    {
+      "command": "git diff --check and strict git apply --whitespace=error in reconstruction",
+      "result": "pass"
+    },
+    {
+      "command": "signature/constructor/module-visibility/scope/lifetime review; reread changed functions",
+      "result": "source_review_complete_compilation_unverified"
+    }
+  ],
+  "new_rust_tests": {
+    "pure_production_host_tests": 16,
+    "packet_json_tests": 4,
+    "session_schema_default_profile_tests": 1,
+    "total": 21,
+    "executed_locally": false,
+    "compiler_gate": "CI only; no Rust or C++ toolchain in sandbox"
+  },
+  "ci_required": {
+    "workflow": ".github/workflows/ci.yml",
+    "cpu_only": false,
+    "jobs": [
+      "tests",
+      "client",
+      "streamer",
+      "matching-pair"
+    ],
+    "host_harness": "tools/wo11_contract_test.rs compiles production packet/pairing modules with pinned rustc",
+    "cargo_packages": [
+      "alvr_packets",
+      "alvr_session",
+      "alvr_common",
+      "alvr_client_core",
+      "alvr_server_core",
+      "alvr_client_openxr",
+      "alvr_dashboard"
+    ],
+    "status": "not_dispatched_not_run_for_this_change"
+  },
+  "hardware_gates": {
+    "runtime_accepts_90_hz": null,
+    "standalone_decode_within_11_11_ms": null,
+    "live_vr_sustains_90_fresh_stereo_per_second": null,
+    "probe_specifications_prepared": true,
+    "probes_run": false,
+    "owner_in_headset_signoff": null
+  },
+  "actions": {
+    "committed": false,
+    "pushed": false,
+    "pr_opened": false,
+    "ci_dispatched": false,
+    "adb_used": false,
+    "installed": false,
+    "vr_apps_launched": false,
+    "gpu_work_run": false,
+    "settings_changed": false,
+    "arm_file_used": false
+  },
+  "historical_scoring": "New source lock is not qualified for retained historical HVS scoring; no scorer or scoring harness changed",
+  "changed_repository_files": [
+    ".github/workflows/ci.yml",
+    "docs/ARTIFACT-QUALITY-STATUS.md",
+    "docs/WO-11-IMPLEMENTATION-PLAN.md",
+    "fork.json",
+    "patches/README.md",
+    "patches/dual-stream-h264-phase1.patch",
+    "results/wo11-phase1-source-2026-10-06.json",
+    "sources.lock.json",
+    "tests/test_dualstream_phase1_contract.py",
+    "tools/ci/fetch_sources.sh",
+    "tools/ci/source_lock.py",
+    "tools/wo11_contract_test.rs"
+  ],
+  "ignored_work": "Isolated upstream archive, baseline/work/verification trees and CPU logs under ws/wo11; no private captures or device identifiers",
+  "next_phase": "After CI passes: phase-2 atomic per-eye NVENC, texture separation and typed complete-AU TCP packetizer. Keep startup refusal until decoder/presentation lifecycle is complete."
+}

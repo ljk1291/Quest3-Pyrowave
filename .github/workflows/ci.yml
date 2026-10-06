@@ -48,6 +48,11 @@ jobs:
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
           rustup run "$RUST_TOOLCHAIN" rustc --edition=2021 --test "$XRWIRED_INPUTS/research/ALVR-20.13.0/alvr/client_openxr/src/layer_filter.rs" -o /tmp/layer-filter-policy
           /tmp/layer-filter-policy
+      - name: WO-11 production AU framing and bounded stereo pairing (CPU only)
+        run: |
+          Q3PW_WO11_TREE="$XRWIRED_INPUTS/research/ALVR-20.13.0" python3 -m unittest discover -s tests -p test_dualstream_phase1_contract.py -v
+          rustup run "$RUST_TOOLCHAIN" rustc --edition=2021 --test tools/wo11_contract_test.rs -o /tmp/wo11-contract
+          /tmp/wo11-contract
       - run: python3 -m unittest tools.tests.test_dualstream_h264_design -v
       - run: g++ -std=c++17 -Wall -Werror tools/pyroclient/decode_path_test.cpp -o /tmp/decode-path && /tmp/decode-path
       - name: Opt-in decoder queue priority parsing and fallback (CPU only)

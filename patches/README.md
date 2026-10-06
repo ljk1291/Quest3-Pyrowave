@@ -1,5 +1,32 @@
 # Patches
 
+## `dual-stream-h264-phase1.patch`: WO-11 contract candidate
+
+Stack last after `direct-eye-foveation.patch` on the complete locked ALVR tree.
+SHA-256 is pinned in `sources.lock.json`, validated by `source_lock.py` and checked
+before `fetch_sources.sh` applies it. Original ALVR and fork credits are retained.
+The [phased plan](../docs/WO-11-IMPLEMENTATION-PLAN.md) records the owner's explicit
+2026-10-06 decision to proceed despite the original quality trigger being only
+partly met, and the revised 500 Mbps **total** candidate budget (250 per eye).
+
+Adds a visible default-off setting, H.264/8-bit/SDR/TCP/no-foveation validation,
+constant total bitrate split, protocol `20.13.0-ljk1291.3`, explicit AU-version
+negotiation, fixed per-eye AU headers and a pure bounded client pairing table.
+Both peers refuse requested dual startup with native requested/effective/reason
+markers until later phases implement the complete pipeline. Framing capability
+does not assert two hardware decoders. The old `VideoPacketHeader`, encoder,
+decoder, OpenXR rendering and shaders are untouched; old peers explicitly fail
+protocol compatibility, including when the new setting is off.
+
+The 11 reconstructed files are listed in the source evidence. Regeneration uses
+`git diff --no-index --binary --full-index --output=...` between ignored baseline
+and modified tree snapshots, normalizing only directory prefixes. This includes
+new files without an index lock; clean forward apply, reverse check and byte-exact
+file comparison are required. Production Rust framing/pairing tests run through
+`tools/wo11_contract_test.rs` in the CPU CI job; actual JSON/schema/protocol tests
+run in the full native package-test job. No hardware or 90 Hz claim follows from
+these checks. [Source evidence](../results/wo11-phase1-source-2026-10-06.json).
+
 ## `presentation-filters.patch`: T2 compositor tokens and PC session downsample
 
 Additive overlay after `foveated-staging-correctness.patch`, on the complete locked
@@ -19,7 +46,7 @@ reconstructs the tree.
 
 ## `direct-eye-foveation.patch`: T1 opt-in WO-8 reconstruction
 
-Stack last, after `foveated-staging-correctness.patch`; SHA-256 is pinned in
+Stack after `presentation-filters.patch` and before the WO-11 phase-1 overlay; SHA-256 is pinned in
 `sources.lock.json`. The Android init property `debug.q3pw.direct_eye_foveation`
 defaults off and additionally requires direct-eye copy and synchronous PyroWave
 import/copy. Light, Medium and H264Fit reuse the existing WGSL constants and

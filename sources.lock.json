@@ -59,6 +59,10 @@
     "direct_eye_foveation": {
       "path": "patches/direct-eye-foveation.patch",
       "sha256": "3c0e470ed3dee013614a7ba8b307c9d3199dd245babb16403ce2ec5e6fc4f259"
+    },
+    "dual_stream_h264_phase1": {
+      "path": "patches/dual-stream-h264-phase1.patch",
+      "sha256": "d0b4f12010f49595bfe727826125173364e76059562fe756189fa68f1d31bd1f"
     }
   },
   "rust": "1.97.1",

@@ -1,0 +1,960 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 837d2d7dfe90b26bccb878a6b744702730786def..f51c22aae69cc075b331090b224b30f2dc98c39d 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -4,7 +4,7 @@ members = ["alvr/*"]
+ 
+ [workspace.package]
+ # Pre-release tag: a different protocol ID, so stock ALVR 20.x clients and servers are refused
+-version = "20.13.0-ljk1291.2"
++version = "20.13.0-ljk1291.3"
+ edition = "2021"
+ rust-version = "1.82"
+ authors = ["alvr-org"]
+diff --git a/alvr/client_core/src/connection.rs b/alvr/client_core/src/connection.rs
+index f375aea9c55120ec8db017a0263e375ddaad5c40..165d4227f932d8db0e60c85cbbc68831dd3cf424 100644
+--- a/alvr/client_core/src/connection.rs
++++ b/alvr/client_core/src/connection.rs
+@@ -215,6 +215,8 @@ fn connection_pipeline(
+             server_ip,
+             streaming_capabilities: Some(
+                 alvr_packets::encode_video_streaming_capabilities(&VideoStreamingCapabilities {
++                    dual_stream_h264_version: Some(alvr_packets::dual_stream::VERSION),
++                    dual_stream_h264_build: Some(ALVR_VERSION.to_string()),
+                     default_view_resolution: capabilities.default_view_resolution,
+                     supported_refresh_rates: capabilities.refresh_rates,
+                     microphone_sample_rate,
+@@ -237,6 +239,26 @@ fn connection_pipeline(
+     dbg_connection!("connection_pipeline: stream config received");
+ 
+     let stream_config = alvr_packets::decode_stream_config(&config_packet).to_con()?;
++    if !alvr_common::is_version_compatible(&stream_config.server_version) {
++        warn!("[WO11_DUAL_H264] side=client requested={} effective=false reason=incompatible_server_protocol",
++            stream_config.settings.video.dual_stream_h264);
++        alvr_common::con_bail!("WO-11: incompatible server protocol {}", stream_config.server_version);
++    }
++    let dual_requested = stream_config.settings.video.dual_stream_h264;
++    let server_build = stream_config.server_version.to_string();
++    let client_build = ALVR_VERSION.to_string();
++    if let Err(reason) = alvr_packets::dual_stream::negotiate_build(
++        dual_requested, Some(server_build.as_str()), client_build.as_str(),
++    ) {
++        warn!("[WO11_DUAL_H264] side=client requested=true effective=false reason={reason}");
++        alvr_common::con_bail!("WO-11 compatibility refused: {reason}");
++    }
++    info!("[WO11_DUAL_H264] side=client requested={} effective=false framing_version={:?} reason={}",
++        dual_requested, stream_config.negotiated_config.dual_stream_h264_version,
++        if dual_requested { "pipeline_not_implemented" } else { "disabled" });
++    if dual_requested {
++        alvr_common::con_bail!("WO-11: dual encoder/decoder pipeline not implemented in phase 1");
++    }
+ 
+     ctx.uses_multimodal_protocol
+         .set(stream_config.negotiated_config.use_multimodal_protocol);
+diff --git a/alvr/client_core/src/lib.rs b/alvr/client_core/src/lib.rs
+index 041310ea643e7581b36ae17d1fea3b869676a52e..9812a2b1f291ffcc76baeff6763e821e01adb5ca 100644
+--- a/alvr/client_core/src/lib.rs
++++ b/alvr/client_core/src/lib.rs
+@@ -17,6 +17,7 @@ pub mod performance;
+ mod audio;
+ 
+ pub mod video_decoder;
++pub mod stereo_pairing;
+ 
+ use alvr_common::{
+     dbg_client_core, error,
+diff --git a/alvr/client_core/src/stereo_pairing.rs b/alvr/client_core/src/stereo_pairing.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..503bb289163955a4f64ee9abd3f09275a95d702c
+--- /dev/null
++++ b/alvr/client_core/src/stereo_pairing.rs
+@@ -0,0 +1,358 @@
++//! Bounded decoded-eye pairing policy. No decoder, network, OpenXR or clock dependency.
++//! The caller owns both decoder queues and MUST honor every Recovery before new input.
++use alvr_packets::dual_stream::{AccessUnitHeader, MAX_ACCESS_UNIT_BYTES};
++use std::{collections::BTreeMap, time::Duration};
++
++pub const MAX_PENDING_PAIRS: usize = 8;
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum DropReason {
++    Generation, InvalidHeader, Duplicate, PoseMismatch, IdOrder, Timeout,
++    QueueFull, DecoderFault, Disconnect, ClockRegression,
++}
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub struct Recovery {
++    pub reason: DropReason,
++    pub flush_decoder_queues: [bool; 2],
++    pub request_idr: [bool; 2],
++    pub require_new_generation: bool,
++}
++
++#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
++pub struct PairingStats {
++    pub paired: u64,
++    pub dropped: u64,
++    pub incomplete: u64,
++    pub late: u64,
++    pub duplicates: u64,
++    pub pose_mismatch: u64,
++    pub resync: u64,
++    pub queue_full: u64,
++}
++
++pub struct StereoPair<T> {
++    pub generation: u64,
++    pub stereo_frame_id: u64,
++    pub pose_id: u64,
++    pub headers: [AccessUnitHeader; 2],
++    pub eyes: [T; 2],
++}
++
++struct Entry<T> {
++    deadline: Duration,
++    eyes: [Option<(AccessUnitHeader, T)>; 2],
++}
++
++pub struct PairingTable<T> {
++    capacity: usize,
++    timeout: Duration,
++    generation: Option<u64>,
++    last_generation: u64,
++    last_now: Option<Duration>,
++    retired: Option<(u64, [u64; 2])>,
++    // Generation is fixed for this table; frame and pose complete the key.
++    entries: BTreeMap<(u64, u64), Entry<T>>,
++    stats: PairingStats,
++}
++
++impl<T> PairingTable<T> {
++    pub fn new(capacity: usize, timeout: Duration) -> Result<Self, &'static str> {
++        if capacity == 0 || capacity > MAX_PENDING_PAIRS || timeout.is_zero() {
++            return Err("invalid_pairing_bounds");
++        }
++        Ok(Self { capacity, timeout, generation: None, last_generation: 0, last_now: None,
++            retired: None, entries: BTreeMap::new(), stats: PairingStats::default() })
++    }
++
++    pub fn len(&self) -> usize { self.entries.len() }
++    pub fn is_empty(&self) -> bool { self.entries.is_empty() }
++    pub fn stats(&self) -> PairingStats { self.stats }
++
++    /// Called only AFTER both queues were flushed and both IDRs requested.
++    /// Generations never wrap/reuse: exhausted u64 requires a new connection identity.
++    pub fn begin_generation(&mut self, generation: u64) -> Result<(), Recovery> {
++        if generation == 0 || generation <= self.last_generation {
++            return Err(self.recover(DropReason::Generation));
++        }
++        if self.generation.is_some() { self.recover(DropReason::Generation); }
++        self.generation = Some(generation);
++        self.last_generation = generation;
++        self.retired = None;
++        self.last_now = None;
++        Ok(())
++    }
++
++    fn recover(&mut self, reason: DropReason) -> Recovery {
++        self.stats.dropped += self.entries.len() as u64;
++        self.stats.incomplete += self.entries.values()
++            .filter(|entry| entry.eyes.iter().any(Option::is_none)).count() as u64;
++        self.stats.resync += 1;
++        match reason {
++            DropReason::Timeout => self.stats.late += 1,
++            DropReason::Duplicate => self.stats.duplicates += 1,
++            DropReason::PoseMismatch => self.stats.pose_mismatch += 1,
++            DropReason::QueueFull => self.stats.queue_full += 1,
++            _ => (),
++        }
++        self.entries.clear();
++        self.generation = None;
++        self.retired = None;
++        Recovery { reason, flush_decoder_queues: [true; 2], request_idr: [true; 2],
++            require_new_generation: true }
++    }
++
++    /// Use the same monotonic now for both eyes; a deadline is never extended.
++    pub fn expire(&mut self, now: Duration) -> Result<(), Recovery> {
++        if self.last_now.is_some_and(|last| now < last) {
++            return Err(self.recover(DropReason::ClockRegression));
++        }
++        self.last_now = Some(now);
++        if self.entries.values().any(|entry| now >= entry.deadline) {
++            return Err(self.recover(DropReason::Timeout));
++        }
++        Ok(())
++    }
++
++    /// AU identity is independent for each eye. Delivery may be out of order,
++    /// but encode order must agree with frame order within a generation.
++    pub fn insert(&mut self, header: AccessUnitHeader, encoded_bytes: usize, eye: T,
++        now: Duration) -> Result<(), Recovery> {
++        self.expire(now)?;
++        if Some(header.generation) != self.generation {
++            return Err(self.recover(DropReason::Generation));
++        }
++        if header.byte_count == 0 || header.byte_count > MAX_ACCESS_UNIT_BYTES
++            || encoded_bytes != header.byte_count as usize {
++            return Err(self.recover(DropReason::InvalidHeader));
++        }
++        let index = header.stream_id.index();
++        if let Some((frame, aus)) = self.retired {
++            if header.stereo_frame_id <= frame || header.access_unit_id <= aus[index] {
++                return Err(self.recover(DropReason::IdOrder));
++            }
++        }
++        let key = (header.stereo_frame_id, header.pose_id);
++        let mut fault = None;
++        for (&(frame, pose), entry) in &self.entries {
++            // Reorder only within the bounded frame window. Without this, a
++            // simultaneous frame/AU wrap could look like an ancient reordered AU.
++            if frame.abs_diff(header.stereo_frame_id) > MAX_PENDING_PAIRS as u64 {
++                fault = Some(DropReason::IdOrder); break;
++            }
++            if frame == header.stereo_frame_id && pose != header.pose_id {
++                fault = Some(DropReason::PoseMismatch); break;
++            }
++            if let Some((other, _)) = &entry.eyes[index] {
++                if frame == header.stereo_frame_id {
++                    fault = Some(DropReason::Duplicate); break;
++                }
++                if (frame < header.stereo_frame_id && other.access_unit_id >= header.access_unit_id)
++                    || (frame > header.stereo_frame_id && other.access_unit_id <= header.access_unit_id) {
++                    fault = Some(DropReason::IdOrder); break;
++                }
++            }
++        }
++        if let Some(reason) = fault { return Err(self.recover(reason)); }
++        if !self.entries.contains_key(&key) {
++            if self.entries.len() == self.capacity { return Err(self.recover(DropReason::QueueFull)); }
++            let Some(deadline) = now.checked_add(self.timeout) else {
++                return Err(self.recover(DropReason::Timeout));
++            };
++            self.entries.insert(key, Entry { deadline, eyes: [None, None] });
++        }
++        self.entries.get_mut(&key).unwrap().eyes[index] = Some((header, eye));
++        Ok(())
++    }
++
++    /// Only the oldest pending frame may be selected, and only for its exact pose.
++    /// Complete pairs stay bounded until selection; no newer eye can bypass a lost eye.
++    pub fn take_for_prediction(&mut self, frame: u64, pose: u64, now: Duration)
++        -> Result<Option<StereoPair<T>>, Recovery> {
++        self.expire(now)?;
++        let Some((&key, entry)) = self.entries.first_key_value() else { return Ok(None); };
++        if key.0 != frame { return Ok(None); }
++        if key.1 != pose { return Err(self.recover(DropReason::PoseMismatch)); }
++        if entry.eyes.iter().any(Option::is_none) { return Ok(None); }
++        let entry = self.entries.remove(&key).unwrap();
++        let [left, right] = entry.eyes;
++        let (lh, left) = left.unwrap();
++        let (rh, right) = right.unwrap();
++        self.retired = Some((frame, [lh.access_unit_id, rh.access_unit_id]));
++        self.stats.paired += 1;
++        Ok(Some(StereoPair { generation: lh.generation, stereo_frame_id: frame, pose_id: pose,
++            headers: [lh, rh], eyes: [left, right] }))
++    }
++
++    pub fn decoder_fault(&mut self) -> Recovery { self.recover(DropReason::DecoderFault) }
++    pub fn disconnect(&mut self) -> Recovery { self.recover(DropReason::Disconnect) }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use alvr_packets::dual_stream::Eye;
++    fn now(ms: u64) -> Duration { Duration::from_millis(ms) }
++    fn table(capacity: usize) -> PairingTable<&'static str> {
++        let mut t = PairingTable::new(capacity, now(10)).unwrap();
++        t.begin_generation(1).unwrap(); t
++    }
++    fn h(eye: Eye, frame: u64, pose: u64, au: u64) -> AccessUnitHeader {
++        AccessUnitHeader { stream_id: eye, stereo_frame_id: frame, generation: 1,
++            pose_id: pose, access_unit_id: au, encode_timestamp_ns: 123, byte_count: 4 }
++    }
++    fn put(t: &mut PairingTable<&'static str>, eye: Eye, frame: u64, pose: u64, au: u64, ms: u64) {
++        t.insert(h(eye, frame, pose, au), 4,
++            if eye == Eye::Left { "LEFT" } else { "RIGHT" }, now(ms)).unwrap();
++    }
++    fn recovery(r: Recovery, reason: DropReason) {
++        assert_eq!(r.reason, reason);
++        assert_eq!(r.flush_decoder_queues, [true; 2]);
++        assert_eq!(r.request_idr, [true; 2]);
++        assert!(r.require_new_generation);
++    }
++    #[test]
++    fn distinct_eye_au_ids_and_out_of_order_delivery_keep_eye_and_pose() {
++        let mut t = table(3);
++        put(&mut t, Eye::Right, 2, 102, 22, 0);
++        put(&mut t, Eye::Left, 1, 101, 11, 1);
++        assert!(t.take_for_prediction(1, 101, now(1)).unwrap().is_none());
++        put(&mut t, Eye::Right, 1, 101, 21, 2);
++        put(&mut t, Eye::Left, 2, 102, 12, 3);
++        assert!(t.take_for_prediction(2, 102, now(3)).unwrap().is_none());
++        for (frame, aus) in [(1, [11, 21]), (2, [12, 22])] {
++            let pair = t.take_for_prediction(frame, 100 + frame, now(4)).unwrap().unwrap();
++            assert_eq!(pair.eyes, ["LEFT", "RIGHT"]);
++            assert_eq!(pair.headers.map(|header| header.access_unit_id), aus);
++            assert_eq!((pair.generation, pair.stereo_frame_id, pair.pose_id), (1, frame, 100 + frame));
++        }
++        assert!(t.is_empty()); assert_eq!(t.stats().paired, 2);
++    }
++    #[test]
++    fn one_eye_loss_blocks_newer_pair_and_flushes_both_at_deadline() {
++        let mut t = table(3);
++        put(&mut t, Eye::Left, 1, 101, 11, 0);
++        put(&mut t, Eye::Left, 2, 102, 12, 1);
++        put(&mut t, Eye::Right, 2, 102, 22, 1);
++        assert!(t.take_for_prediction(2, 102, now(9)).unwrap().is_none());
++        recovery(t.expire(now(10)).unwrap_err(), DropReason::Timeout);
++        assert_eq!((t.stats().dropped, t.stats().incomplete, t.stats().late), (2, 1, 1));
++        assert!(t.is_empty());
++        recovery(t.insert(h(Eye::Right, 1, 101, 21), 4, "RIGHT", now(11)).unwrap_err(), DropReason::Generation);
++    }
++    #[test]
++    fn duplicate_drops_whole_frame_and_requires_new_generation() {
++        let mut t = table(2);
++        put(&mut t, Eye::Left, 1, 101, 11, 0);
++        recovery(t.insert(h(Eye::Left, 1, 101, 11), 4, "WRONG", now(1)).unwrap_err(), DropReason::Duplicate);
++        assert_eq!(t.stats().duplicates, 1); assert_eq!(t.stats().dropped, 1);
++        assert!(t.take_for_prediction(1, 101, now(2)).unwrap().is_none());
++    }
++    #[test]
++    fn mismatched_pose_is_never_paired_or_selected() {
++        let mut t = table(2);
++        put(&mut t, Eye::Left, 1, 101, 11, 0);
++        recovery(t.insert(h(Eye::Right, 1, 999, 21), 4, "RIGHT", now(1)).unwrap_err(), DropReason::PoseMismatch);
++        let mut t = table(2);
++        put(&mut t, Eye::Left, 1, 101, 11, 0); put(&mut t, Eye::Right, 1, 101, 21, 0);
++        let result = t.take_for_prediction(1, 999, now(1));
++        recovery(result.err().unwrap(), DropReason::PoseMismatch);
++        assert_eq!(t.stats().paired, 0);
++    }
++    #[test]
++    fn generation_change_flushes_pending_and_cannot_rollback() {
++        let mut t = table(2); put(&mut t, Eye::Left, 1, 101, 11, 0);
++        t.begin_generation(2).unwrap(); assert!(t.is_empty());
++        assert_eq!(t.stats().incomplete, 1);
++        let header = AccessUnitHeader { generation: 2, ..h(Eye::Right, 1, 101, 21) };
++        t.insert(header, 4, "RIGHT", now(0)).unwrap();
++        assert!(t.take_for_prediction(1, 101, now(1)).unwrap().is_none());
++        recovery(t.begin_generation(1).unwrap_err(), DropReason::Generation);
++        recovery(t.begin_generation(2).unwrap_err(), DropReason::Generation);
++        t.begin_generation(3).unwrap();
++        recovery(t.insert(header, 4, "STALE", now(0)).unwrap_err(), DropReason::Generation);
++    }
++    #[test]
++    fn timeout_applies_to_complete_pairs_and_never_extends_for_second_eye() {
++        let mut t = table(2);
++        put(&mut t, Eye::Left, 1, 101, 11, 0); put(&mut t, Eye::Right, 1, 101, 21, 9);
++        let result = t.take_for_prediction(1, 101, now(10));
++        recovery(result.err().unwrap(), DropReason::Timeout);
++        assert_eq!(t.stats().incomplete, 0); assert_eq!(t.stats().paired, 0);
++    }
++    #[test]
++    fn queue_is_bounded_even_if_all_pairs_are_complete() {
++        let mut t = table(2);
++        for frame in 1..=2 {
++            put(&mut t, Eye::Left, frame, frame, frame, 0);
++            put(&mut t, Eye::Right, frame, frame, frame + 100, 0);
++        }
++        assert_eq!(t.len(), 2);
++        recovery(t.insert(h(Eye::Left, 3, 3, 3), 4, "LEFT", now(1)).unwrap_err(), DropReason::QueueFull);
++        assert_eq!(t.stats().queue_full, 1); assert!(t.is_empty());
++        for capacity in [0, MAX_PENDING_PAIRS + 1] {
++            assert!(PairingTable::<()>::new(capacity, now(1)).is_err());
++        }
++        assert!(PairingTable::<()>::new(1, now(0)).is_err());
++    }
++    #[test]
++    fn frame_and_au_wrap_require_new_generation() {
++        let mut t = table(2);
++        put(&mut t, Eye::Left, u64::MAX, 1, u64::MAX, 0);
++        put(&mut t, Eye::Right, u64::MAX, 1, u64::MAX, 0);
++        assert!(t.take_for_prediction(u64::MAX, 1, now(1)).unwrap().is_some());
++        recovery(t.insert(h(Eye::Left, 0, 2, 0), 4, "LEFT", now(2)).unwrap_err(), DropReason::IdOrder);
++        t.begin_generation(2).unwrap();
++        t.insert(AccessUnitHeader { generation: 2, ..h(Eye::Left, 0, 2, 0) }, 4, "LEFT", now(0)).unwrap();
++        let mut t = table(2);
++        put(&mut t, Eye::Left, 1, 1, u64::MAX, 0);
++        recovery(t.insert(h(Eye::Left, 2, 2, 0), 4, "LEFT", now(1)).unwrap_err(), DropReason::IdOrder);
++        let mut t = table(2);
++        put(&mut t, Eye::Left, u64::MAX, 1, u64::MAX, 0);
++        recovery(t.insert(h(Eye::Left, 0, 2, 0), 4, "LEFT", now(1)).unwrap_err(), DropReason::IdOrder);
++    }
++    #[test]
++    fn reused_au_and_displayed_frame_are_rejected() {
++        let mut t = table(2); put(&mut t, Eye::Left, 1, 1, 11, 0);
++        recovery(t.insert(h(Eye::Left, 2, 2, 11), 4, "LEFT", now(1)).unwrap_err(), DropReason::IdOrder);
++        let mut t = table(2);
++        put(&mut t, Eye::Left, 1, 1, 11, 0); put(&mut t, Eye::Right, 1, 1, 21, 0);
++        t.take_for_prediction(1, 1, now(1)).unwrap().unwrap();
++        recovery(t.insert(h(Eye::Right, 1, 1, 21), 4, "RIGHT", now(2)).unwrap_err(), DropReason::IdOrder);
++    }
++    #[test]
++    fn decoder_fault_disconnect_and_bad_payload_flush_everything() {
++        let mut t = table(2); put(&mut t, Eye::Left, 1, 1, 1, 0);
++        recovery(t.decoder_fault(), DropReason::DecoderFault); assert!(t.is_empty());
++        t.begin_generation(2).unwrap(); recovery(t.disconnect(), DropReason::Disconnect);
++        let mut t = table(2); put(&mut t, Eye::Left, 1, 1, 1, 0);
++        recovery(t.insert(h(Eye::Right, 1, 1, 2), 3, "RIGHT", now(1)).unwrap_err(), DropReason::InvalidHeader);
++        assert!(t.is_empty());
++    }
++    #[test]
++    fn clock_regression_and_generation_exhaustion_fail_closed() {
++        let mut t = table(2); t.expire(now(2)).unwrap();
++        recovery(t.expire(now(1)).unwrap_err(), DropReason::ClockRegression);
++        t.begin_generation(u64::MAX).unwrap();
++        recovery(t.begin_generation(0).unwrap_err(), DropReason::Generation);
++    }
++    #[test]
++    fn flush_releases_both_owned_eye_handles() {
++        use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
++        struct Handle(Arc<AtomicUsize>);
++        impl Drop for Handle {
++            fn drop(&mut self) { self.0.fetch_add(1, Ordering::SeqCst); }
++        }
++        let released = Arc::new(AtomicUsize::new(0));
++        let mut t = PairingTable::new(2, now(10)).unwrap();
++        t.begin_generation(1).unwrap();
++        for eye in [Eye::Left, Eye::Right] {
++            t.insert(h(eye, 1, 1, 1), 4, Handle(Arc::clone(&released)), now(0)).unwrap();
++        }
++        assert_eq!(released.load(Ordering::SeqCst), 0);
++        recovery(t.decoder_fault(), DropReason::DecoderFault);
++        assert_eq!(released.load(Ordering::SeqCst), 2);
++        t.begin_generation(2).unwrap();
++        assert!(t.take_for_prediction(1, 1, now(0)).unwrap().is_none());
++    }
++}
+diff --git a/alvr/common/src/version.rs b/alvr/common/src/version.rs
+index 87a113cd5a086582a4266fdfcf64020e18940efc..0dbbf629b1b350dba4f6e0c8b83d29e042749f0a 100644
+--- a/alvr/common/src/version.rs
++++ b/alvr/common/src/version.rs
+@@ -55,8 +55,10 @@ mod tests {
+ 
+     #[test]
+     fn telemetry_schema_protocol_rejects_the_previous_fork_prerelease() {
+-        let previous_schema = Version::parse("20.13.0-ljk1291.1").unwrap();
++        let previous_schema = Version::parse("20.13.0-ljk1291.2").unwrap();
+         assert!(!is_version_compatible(&previous_schema));
++        assert!(!is_version_compatible(&Version::parse("20.13.0-ljk1291.1").unwrap()));
++        assert!(!is_version_compatible(&Version::parse("20.13.0").unwrap()));
+         assert!(is_version_compatible(&ALVR_VERSION));
+     }
+ }
+diff --git a/alvr/packets/src/dual_stream.rs b/alvr/packets/src/dual_stream.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..a832d5ad935ea488be5615f95149c0693b2b303e
+--- /dev/null
++++ b/alvr/packets/src/dual_stream.rs
+@@ -0,0 +1,177 @@
++//! WO-11 framing contract. Pure CPU code; never used for the legacy VIDEO stream.
++pub const VERSION: u16 = 1;
++pub const HEADER_LEN: usize = 56;
++pub const MAX_ACCESS_UNIT_BYTES: u32 = 16 * 1024 * 1024;
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum Eye { Left, Right }
++
++impl Eye {
++    pub fn index(self) -> usize { match self { Self::Left => 0, Self::Right => 1 } }
++}
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub struct AccessUnitHeader {
++    pub stream_id: Eye,
++    pub stereo_frame_id: u64,
++    pub generation: u64,
++    pub pose_id: u64,
++    pub access_unit_id: u64,
++    pub encode_timestamp_ns: u64,
++    pub byte_count: u32,
++}
++
++impl AccessUnitHeader {
++    pub fn to_bytes(self) -> [u8; HEADER_LEN] {
++        let mut bytes = [0; HEADER_LEN];
++        bytes[0..4].copy_from_slice(b"DSH1");
++        bytes[4..6].copy_from_slice(&VERSION.to_le_bytes());
++        bytes[6] = self.stream_id.index() as u8;
++        for (i, value) in [self.generation, self.stereo_frame_id, self.pose_id,
++            self.access_unit_id, self.encode_timestamp_ns].into_iter().enumerate() {
++            bytes[8 + i * 8..16 + i * 8].copy_from_slice(&value.to_le_bytes());
++        }
++        bytes[48..52].copy_from_slice(&self.byte_count.to_le_bytes());
++        bytes
++    }
++
++    /// Header only: the TCP AU receiver must additionally call validate_payload.
++    /// Reserved bytes fail closed; this is not bincode or native struct layout.
++    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
++        if bytes.len() != HEADER_LEN || &bytes[0..4] != b"DSH1"
++            || u16::from_le_bytes(bytes[4..6].try_into().ok()?) != VERSION
++            || bytes[7] != 0 || bytes[52..56] != [0; 4] {
++            return None;
++        }
++        let stream_id = match bytes[6] { 0 => Eye::Left, 1 => Eye::Right, _ => return None };
++        let read = |offset| u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
++        let header = Self {
++            stream_id, generation: read(8), stereo_frame_id: read(16), pose_id: read(24),
++            access_unit_id: read(32), encode_timestamp_ns: read(40),
++            byte_count: u32::from_le_bytes(bytes[48..52].try_into().ok()?),
++        };
++        (header.generation != 0 && header.byte_count > 0
++            && header.byte_count <= MAX_ACCESS_UNIT_BYTES).then_some(header)
++    }
++
++    pub fn validate_payload(self, payload: &[u8]) -> bool {
++        self.generation != 0 && self.byte_count > 0
++            && self.byte_count <= MAX_ACCESS_UNIT_BYTES
++            && payload.len() == self.byte_count as usize
++    }
++}
++
++/// A framing capability is not proof of two hardware decoder sessions.
++pub fn negotiate(requested: bool, peer_version: Option<u16>) -> Result<bool, &'static str> {
++    if !requested { return Ok(false); }
++    match peer_version {
++        Some(VERSION) => Ok(true),
++        None => Err("missing_dual_stream_version"),
++        _ => Err("incompatible_dual_stream_version"),
++    }
++}
++
++pub fn validate_negotiated(requested: bool, version: Option<u16>) -> Result<(), &'static str> {
++    if requested != version.is_some() { return Err("dual_stream_request_effective_mismatch"); }
++    negotiate(requested, version).map(|_| ())
++}
++
++/// The signed-pair gate also verifies certificates/artifacts; this is runtime build identity.
++pub fn negotiate_build(requested: bool, peer_build: Option<&str>, local_build: &str)
++    -> Result<(), &'static str> {
++    if !requested { return Ok(()); }
++    if local_build.is_empty() || peer_build != Some(local_build) {
++        return Err("mismatched_dual_stream_build");
++    }
++    Ok(())
++}
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub struct BitrateSplit { pub total_bps: u64, pub eye_bps: [u64; 2] }
++
++/// Phase-1 candidate policy. Never mutates codec, foveation, transport or bitrate.
++pub fn request_policy(requested: bool, h264: bool, foveated: bool, ten_bit_or_hdr: bool,
++    tcp: bool, constant_mbps: Option<u64>) -> Result<Option<BitrateSplit>, &'static str> {
++    if !requested { return Ok(None); }
++    if !h264 { return Err("h264_only"); }
++    if foveated { return Err("foveation_must_be_off"); }
++    if ten_bit_or_hdr { return Err("eight_bit_sdr_only"); }
++    if !tcp { return Err("tcp_required"); }
++    let mbps = constant_mbps.ok_or("constant_total_bitrate_required")?;
++    if !(5..=500).contains(&mbps) { return Err("total_mbps_must_be_5_to_500"); }
++    let total_bps = mbps * 1_000_000;
++    Ok(Some(BitrateSplit { total_bps, eye_bps: [total_bps / 2; 2] }))
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    fn header() -> AccessUnitHeader {
++        AccessUnitHeader { stream_id: Eye::Left, stereo_frame_id: 9, generation: 2,
++            pose_id: 44, access_unit_id: 100, encode_timestamp_ns: 123, byte_count: 3 }
++    }
++    #[test]
++    fn distinct_eye_headers_round_trip_with_exact_little_endian_layout() {
++        for eye in [Eye::Left, Eye::Right] {
++            let h = AccessUnitHeader { stream_id: eye, ..header() };
++            let b = h.to_bytes();
++            assert_eq!(&b[0..8], &[b'D', b'S', b'H', b'1', 1, 0, eye.index() as u8, 0]);
++            assert_eq!(&b[16..24], &9_u64.to_le_bytes());
++            assert_eq!(AccessUnitHeader::from_bytes(&b), Some(h));
++            assert!(h.validate_payload(&[1, 2, 3]));
++            assert!(!h.validate_payload(&[1, 2]));
++        }
++    }
++    #[test]
++    fn malformed_headers_fail_closed() {
++        let b = header().to_bytes();
++        for offset in [0, 4, 6, 7, 52, 55] {
++            let mut bad = b; bad[offset] = 255;
++            assert!(AccessUnitHeader::from_bytes(&bad).is_none());
++        }
++        assert!(AccessUnitHeader::from_bytes(&b[..55]).is_none());
++        assert!(AccessUnitHeader::from_bytes(&[0; 57]).is_none());
++        for h in [AccessUnitHeader { generation: 0, ..header() },
++            AccessUnitHeader { byte_count: 0, ..header() },
++            AccessUnitHeader { byte_count: MAX_ACCESS_UNIT_BYTES + 1, ..header() }] {
++            assert!(AccessUnitHeader::from_bytes(&h.to_bytes()).is_none());
++            assert!(!h.validate_payload(&[1, 2, 3]));
++        }
++    }
++    #[test]
++    fn requested_mode_needs_explicit_matching_version() {
++        assert_eq!(negotiate(false, None), Ok(false));
++        assert_eq!(negotiate(false, Some(999)), Ok(false));
++        assert!(negotiate(true, None).is_err());
++        assert!(negotiate(true, Some(0)).is_err());
++        assert!(negotiate(true, Some(VERSION + 1)).is_err());
++        assert_eq!(negotiate(true, Some(VERSION)), Ok(true));
++        assert_eq!(validate_negotiated(false, None), Ok(()));
++        assert_eq!(validate_negotiated(true, Some(VERSION)), Ok(()));
++        assert!(validate_negotiated(true, None).is_err());
++        assert!(validate_negotiated(false, Some(VERSION)).is_err());
++        let build = "20.13.0-ljk1291.3+0123456789ab";
++        assert_eq!(negotiate_build(false, None, build), Ok(()));
++        assert_eq!(negotiate_build(true, Some(build), build), Ok(()));
++        for peer in [None, Some("20.13.0-ljk1291.2"), Some("20.13.0-ljk1291.3+abcdef012345")] {
++            assert!(negotiate_build(true, peer, build).is_err());
++        }
++    }
++    #[test]
++    fn policy_is_default_off_and_splits_the_total_not_each_eye() {
++        assert_eq!(request_policy(false, false, true, true, false, None), Ok(None));
++        let split = request_policy(true, true, false, false, true, Some(500)).unwrap().unwrap();
++        assert_eq!(split.total_bps, 500_000_000);
++        assert_eq!(split.eye_bps, [250_000_000; 2]);
++        assert_eq!(request_policy(true, true, false, false, true, Some(5)).unwrap().unwrap().eye_bps,
++            [2_500_000; 2]);
++        for value in [0, 4, 501, u64::MAX] {
++            assert!(request_policy(true, true, false, false, true, Some(value)).is_err());
++        }
++        for args in [(false, false, false, true, Some(500)), (true, true, false, true, Some(500)),
++            (true, false, true, true, Some(500)), (true, false, false, false, Some(500)),
++            (true, false, false, true, None)] {
++            assert!(request_policy(true, args.0, args.1, args.2, args.3, args.4).is_err());
++        }
++    }
++}
+diff --git a/alvr/packets/src/lib.rs b/alvr/packets/src/lib.rs
+index 1223c0523819addccecd35fbf0e8612f61215b2f..746a3b3c350a2643c7b7cdebd3aab097428f54ba 100644
+--- a/alvr/packets/src/lib.rs
++++ b/alvr/packets/src/lib.rs
+@@ -15,6 +15,8 @@ use std::{
+     time::Duration,
+ };
+ 
++pub mod dual_stream;
++
+ pub const TRACKING: u16 = 0;
+ pub const HAPTICS: u16 = 1;
+ pub const AUDIO: u16 = 2;
+@@ -100,6 +102,11 @@ pub struct VideoStreamingCapabilitiesLegacy {
+ // Note: not a network packet
+ #[derive(Serialize, Deserialize, Clone)]
+ pub struct VideoStreamingCapabilities {
++    /// Framing support only; not a claim of dual MediaCodec throughput.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub dual_stream_h264_version: Option<u16>,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub dual_stream_h264_build: Option<String>,
+     pub default_view_resolution: UVec2,
+     pub supported_refresh_rates: Vec<f32>, // todo rename
+     pub microphone_sample_rate: u32,
+@@ -156,7 +163,17 @@ pub fn decode_video_streaming_capabilities(
+     let caps_json =
+         json::from_str::<json::Value>(&String::from_utf8(json_bytes)?).unwrap_or(json::Value::Null);
+ 
++    let dual_stream_h264_version = match caps_json.get("dual_stream_h264_version") {
++        Some(value) => Some(json::from_value::<u16>(value.clone())?),
++        None => None,
++    };
++    let dual_stream_h264_build = match caps_json.get("dual_stream_h264_build") {
++        Some(value) => Some(json::from_value::<String>(value.clone())?),
++        None => None,
++    };
+     Ok(VideoStreamingCapabilities {
++        dual_stream_h264_version,
++        dual_stream_h264_build,
+         default_view_resolution: legacy.default_view_resolution,
+         supported_refresh_rates,
+         microphone_sample_rate: legacy.microphone_sample_rate,
+@@ -190,6 +207,9 @@ pub enum ClientConnectionResult {
+ // Note: not a network packet
+ #[derive(Serialize, Deserialize, Clone)]
+ pub struct NegotiatedStreamingConfig {
++    /// Omitted for single stream: legacy video packet layout remains untouched.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub dual_stream_h264_version: Option<u16>,
+     pub view_resolution: UVec2,
+     pub refresh_rate_hint: f32,
+     pub game_audio_sample_rate: u32,
+@@ -216,8 +236,12 @@ pub fn encode_stream_config(
+     session: &SessionConfig,
+     negotiated: &NegotiatedStreamingConfig,
+ ) -> Result<StreamConfigPacket> {
++    // Advertise this executable, not the version last saved by a dashboard.
++    // Cloning leaves persisted settings untouched (also for standalone drivers).
++    let mut session = session.clone();
++    session.server_version = alvr_common::ALVR_VERSION.clone();
+     Ok(StreamConfigPacket {
+-        session: json::to_string(session)?,
++        session: json::to_string(&session)?,
+         negotiated: json::to_string(negotiated)?,
+     })
+ }
+@@ -230,8 +254,11 @@ pub struct StreamConfig {
+ }
+ 
+ pub fn decode_stream_config(packet: &StreamConfigPacket) -> Result<StreamConfig> {
++    let session_json = json::from_str::<json::Value>(&packet.session)?;
++    // No missing-version extrapolation for this protocol: never guess a peer.
++    let server_version = json::from_value::<Version>(session_json["server_version"].clone())?;
+     let mut session_config = SessionConfig::default();
+-    session_config.merge_from_json(&json::from_str(&packet.session)?)?;
++    session_config.merge_from_json(&session_json)?;
+     let settings = session_config.to_settings();
+ 
+     let negotiated_json = json::from_str::<json::Value>(&packet.negotiated)?;
+@@ -258,10 +285,18 @@ pub fn decode_stream_config(packet: &StreamConfigPacket) -> Result<StreamConfig>
+         None => FovTangentMultipliers::default(),
+     };
+ 
++    let dual_stream_h264_version = match negotiated_json.get("dual_stream_h264_version") {
++        Some(value) => Some(json::from_value::<u16>(value.clone())?),
++        None => None,
++    };
++    dual_stream::validate_negotiated(settings.video.dual_stream_h264, dual_stream_h264_version)
++        .map_err(|reason| alvr_common::anyhow::anyhow!("WO-11 compatibility: {reason}"))?;
++
+     Ok(StreamConfig {
+-        server_version: session_config.server_version,
++        server_version,
+         settings,
+         negotiated_config: NegotiatedStreamingConfig {
++            dual_stream_h264_version,
+             view_resolution,
+             refresh_rate_hint,
+             game_audio_sample_rate,
+@@ -276,6 +311,94 @@ pub fn decode_stream_config(packet: &StreamConfigPacket) -> Result<StreamConfig>
+     })
+ }
+ 
++#[cfg(test)]
++mod dual_stream_negotiation_tests {
++    use super::*;
++
++    fn packet(requested: bool, version: Option<u16>) -> StreamConfigPacket {
++        let mut session = SessionConfig::default();
++        session.session_settings.video.dual_stream_h264 = requested;
++        encode_stream_config(&session, &NegotiatedStreamingConfig {
++            dual_stream_h264_version: version,
++            view_resolution: UVec2::new(3072, 3232), refresh_rate_hint: 90.0,
++            game_audio_sample_rate: 48_000, enable_foveated_encoding: false,
++            use_multimodal_protocol: false, use_full_range: true, encoding_gamma: 1.0,
++            enable_hdr: false, wired: false, fov_tangent_multipliers: FovTangentMultipliers::default(),
++        }).unwrap()
++    }
++
++    fn legacy_caps(extra: &str) -> VideoStreamingCapabilitiesLegacy {
++        let mut rates = vec![90.0];
++        rates.extend(extra.as_bytes().iter().map(|byte| -(*byte as f32)));
++        VideoStreamingCapabilitiesLegacy { default_view_resolution: UVec2::new(3072, 3232),
++            supported_refresh_rates_plus_extra_data: rates, microphone_sample_rate: 48_000 }
++    }
++
++    #[test]
++    fn advertised_version_is_compiled_identity_and_missing_peer_version_is_an_error() {
++        let mut session = SessionConfig::default();
++        session.server_version = Version::parse("20.13.0-ljk1291.2").unwrap();
++        let original = session.server_version.clone();
++        let config = decode_stream_config(&packet(false, None)).unwrap().negotiated_config;
++        let mut p = encode_stream_config(&session, &config).unwrap();
++        assert_eq!(decode_stream_config(&p).unwrap().server_version, *alvr_common::ALVR_VERSION);
++        assert_eq!(session.server_version, original);
++        let mut value: json::Value = json::from_str(&p.session).unwrap();
++        value.as_object_mut().unwrap().remove("server_version");
++        p.session = json::to_string(&value).unwrap();
++        assert!(decode_stream_config(&p).is_err());
++    }
++
++    #[test]
++    fn single_stream_omits_new_negotiated_field_and_keeps_legacy_video_bytes() {
++        let p = packet(false, None);
++        assert!(!p.negotiated.contains("dual_stream_h264_version"));
++        assert!(decode_stream_config(&p).unwrap().negotiated_config.dual_stream_h264_version.is_none());
++        // Original bincode header: Duration(u64 seconds,u32 nanos), bool, four f32s.
++        let h = VideoPacketHeader { timestamp: Duration::new(1, 2), is_idr: true,
++            foveation_center: [[0.0; 2]; 2] };
++        let mut expected = Vec::new();
++        expected.extend_from_slice(&1_u64.to_le_bytes());
++        expected.extend_from_slice(&2_u32.to_le_bytes());
++        expected.push(1);
++        expected.extend_from_slice(&[0; 16]);
++        assert_eq!(bincode::serialize(&h).unwrap(), expected);
++    }
++
++    #[test]
++    fn request_and_effective_version_must_match_without_guessing() {
++        assert!(decode_stream_config(&packet(true, Some(dual_stream::VERSION))).is_ok());
++        for (requested, version) in [(true, None), (false, Some(dual_stream::VERSION)),
++            (true, Some(0)), (true, Some(dual_stream::VERSION + 1))] {
++            assert!(decode_stream_config(&packet(requested, version)).is_err());
++        }
++        for value in [json::json!(null), json::json!("1"), json::json!(-1), json::json!(65536)] {
++            let mut p = packet(true, Some(dual_stream::VERSION));
++            let mut negotiated: json::Value = json::from_str(&p.negotiated).unwrap();
++            negotiated["dual_stream_h264_version"] = value;
++            p.negotiated = json::to_string(&negotiated).unwrap();
++            assert!(decode_stream_config(&p).is_err());
++        }
++    }
++
++    #[test]
++    fn capability_is_explicit_round_trips_and_missing_does_not_enable_dual() {
++        let old = decode_video_streaming_capabilities(&legacy_caps("{}")).unwrap();
++        assert_eq!(old.dual_stream_h264_version, None);
++        assert_eq!(old.dual_stream_h264_build, None);
++        assert!(dual_stream::negotiate(true, old.dual_stream_h264_version).is_err());
++        let caps = decode_video_streaming_capabilities(&legacy_caps("{\"dual_stream_h264_version\":1,\"dual_stream_h264_build\":\"20.13.0-ljk1291.3+0123456789ab\"}")).unwrap();
++        let caps = decode_video_streaming_capabilities(&encode_video_streaming_capabilities(&caps).unwrap()).unwrap();
++        assert_eq!(caps.dual_stream_h264_version, Some(dual_stream::VERSION));
++        assert_eq!(caps.dual_stream_h264_build.as_deref(), Some("20.13.0-ljk1291.3+0123456789ab"));
++        assert_eq!(caps.supported_refresh_rates, vec![90.0]);
++        for extra in ["{\"dual_stream_h264_version\":null}", "{\"dual_stream_h264_version\":\"1\"}",
++            "{\"dual_stream_h264_version\":-1}", "{\"dual_stream_h264_build\":1}"] {
++            assert!(decode_video_streaming_capabilities(&legacy_caps(extra)).is_err());
++        }
++    }
++}
++
+ #[derive(Serialize, Deserialize, Clone)]
+ pub struct DecoderInitializationConfig {
+     pub codec: CodecType,
+@@ -783,6 +906,7 @@ mod fov_crop_tests {
+         encode_stream_config(
+             &SessionConfig::default(),
+             &NegotiatedStreamingConfig {
++                dual_stream_h264_version: None,
+                 view_resolution: UVec2::new(3072, 3232),
+                 refresh_rate_hint: 90.0,
+                 game_audio_sample_rate: 48_000,
+diff --git a/alvr/server_core/src/connection.rs b/alvr/server_core/src/connection.rs
+index 84359750ddaf6cf98271e6cebb7ce5a7683750a9..7e6eb3dfaaec536c27af785900916a2464a08de5 100644
+--- a/alvr/server_core/src/connection.rs
++++ b/alvr/server_core/src/connection.rs
+@@ -627,6 +627,50 @@ fn connection_pipeline(
+     dbg_connection!("connection_pipeline: setting up negotiated streaming config");
+ 
+     let initial_settings = session_manager_lock.settings().clone();
++    // Validate/refuse before audio setup, stream sockets, OpenVR config or driver restart.
++    // No implicit fallback: a requested dual stream can never start as single stream.
++    let dual_requested = initial_settings.video.dual_stream_h264;
++    let constant_mbps = match &initial_settings.video.bitrate.mode {
++        alvr_session::BitrateMode::ConstantMbps(mbps)
++            if !initial_settings.video.bitrate.adapt_to_framerate.enabled() => Some(*mbps),
++        _ => None,
++    };
++    let encoder = &initial_settings.video.encoder_config;
++    let dual_depth_or_hdr = encoder.use_10bit || encoder.enable_hdr
++        || (!encoder.server_overrides_use_10bit && streaming_caps.prefer_10bit)
++        || (!encoder.server_overrides_enable_hdr && streaming_caps.prefer_hdr);
++    let dual_policy = alvr_packets::dual_stream::request_policy(
++        dual_requested, initial_settings.video.preferred_codec == CodecType::H264,
++        initial_settings.video.foveated_encoding.enabled()
++            || initial_settings.video.clientside_foveation.enabled(),
++        dual_depth_or_hdr,
++        client_ip.is_loopback() || matches!(initial_settings.connection.stream_protocol, SocketProtocol::Tcp),
++        constant_mbps,
++    );
++    match dual_policy {
++        Err(reason) => {
++            warn!("[WO11_DUAL_H264] side=server requested=true effective=false reason={reason}");
++            con_bail!("WO-11 dual-stream request refused: {reason}");
++        }
++        Ok(Some(split)) => {
++            if let Err(reason) = alvr_packets::dual_stream::negotiate(true, streaming_caps.dual_stream_h264_version) {
++                warn!("[WO11_DUAL_H264] side=server requested=true effective=false reason={reason}");
++                con_bail!("WO-11 compatibility refused: {reason}");
++            }
++            let server_build = alvr_common::ALVR_VERSION.to_string();
++            if let Err(reason) = alvr_packets::dual_stream::negotiate_build(
++                true, streaming_caps.dual_stream_h264_build.as_deref(), server_build.as_str(),
++            ) {
++                warn!("[WO11_DUAL_H264] side=server requested=true effective=false reason={reason}");
++                con_bail!("WO-11 compatibility refused: {reason}");
++            }
++            warn!("[WO11_DUAL_H264] side=server requested=true effective=false framing_version={} total_bps={} left_bps={} right_bps={} reason=pipeline_not_implemented",
++                alvr_packets::dual_stream::VERSION, split.total_bps, split.eye_bps[0], split.eye_bps[1]);
++            con_bail!("WO-11: dual encoder/decoder pipeline not implemented in phase 1");
++        }
++        Ok(None) => info!("[WO11_DUAL_H264] side=server requested=false effective=false reason=disabled"),
++    }
++
+ 
+     fn get_view_res(config: FrameSize, default_res: UVec2) -> UVec2 {
+         let res = match config {
+@@ -860,6 +904,7 @@ fn connection_pipeline(
+     let stream_config_packet = alvr_packets::encode_stream_config(
+         session_manager_lock.session(),
+         &NegotiatedStreamingConfig {
++            dual_stream_h264_version: None,
+             view_resolution: stream_view_resolution,
+             refresh_rate_hint: fps,
+             game_audio_sample_rate,
+diff --git a/alvr/session/src/beta.rs b/alvr/session/src/beta.rs
+index d36edf7f76370c3bd51471f2d880caebd4415cc2..f8b63f41d497083c66238052b372511ddd8ef6b5 100644
+--- a/alvr/session/src/beta.rs
++++ b/alvr/session/src/beta.rs
+@@ -128,6 +128,7 @@ fn render_size(percent: u32) -> Vec<(String, json::Value)> {
+ fn shared(codec: &str, mbps: u64, fps: f32, percent: u32) -> Vec<(String, json::Value)> {
+     let mut list = vec![
+         assign("video.preferred_codec.variant", codec.into()),
++        assign("video.dual_stream_h264", false.into()),
+         assign("video.bitrate.mode.variant", "ConstantMbps".into()),
+         assign("video.bitrate.mode.ConstantMbps", mbps.into()),
+         assign("video.preferred_fps", json::json!(fps)),
+diff --git a/alvr/session/src/beta_tests.rs b/alvr/session/src/beta_tests.rs
+index a738aba24eee7ff51f9295aa4a27e5a41f9a2173..e399722979cba28a40f5731e45bd653557c7a282 100644
+--- a/alvr/session/src/beta_tests.rs
++++ b/alvr/session/src/beta_tests.rs
+@@ -31,7 +31,7 @@ fn video_shows_only_codec_experiment_controls() {
+     let entries = visible_children(&schema(), &["video"]).unwrap();
+     assert_eq!(
+         names(entries.clone(), Visibility::Experiment),
+-        sorted(&["passthrough", "bitrate", "preferred_codec", "pyrowave", "fov_crop", "transcoding_view_resolution", "emulated_headset_view_resolution"])
++        sorted(&["passthrough", "bitrate", "preferred_codec", "dual_stream_h264", "pyrowave", "fov_crop", "transcoding_view_resolution", "emulated_headset_view_resolution"])
+     );
+     assert_eq!(
+         names(entries, Visibility::Advanced),
+@@ -451,3 +451,14 @@ fn presentation_filter_defaults_and_legacy_migration() {
+         }
+     }
+ }
++
++#[test]
++fn dual_stream_is_default_off_visible_and_reset_by_profiles() {
++    let session = SessionConfig::default();
++    assert!(!session.session_settings.video.dual_stream_h264);
++    assert!(!session.to_settings().video.dual_stream_h264);
++    for profile in streaming_profiles() {
++        assert!(profile.assignments.iter().any(|(path, value)|
++            path == "video.dual_stream_h264" && value == &json::json!(false)));
++    }
++}
+diff --git a/alvr/session/src/settings.rs b/alvr/session/src/settings.rs
+index c6156a9fed32cb150a26862d7bcaa16dd56da848..81c875ebe5b72eea7af6c13b4013077b6c507dbc 100644
+--- a/alvr/session/src/settings.rs
++++ b/alvr/session/src/settings.rs
+@@ -933,6 +933,13 @@ pub struct VideoConfig {
+     #[schema(flag = "steamvr-restart")]
+     pub preferred_codec: CodecType,
+ 
++    #[schema(strings(
++        display_name = "Dual-stream H.264 (phase 1 candidate)",
++        help = "Default off. Requires a matching WO-11 pair, H.264 8-bit SDR, all foveation off and TCP. Constant bitrate is TOTAL for both eyes (5-500 Mbps, split equally; target 500/250 per eye). Phase 1 validates the contract and refuses startup: the two encoder/decoder paths are not implemented."
++    ))]
++    #[schema(flag = "steamvr-restart")]
++    pub dual_stream_h264: bool,
++
+     #[schema(strings(
+         display_name = "PyroWave",
+         notice = "4:2:0 is the default; enable Full chroma for 4:4:4. Both keep full-resolution luma and uniform rendering. Bitrate is a separate limit."
+@@ -1925,6 +1932,7 @@ pub fn session_settings_default() -> SettingsDefault {
+                 history_size: 256,
+                 image_corruption_fix: false,
+             },
++            dual_stream_h264: false,
+             preferred_codec: CodecTypeDefault {
+                 variant: CodecTypeDefaultVariant::PyroWave,
+             },

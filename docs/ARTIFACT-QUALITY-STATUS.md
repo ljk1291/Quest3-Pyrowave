@@ -1178,3 +1178,31 @@ off / `supersample_hq` / `sharpen_hq+supersample_hq`; `decode_priority`
 default/low/default on the full-FOV baseline; then Metro fence candidates chosen
 from the T4 500 Mbps re-score and a back-to-back VD H.264+ 500 comparison.
 No default changes; all live fields remain unset until measured.
+
+### 2026-10-06 — WO-11 phase-1 source/contract checkpoint
+
+Owner explicitly requested WO-11 despite the design trigger being only partly
+met: T4's 500 Mbps dual-eye P7 proxy trails H264Fit on fence/p99 but preserves full
+Godlike density and has much higher HVS. The revised candidate budget is 500 Mbps
+total / 250 per eye. [Phased plan and prepared probe specifications](WO-11-IMPLEMENTATION-PLAN.md).
+
+On `codex/wo11-dualstream-h264`, base `c7513be`, added a pinned additive overlay:
+visible default-off H.264/TCP/SDR/no-foveation setting and total-budget split,
+explicit fork/AU/full-build compatibility, per-eye AU header and pure bounded
+pose/frame/generation pairing with flush/both-IDR/new-generation recovery.
+Requested dual startup reports `effective=false reason=pipeline_not_implemented`;
+no second encoder/decoder or live presentation wiring. Legacy video header and
+native encoder/decoder/render paths are unchanged. Protocol `.3` intentionally
+refuses previous `.2` peers, including with the new setting off.
+
+Local checks: 135 unittest cases (134 passed, one missing-C++-compiler skip),
+17 pin/metadata tests and five design/preflight checks passed. All 553 reconstructed
+files match the final overlay exactly (11 changed, 542 unchanged); clean forward,
+reverse and strict-whitespace apply pass; preceding overlays are unchanged.
+[Sanitized evidence and full inventory](../results/wo11-phase1-source-2026-10-06.json).
+Twenty-one new Rust tests are written, not locally compiled/run. Full Actions
+`tests/client/streamer/matching-pair` remains pending; no push/PR/dispatch or commit.
+No hardware, GPU work, install, ADB, settings or arm-file use occurred. Runtime
+acceptance, standalone 11.11-ms decode budget and sustained live 90 Hz remain
+separately unverified. Next: CI first, then phase-2 atomic NVENC/packetizer source
+work; concurrent Quest decoders and exact OpenXR eye routing remain major risks.

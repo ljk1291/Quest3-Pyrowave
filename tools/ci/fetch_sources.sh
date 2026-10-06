@@ -71,6 +71,12 @@ actual_direct_ffe_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha
 [ "$actual_direct_ffe_patch" = "$expected_direct_ffe_patch" ] || { echo "Direct eye foveation patch hash differs" >&2; exit 1; }
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/direct-eye-foveation.patch"
 
+# WO-11 phase 1: framing/settings contracts only; live dual startup fails closed.
+expected_dual_h264_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value dual_stream_h264_phase1_patch_sha256)
+actual_dual_h264_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/dual-stream-h264-phase1.patch")
+[ "$actual_dual_h264_patch" = "$expected_dual_h264_patch" ] || { echo "Dual-stream H.264 phase-1 patch hash differs" >&2; exit 1; }
+apply_patch "$dest/ALVR-20.13.0" "$repo/patches/dual-stream-h264-phase1.patch"
+
 checkout "$PYROWAVE_URL" "$dest/pyrowave" "$PYROWAVE_BASE"
 # pyrowave's checkout_granite.sh pins a newer Granite (9d44761), which spiked encoder p99 to 14 ms;
 # the measurements used 842d9d5, cloned here with all of its submodules.
