@@ -34,6 +34,8 @@ jobs:
       - run: python3 -m unittest tools.tests.test_supervised -v
       - name: Network frame-pacing and live frame-size telemetry tests
         run: python3 -m pytest tools/tests/test_quest3_network.py tools/tests/test_alvr_events_summary.py -q
+      - name: Offline frame-loss accounting and settings variants
+        run: python3 -m unittest tools.tests.test_frame_loss -v
       - name: TCP frame receiver protocol build
         run: gcc -std=c11 -Wall -Wextra -Werror tools/udptest/tcpframerecv.c -o /tmp/tcp-frame-receiver
       - run: python3 -m unittest tools.tests.test_stock_codec_audit -v

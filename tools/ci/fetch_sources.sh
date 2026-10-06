@@ -82,6 +82,12 @@ actual_frame_dump_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha
 [ "$actual_frame_dump_patch" = "$expected_frame_dump_patch" ] || { echo "Frame dump patch hash differs" >&2; exit 1; }
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/frame-dump.patch"
 
+# Default-off frame-loss accounting and source-key statistics experiment.
+expected_frame_loss_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value frame_loss_diagnostics_patch_sha256)
+actual_frame_loss_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/frame-loss-diagnostics.patch")
+[ "$actual_frame_loss_patch" = "$expected_frame_loss_patch" ] || { echo "Frame loss diagnostics patch hash differs" >&2; exit 1; }
+apply_patch "$dest/ALVR-20.13.0" "$repo/patches/frame-loss-diagnostics.patch"
+
 checkout "$PYROWAVE_URL" "$dest/pyrowave" "$PYROWAVE_BASE"
 # pyrowave's checkout_granite.sh pins a newer Granite (9d44761), which spiked encoder p99 to 14 ms;
 # the measurements used 842d9d5, cloned here with all of its submodules.

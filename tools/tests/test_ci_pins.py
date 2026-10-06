@@ -17,7 +17,7 @@ def test_frame_dump_overlay_hash_and_order():
     assert pin['path'] == 'patches/frame-dump.patch'
     assert hashlib.sha256((REPO / pin['path']).read_bytes()).hexdigest() == pin['sha256']
     script = (REPO / 'tools/ci/fetch_sources.sh').read_text()
-    assert script.index('direct-eye-foveation.patch') < script.index('frame-dump.patch')
+    assert script.index('foveation-shader-linkage.patch') < script.index('frame-dump.patch')
     assert '--value frame_dump_patch_sha256' in script
     result = subprocess.run([sys.executable, 'tools/ci/source_lock.py', '--value', 'frame_dump_patch_sha256'],
                             cwd=REPO, capture_output=True, text=True, check=True)
@@ -59,8 +59,12 @@ def test_fetch_script_reads_lock_and_applies_the_complete_alvr_stack_in_order():
     assert "source_lock.py" in script
     names = ("alvr-20.13.0-server-instrumentation.patch", "quest3-alvr.patch",
              "stable-baseline-alvr.patch", "fork-identity-alvr.patch", "wo8-foveation.patch",
-             "wo8-light-centre-phase.patch")
-    positions = [script.index(name) for name in names]
+             "wo8-light-centre-phase.patch", "nvenc-dimension-preflight.patch",
+             "alvr-pyrowave-rdo-live-readback.patch", "alvr-pyrowave-rdo-session-setting.patch",
+             "foveated-staging-correctness.patch", "presentation-filters.patch",
+             "direct-eye-foveation.patch", "foveation-shader-linkage.patch",
+             "frame-dump.patch", "frame-loss-diagnostics.patch")
+    positions = [script.index(f'apply_patch "$dest/ALVR-20.13.0" "$repo/patches/{name}"') for name in names]
     assert positions == sorted(positions)
 
 
@@ -98,6 +102,20 @@ def test_live_rdo_readback_patches_are_pinned_and_applied_after_their_stacks():
             < script.index('apply_patch "$dest/ALVR-20.13.0" "$repo/patches/alvr-pyrowave-rdo-live-readback.patch"'))
     assert (script.index('apply_patch "$dest/ALVR-20.13.0" "$repo/patches/alvr-pyrowave-rdo-live-readback.patch"')
             < script.index('apply_patch "$dest/ALVR-20.13.0" "$repo/patches/alvr-pyrowave-rdo-session-setting.patch"'))
+
+
+def test_frame_loss_overlay_is_pinned_and_applied_last():
+    expected = LOCK['patches']['frame_loss_diagnostics']
+    assert expected['path'] == 'patches/frame-loss-diagnostics.patch'
+    assert expected['sha256'] == hashlib.sha256((REPO / expected['path']).read_bytes()).hexdigest()
+    script = (REPO / 'tools/ci/fetch_sources.sh').read_text()
+    assert script.index('apply_patch "$dest/ALVR-20.13.0" "$repo/patches/frame-dump.patch"') < script.index(
+        '--value frame_loss_diagnostics_patch_sha256') < script.index(
+        'apply_patch "$dest/ALVR-20.13.0" "$repo/patches/frame-loss-diagnostics.patch"')
+    result = subprocess.run([sys.executable, 'tools/ci/source_lock.py', '--value',
+                             'frame_loss_diagnostics_patch_sha256'],
+                            cwd=REPO, capture_output=True, text=True, check=True)
+    assert result.stdout.strip() == expected['sha256']
 
 
 def test_foveation_linkage_fix_is_pinned_and_checked_in_cpu_ci():
@@ -162,6 +180,8 @@ def test_lock_emitter_uses_exact_values():
     assert actual["PYROWAVE_BASE"] == LOCK["pyrowave"]["commit"]
     assert actual["GRANITE_COMMIT"] == LOCK["granite"]["commit"]
     assert actual["WO8_LIGHT_CENTRE_PHASE_PATCH_SHA256"] == LOCK["patches"]["wo8_light_centre_phase"]["sha256"]
+    assert actual["FRAME_DUMP_PATCH_SHA256"] == LOCK["patches"]["frame_dump"]["sha256"]
+    assert actual["FRAME_LOSS_DIAGNOSTICS_PATCH_SHA256"] == LOCK["patches"]["frame_loss_diagnostics"]["sha256"]
 
 
 def test_toolchain_is_read_from_the_lock_by_posix_builds():

@@ -67,6 +67,10 @@
     "frame_dump": {
       "path": "patches/frame-dump.patch",
       "sha256": "b45f80b0b8be93bc474f176c0cfe90c11bc0867a81d09dea54ba1efcfb9815f6"
+    },
+    "frame_loss_diagnostics": {
+      "path": "patches/frame-loss-diagnostics.patch",
+      "sha256": "4eba7040a23edcebd5be06fbcdcb68511983c7144177803c3946e2db3360d54c"
     }
   },
   "rust": "1.97.1",
