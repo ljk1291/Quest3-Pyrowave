@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 
 CELLS = ('loss-control500', 'loss-runtime500', 'loss-wait500', 'loss-nopace500',
-         'queue2-500', 'queue2-wait-500')
+         'queue2-500', 'queue2-wait-500', 'queue3-500')
 PROPERTY_DEFAULTS = {
     'debug.q3pw.frame_loss': '0',
     'debug.q3pw.stats_source_ts': '0',
@@ -49,6 +49,10 @@ def install(harness):
                 spec['properties']['debug.q3pw.output_queue'] = '2'
                 if name == 'queue2-wait-500':
                     spec['properties']['debug.q3pw.frame_wait_us'] = '1000'
+            elif name == 'queue3-500':
+                # Default age bound (22,223 us) would drop the third entry; allow three periods.
+                spec['properties']['debug.q3pw.output_queue'] = '3'
+                spec['properties']['debug.q3pw.output_queue_max_age_us'] = '33334'
         return spec
 
     harness.profile = profile
