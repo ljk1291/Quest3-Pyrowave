@@ -28,6 +28,20 @@ signing identity and baseline defaults. No install is performed.
 
 ## Candidate requiring a Quest check
 
+`debug.q3pw.staging_init=1` opts PyroWave into a once-per-renderer WGPU-tracked
+partial texture write, submission and completion **before** the first external
+copy. Raw GLES writes do not update WGPU's initialization tracker. Its first
+sampling can clear an apparently uninitialized texture after that raw copy.
+The software test previously returned black at its first pixel; the new control
+checks the staging pixel before and after sampling to establish that mechanism.
+It separately checks the next changing frame and the initialization-on first
+frame. The native marker is `[Q3PW_STAGING_INIT] requested/effective/initialized`.
+It is default-off and independent of state isolation. No per-frame CPU image
+upload is added. The pinned WGPU source is
+[texture memory initialization](https://github.com/gfx-rs/wgpu/blob/v24.0.0/wgpu-core/src/command/memory_init.rs).
+Even a confirmed software first-frame clear cannot explain persistent Quest
+flashing by itself. The new regression and signed pair must pass before use.
+
 `debug.q3pw.staging_isolation=1` enables a PyroWave-only copy with its own VAO,
 explicit depth/blend/cull/raster-discard/mask/sampler state and a framebuffer
 completeness check. The existing import, synchronous completion and decoder
@@ -43,7 +57,11 @@ The Linux software test uses real Mesa GLES with a CPU adapter, the actual
 Rust staging draw, actual WGSL
 inverse mapping and actual projection transform. An owned GL texture becomes
 an EGLImage source. It checks every output pixel for both eyes for all three
-fixed profiles, with isolation off and on; the on case injects hostile blend,
+fixed profiles and both output formats, with initialization and isolation off
+and on across two changing frames. Initialization-off's first black frame is
+an explicit bug-reproduction control, **not a correctness pass**; its next frame
+and initialization-on's first and second frames must match the source colours.
+The isolation-on case injects hostile blend,
 cull and color-mask state. It does not exercise Android AHB import, Qualcomm's
 driver or OpenXR presentation. Its adapter/API identity is logged; a CPU renderer
 and an actual OpenGL ES version string are mandatory. wgpu24 prefers desktop GL
@@ -57,7 +75,8 @@ and reproduce the stale raw fields from the failed session.
 Before Metro or timing: independently verify a matching pair, obtain installation
 authorization, then run a finite supervised chart at a conservative diagnostic
 rate (500 Mbps or lower). The stationary Q4 continuation does not qualify nominal
-1000 Mbps. Compare isolation off/on with a native marker and decoded/staging
+1000 Mbps. Compare initialization off/on first, then isolate GL state as a
+separate change, with native markers and decoded/staging
 dimensions; ask the owner about labels, orientation, colours, moving content
 and corruption. Stop immediately on black/flashing. No optimization is promoted
 until this gate passes, followed by controlled timing and quality checks.

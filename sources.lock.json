@@ -50,7 +50,7 @@
     },
     "foveated_staging_correctness": {
       "path": "patches/foveated-staging-correctness.patch",
-      "sha256": "47b292afce98bbc1a6aded25a6ebfc6fedb0e77096adc390c358e979a7e7b9d4"
+      "sha256": "fa174825b9099d5148f2df688a769b98c23dbf27b91e56aa325c6da33279b3b8"
     }
   },
   "rust": "1.97.1",

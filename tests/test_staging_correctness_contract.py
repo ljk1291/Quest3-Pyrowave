@@ -23,6 +23,10 @@ class StagingCorrectnessContract(unittest.TestCase):
                      'codec == CodecType::PyroWave &&',
                      'requested && self.wait_for_import_copy',
                      '"debug.q3pw.staging_isolation") == "1"',
+                     '"debug.q3pw.staging_init") == "1"',
+                     'pub fn set_staging_initialization',
+                     'raw copy must be correct before WGPU',
+                     'Explicit reproduction control, not a correctness pass.',
                      '.filter(|c| !c.blur_only).map(|c| c.resolved_geometry())'):
             self.assertIn(text,patch)
         self.assertIn('precision highp float;',patch)
@@ -41,5 +45,11 @@ class StagingCorrectnessContract(unittest.TestCase):
         self.assertIn('strncmp(version, "OpenGL ES", 9)',probe)
         self.assertIn('external-image regression requires real GLES',patch)
         self.assertNotIn('MESA_NO_ERROR',production)
+
+    def test_both_experiments_are_observable_and_resettable(self):
+        from tools.quest3 import bench, control
+        for prop in ('debug.q3pw.staging_init','debug.q3pw.staging_isolation'):
+            self.assertIn(prop,bench.EXPERIMENT_PROPERTIES)
+            self.assertIn(prop,control.EXPERIMENT_PROPERTIES)
 
 if __name__=='__main__':unittest.main()
