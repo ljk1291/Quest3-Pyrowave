@@ -32,7 +32,13 @@ class StagingCorrectnessContract(unittest.TestCase):
         self.assertIn("LIBGL_ALWAYS_SOFTWARE: '1'",workflow)
         production=workflow.split('name: Production foveated staging software GLES regression',1)[1].split('      - name:',1)[0]
         self.assertIn('libegl-dev libgles-dev',production)
-        self.assertIn('tools/ci/gles_only_egl.c',production)
+        self.assertIn('tools/ci/build_gles_only_egl.sh',production)
+        loader=(ROOT/'tools/ci/build_gles_only_egl.sh').read_text(encoding='utf-8')
+        self.assertIn('libEGL.so.1',loader)
+        self.assertIn('patchelf --set-soname libq3pw_real_egl.so.1',loader)
+        probe=(ROOT/'tools/ci/gles_only_egl_probe.c').read_text(encoding='utf-8')
+        self.assertIn('dlopen("libEGL.so.1"',probe)
+        self.assertIn('strncmp(version, "OpenGL ES", 9)',probe)
         self.assertIn('external-image regression requires real GLES',patch)
         self.assertNotIn('MESA_NO_ERROR',production)
 
