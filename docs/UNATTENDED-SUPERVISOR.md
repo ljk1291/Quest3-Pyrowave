@@ -1,3 +1,5 @@
+> **Superseded 2026-10-06 — not in force.** The owner replaced these rules with the lean hardware-testing rules in [AGENTS.md](../AGENTS.md). Kept for history only.
+
 # Unattended supervisor source review
 
 This tool implements the owner window rules in [UNATTENDED.md](UNATTENDED.md).

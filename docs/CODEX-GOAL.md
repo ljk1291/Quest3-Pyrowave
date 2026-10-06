@@ -23,7 +23,7 @@ given by the queue in [ARTIFACT-QUALITY-STATUS.md](ARTIFACT-QUALITY-STATUS.md).
 
 ## Read first
 
-[AGENTS.md](../AGENTS.md), [UNATTENDED.md](UNATTENDED.md),
+[AGENTS.md](../AGENTS.md),
 [ARTIFACT-QUALITY-PLAN.md](ARTIFACT-QUALITY-PLAN.md),
 [ARTIFACT-QUALITY-STATUS.md](ARTIFACT-QUALITY-STATUS.md),
 [DECODER-OPTIMIZATION-PLAN.md](DECODER-OPTIMIZATION-PLAN.md),
@@ -34,7 +34,7 @@ given by the queue in [ARTIFACT-QUALITY-STATUS.md](ARTIFACT-QUALITY-STATUS.md).
 
 - Stable defaults, dependency pins, signing, fork identity or protocol version, except
   where a work order explicitly requires a new protocol and pair.
-- Virtual Desktop, network, router, Windows power settings, the arm file, or
+- Virtual Desktop, network, router, Windows power settings, or
   `main` / the stable branch.
 - Existing evidence text in results and docs. Add new sections instead.
 
@@ -48,11 +48,8 @@ given by the queue in [ARTIFACT-QUALITY-STATUS.md](ARTIFACT-QUALITY-STATUS.md).
 3. Push, then wait for GitHub Actions. Fix failures before moving on. Merge into the
    integration branch only when CI is green and no default changed.
 4. If the item needs hardware:
-   - When a window is armed and every precondition in UNATTENDED.md passes: run it with
-     the guards, then restore and verify.
-   - When it needs Metro gameplay or an in-headset judgement: queue an owner task.
-   - Otherwise: leave the item queued, record why, and continue with the next
-     source or offline item.
+   - Run it with `ws/session25.py` under the lean rules in AGENTS.md, then restore.
+   - When it needs Metro gameplay: queue an owner task and continue with other items.
 5. Append a progress entry to the status file:
    - the checkpoint;
    - what was verified, with links to CI runs and sanitized results;
@@ -62,9 +59,8 @@ given by the queue in [ARTIFACT-QUALITY-STATUS.md](ARTIFACT-QUALITY-STATUS.md).
 ## Validation that counts
 
 - CPU tests and the full Actions workflow are green on the integration branch.
-- Hardware cells follow UNATTENDED.md's cell protocol: a verified matching pair,
-  off/on/off order, the selected-output counter, settings readback, and a restoration
-  result with matching VD hashes.
+- Hardware cells: off/on/off order where an A/B matters, the selected-output counter,
+  and restored settings with Virtual Desktop untouched.
 - Quality claims use the WO-1 frame bank: exact source/decoded identity, fixed crops,
   PSNR-Y, SSIM, VMAF, and PSNR-HVS-M-H at the measured ~24 px/deg viewing factor.
 
@@ -75,12 +71,12 @@ Stop when **all** of these hold:
 1. A frame-bank report on Metro frames names one profile (encode size × wavelet ×
    bitrate × optional filters) that beats the current Godlike / Haar / 500 Mbps
    baseline on VMAF and PSNR-HVS-M-H for every fixed crop.
-2. An unattended chart screen of that profile shows:
+2. A chart screen of that profile shows:
    - a fresh-submission rate at or above the baseline's;
    - no decoder/encoder faults;
    - settings restored with matching VD hashes.
-3. `docs/ARTIFACT-QUALITY-STATUS.md` contains the owner sign-off checklist for that
-   profile, with exact settings and rollback steps.
+3. `docs/ARTIFACT-QUALITY-STATUS.md` names that profile with exact settings and
+   rollback steps.
 
 Also stop, writing the blocker to the status file, when no unblocked queue item remains
 and the remaining items all need the owner.

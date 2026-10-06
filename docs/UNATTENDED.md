@@ -1,3 +1,5 @@
+> **Superseded 2026-10-06 — not in force.** The owner replaced these rules with the lean hardware-testing rules in [AGENTS.md](../AGENTS.md). Kept for history only.
+
 # Bounded unattended hardware windows
 
 The owner granted a standing authorization on **2026-10-02** for agents to run hardware
