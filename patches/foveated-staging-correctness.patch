@@ -1,0 +1,669 @@
+diff --git a/alvr/client_openxr/src/stream.rs b/alvr/client_openxr/src/stream.rs
+index 91c7fbbaefbb52b77040538da1ec58da28c83d8a..846bbe9e267726088e1ccdce07bd8ed7a219de87 100644
+--- a/alvr/client_openxr/src/stream.rs
++++ b/alvr/client_openxr/src/stream.rs
+@@ -73,7 +73,8 @@ impl ParsedStreamConfig {
+             // Only use the inverse mapping when the matching server negotiated it.
+             // A stale local dashboard setting cannot warp a full-frame stream.
+             foveated_encoding_config: (config.negotiated_config.enable_foveated_encoding)
+-                .then(|| config.settings.video.foveated_encoding.as_option().cloned())
++                .then(|| config.settings.video.foveated_encoding.as_option()
++                    .filter(|c| !c.blur_only).map(|c| c.resolved_geometry()))
+                 .flatten(),
+             clientside_foveation_config: None,
+             upscaling: config.settings.video.upscaling.as_option().cloned(),
+@@ -366,6 +367,18 @@ impl StreamContext {
+             self.pre_wait_last_log = Instant::now();
+             self.released_eye_images_valid = false;
+             self.renderer.set_import_copy_sync(codec == CodecType::PyroWave);
++            self.renderer.set_staging_initialization(
++                codec == CodecType::PyroWave && crate::extra_extensions::perf_settings::system_property(
++                    "debug.q3pw.staging_init") == "1",
++            );
++            self.renderer.set_staging_preservation(
++                codec == CodecType::PyroWave && crate::extra_extensions::perf_settings::system_property(
++                    "debug.q3pw.staging_preserve") == "1",
++            );
++            self.renderer.set_staging_isolation(
++                codec == CodecType::PyroWave && crate::extra_extensions::perf_settings::system_property(
++                    "debug.q3pw.staging_isolation") == "1",
++            );
+             self.renderer.set_direct_eye_copy(
+                 codec == CodecType::PyroWave && alvr_system_info::platform() == Platform::Quest3
+                     && crate::extra_extensions::perf_settings::system_property("debug.q3pw.direct_eye_copy") == "1",
+diff --git a/alvr/graphics/resources/staging_fragment.glsl b/alvr/graphics/resources/staging_fragment.glsl
+index 7bfba12ca0479598b4060b84664695a82c96411d..5fd8190ec28161d8953a8355bb0c9a9457973727 100644
+--- a/alvr/graphics/resources/staging_fragment.glsl
++++ b/alvr/graphics/resources/staging_fragment.glsl
+@@ -1,6 +1,9 @@
+ #version 300 es
+ #extension GL_OES_EGL_image_external_essl3 : enable
+ 
++precision highp float;
++precision highp samplerExternalOES;
++
+ uniform samplerExternalOES tex;
+ 
+ // Convert from limited colors to full
+diff --git a/alvr/graphics/src/lib.rs b/alvr/graphics/src/lib.rs
+index b0aaae7f38576af3e5bb01a7953521d59f55d460..4588b89cee3dd44a3a0d54cc4e80fada8a39294a 100644
+--- a/alvr/graphics/src/lib.rs
++++ b/alvr/graphics/src/lib.rs
+@@ -31,6 +31,19 @@ pub const SDR_FORMAT_GL: u32 = gl::RGBA8;
+ pub const GL_TEXTURE_EXTERNAL_OES: u32 = 0x8D65;
+ pub const MAX_PUSH_CONSTANTS_SIZE: u32 = 128;
+ 
++fn image_import_attributes(preserve: bool) -> Option<[egl::Int; 3]> {
++    preserve.then_some([0x30D2, 1, egl::NONE]) // EGL_IMAGE_PRESERVED_KHR = EGL_TRUE
++}
++
++#[cfg(test)]
++mod image_import_policy_tests {
++    #[test]
++    fn default_import_is_unchanged_and_preservation_is_explicit() {
++        assert_eq!(super::image_import_attributes(false), None);
++        assert_eq!(super::image_import_attributes(true), Some([0x30D2,1,super::egl::NONE]));
++    }
++}
++
+ type CreateImageFn = unsafe extern "C" fn(
+     egl::EGLDisplay,
+     egl::EGLContext,
+@@ -377,6 +390,18 @@ impl GraphicsContext {
+         buffer: *const c_void,
+         texture: gl::Texture,
+         render_cb: impl FnOnce(),
++    ) {
++        self.render_ahardwarebuffer_using_texture_preserved(buffer, texture, false, render_cb);
++    }
++
++    /// Same import/lease path, with an explicit opt-in pixel-preservation request.
++    /// A failed preservation request is fatal rather than silently discarding it.
++    pub unsafe fn render_ahardwarebuffer_using_texture_preserved(
++        &self,
++        buffer: *const c_void,
++        texture: gl::Texture,
++        preserve: bool,
++        render_cb: impl FnOnce(),
+     ) {
+         const EGL_NATIVE_BUFFER_ANDROID: u32 = 0x3140;
+ 
+@@ -384,13 +409,15 @@ impl GraphicsContext {
+             let client_buffer = (self.get_native_client_buffer)(buffer);
+             check_error(&self.gl_context, "get_native_client_buffer");
+ 
++            let attributes = image_import_attributes(preserve);
+             let image = (self.create_image)(
+                 self.egl_display.as_ptr(),
+                 egl::NO_CONTEXT,
+                 EGL_NATIVE_BUFFER_ANDROID,
+                 client_buffer,
+-                ptr::null(),
++                attributes.as_ref().map_or(ptr::null(), |attrs| attrs.as_ptr()),
+             );
++            assert!(!preserve || !image.is_null(), "[Q3PW_STAGING_PRESERVE] preserved EGL import failed");
+             check_error(&self.gl_context, "create_image");
+ 
+             self.gl_context
+diff --git a/alvr/graphics/src/staging.rs b/alvr/graphics/src/staging.rs
+index 779de33ca83d78d9b52c92193b54f60b00056503..0e8eca139857ba340782300824f20555be7f25ee 100644
+--- a/alvr/graphics/src/staging.rs
++++ b/alvr/graphics/src/staging.rs
+@@ -2,7 +2,7 @@ use super::{ck, GraphicsContext};
+ use crate::GL_TEXTURE_EXTERNAL_OES;
+ use alvr_common::glam::{IVec2, UVec2};
+ use glow::{self as gl, HasContext};
+-use std::{ffi::c_void, rc::Rc};
++use std::{cell::Cell, ffi::c_void, rc::Rc};
+ 
+ fn create_program(
+     gl: &gl::Context,
+@@ -55,6 +55,9 @@ pub struct StagingRenderer {
+     surface_texture: gl::Texture,
+     framebuffers: [gl::Framebuffer; 2],
+     viewport_size: IVec2,
++    isolated_vertex_array: Cell<Option<gl::VertexArray>>,
++    srgb_target: bool,
++    preserve_image: Cell<bool>,
+ }
+ 
+ impl StagingRenderer {
+@@ -63,6 +66,7 @@ impl StagingRenderer {
+         staging_textures: [gl::Texture; 2],
+         view_resolution: UVec2,
+         fix_limited_range: bool,
++        srgb_target: bool,
+     ) -> Self {
+         let gl = &context.gl_context;
+         context.make_current();
+@@ -112,24 +116,46 @@ impl StagingRenderer {
+                 view_idx_uloc,
+                 framebuffers: framebuffers.try_into().unwrap(),
+                 viewport_size: view_resolution.as_ivec2(),
++                isolated_vertex_array: Cell::new(None),
++                srgb_target,
++                preserve_image: Cell::new(false),
+             }
+         }
+     }
+ 
+     #[allow(unused_variables)]
+     pub unsafe fn render(&self, hardware_buffer: *mut c_void, wait_for_copy: bool) {
+-        let gl = &self.context.gl_context;
+         self.context.make_current();
+ 
+-        self.context.render_ahardwarebuffer_using_texture(
++        self.context.render_ahardwarebuffer_using_texture_preserved(
+             hardware_buffer,
+             self.surface_texture,
+-            || unsafe {
++            self.preserve_image.get(),
++            || unsafe { self.draw_copy(wait_for_copy); },
++        );
++    }
++
++    unsafe fn draw_copy(&self, wait_for_copy: bool) {
++        let gl = &self.context.gl_context;
+                 ck!(gl.use_program(Some(self.program)));
+ 
+                 ck!(gl.viewport(0, 0, self.viewport_size.x, self.viewport_size.y));
+                 ck!(gl.disable(gl::SCISSOR_TEST));
+                 ck!(gl.disable(gl::STENCIL_TEST));
++                if let Some(vao) = self.isolated_vertex_array.get() {
++                    // Opt-in PyroWave copy isolation. Raw GL must not inherit
++                    // masks, culling, blend/depth state or a foreign VAO.
++                    ck!(gl.bind_vertex_array(Some(vao)));
++                    for state in [gl::DEPTH_TEST, gl::BLEND, gl::CULL_FACE,
++                        gl::RASTERIZER_DISCARD, gl::SAMPLE_ALPHA_TO_COVERAGE] {
++                        ck!(gl.disable(state));
++                    }
++                    ck!(gl.color_mask(true, true, true, true));
++                    if gl.supported_extensions().contains("GL_EXT_sRGB_write_control") {
++                        if self.srgb_target { ck!(gl.enable(0x8DB9)); }
++                        else { ck!(gl.disable(0x8DB9)); }
++                    }
++                }
+ 
+                 for (i, framebuffer) in self.framebuffers.iter().enumerate() {
+                     ck!(gl.bind_framebuffer(gl::DRAW_FRAMEBUFFER, Some(*framebuffer)));
+@@ -137,6 +163,14 @@ impl StagingRenderer {
+                     ck!(gl.active_texture(gl::TEXTURE0));
+                     ck!(gl.bind_texture(GL_TEXTURE_EXTERNAL_OES, Some(self.surface_texture)));
+                     ck!(gl.bind_sampler(0, None));
++                    if self.isolated_vertex_array.get().is_some() {
++                        ck!(gl.tex_parameter_i32(GL_TEXTURE_EXTERNAL_OES, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32));
++                        ck!(gl.tex_parameter_i32(GL_TEXTURE_EXTERNAL_OES, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32));
++                        ck!(gl.tex_parameter_i32(GL_TEXTURE_EXTERNAL_OES, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32));
++                        ck!(gl.tex_parameter_i32(GL_TEXTURE_EXTERNAL_OES, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32));
++                        assert_eq!(gl.check_framebuffer_status(gl::DRAW_FRAMEBUFFER), gl::FRAMEBUFFER_COMPLETE,
++                            "PyroWave staging framebuffer incomplete");
++                    }
+                     ck!(gl.uniform_1_i32(Some(&self.view_idx_uloc), i as i32));
+                     ck!(gl.draw_arrays(gl::TRIANGLE_STRIP, 0, 4));
+                 }
+@@ -145,8 +179,40 @@ impl StagingRenderer {
+                 if wait_for_copy {
+                     ck!(gl.finish());
+                 }
+-            },
+-        );
++                if self.isolated_vertex_array.get().is_some() {
++                    ck!(gl.bind_vertex_array(None));
++                    ck!(gl.bind_framebuffer(gl::DRAW_FRAMEBUFFER, None));
++                }
++    }
++
++    pub fn set_isolation(&self, enabled: bool) {
++        self.context.make_current();
++        let gl = &self.context.gl_context;
++        unsafe {
++            if enabled && self.isolated_vertex_array.get().is_none() {
++                self.isolated_vertex_array.set(Some(gl.create_vertex_array().unwrap()));
++            } else if !enabled {
++                if let Some(vao) = self.isolated_vertex_array.take() { gl.delete_vertex_array(vao); }
++            }
++        }
++        crate::log_quest_experiment(format!("[Q3PW_STAGING] isolation={} copy_eye={}x{}",
++            enabled, self.viewport_size.x, self.viewport_size.y));
++    }
++
++    pub fn set_preservation(&self, enabled: bool) {
++        self.preserve_image.set(enabled);
++        crate::log_quest_experiment(format!("[Q3PW_STAGING_PRESERVE] effective={enabled}"));
++    }
++
++    #[cfg(test)]
++    pub(crate) unsafe fn render_egl_image_for_test(&self, image: super::egl::EGLImage) {
++        self.context.make_current();
++        let gl = &self.context.gl_context;
++        gl.active_texture(gl::TEXTURE0);
++        gl.bind_texture(GL_TEXTURE_EXTERNAL_OES, Some(self.surface_texture));
++        (self.context.image_target_texture_2d)(GL_TEXTURE_EXTERNAL_OES, image);
++        self.draw_copy(true);
++        crate::check_error(gl, "software staging EGLImage draw");
+     }
+ }
+ 
+@@ -156,6 +222,7 @@ impl Drop for StagingRenderer {
+         self.context.make_current();
+ 
+         unsafe {
++            if let Some(vao) = self.isolated_vertex_array.take() { gl.delete_vertex_array(vao); }
+             ck!(gl.delete_program(self.program));
+             ck!(gl.delete_texture(self.surface_texture));
+             for framebuffer in &self.framebuffers {
+diff --git a/alvr/graphics/src/stream.rs b/alvr/graphics/src/stream.rs
+index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..1f41570fd3179c0ba5ec72cae005b0170ff64e0b 100644
+--- a/alvr/graphics/src/stream.rs
++++ b/alvr/graphics/src/stream.rs
+@@ -4,6 +4,7 @@ use alvr_common::{
+     Fov,
+ };
+ use alvr_session::{FoveatedEncodingConfig, PassthroughMode, UpscalingConfig};
++use glow::HasContext;
+ use std::{cell::Cell, collections::HashMap, ffi::c_void, iter, mem, ptr, rc::Rc};
+ use wgpu::{
+     hal::{api, gles},
+@@ -69,6 +70,8 @@ pub struct StreamRenderer {
+     staging_renderer: StagingRenderer,
+     pipeline: RenderPipeline,
+     views_objects: [ViewObjects; 2],
++    staging_textures: Vec<wgpu::Texture>,
++    staging_initialized: Cell<bool>,
+     ffe_params_buffer: Buffer,
+     /// `None` when foveated encoding is off, in which case there is nothing to steer.
+     foveated_encoding: Option<(UVec2, FoveatedEncodingConfig)>,
+@@ -182,6 +185,12 @@ impl StreamRenderer {
+             base_view_resolution
+         };
+ 
++        crate::log_quest_experiment(format!(
++            "[Q3PW_PRESENTATION_GEOMETRY] render_eye={}x{} staging_eye={}x{} target_eye={}x{} foveation={}",
++            base_view_resolution.x, base_view_resolution.y, staging_resolution.x,
++            staging_resolution.y, target_view_resolution.x, target_view_resolution.y,
++            foveated_encoding.is_some()));
++
+         if let Some(upscaling) = upscaling {
+             constants.extend([
+                 ("ENABLE_UPSCALING".into(), true.into()),
+@@ -251,6 +260,7 @@ impl StreamRenderer {
+ 
+         let mut view_objects = vec![];
+         let mut staging_textures_gl = vec![];
++        let mut staging_textures = vec![];
+         for target_swapchain in &swapchain_textures {
+             let staging_texture = super::create_texture(device, staging_resolution, target_format);
+ 
+@@ -296,6 +306,7 @@ impl StreamRenderer {
+                 render_target,
+             });
+             staging_textures_gl.push(staging_texture_gl);
++            staging_textures.push(staging_texture);
+         }
+ 
+         let staging_renderer = StagingRenderer::new(
+@@ -303,6 +314,7 @@ impl StreamRenderer {
+             staging_textures_gl.try_into().unwrap(),
+             staging_resolution,
+             fix_limited_range,
++            target_format.is_srgb(),
+         );
+ 
+         Self {
+@@ -310,6 +322,8 @@ impl StreamRenderer {
+             staging_renderer,
+             pipeline,
+             views_objects: view_objects.try_into().unwrap(),
++            staging_textures,
++            staging_initialized: Cell::new(false),
+             ffe_params_buffer,
+             foveated_encoding: foveated_encoding.map(|c| (base_view_resolution, c)),
+             wait_for_import_copy: false,
+@@ -333,6 +347,10 @@ impl StreamRenderer {
+ 
+     pub fn set_direct_eye_copy(&mut self, requested: bool, flip_y: bool, asynchronous: bool, copy_wait_us: i32, raw_srgb_requested: bool, image_cache_requested: bool) {
+         self.direct_eye_enabled = false;
++        crate::log_quest_experiment(format!(
++            "[Q3PW_PRESENTATION] direct_requested={} direct_eligible={} pyrowave_import_sync={} foveation={}",
++            requested, self.direct_eye_config.is_some(), self.wait_for_import_copy,
++            self.foveated_encoding.is_some()));
+         if !requested || !self.wait_for_import_copy { return; }
+         let Some(config) = &self.direct_eye_config else { return; };
+         // Re-create only on stream/decoder initialization; errors fall back.
+@@ -345,6 +363,44 @@ impl StreamRenderer {
+         }
+     }
+ 
++    pub fn set_staging_isolation(&self, requested: bool) {
++        self.staging_renderer.set_isolation(requested && self.wait_for_import_copy);
++    }
++
++    pub fn set_staging_preservation(&self, requested: bool) {
++        self.staging_renderer.set_preservation(requested && self.wait_for_import_copy);
++    }
++
++    pub fn set_staging_initialization(&self, requested: bool) {
++        let enabled = requested && self.wait_for_import_copy;
++        if enabled && !self.staging_initialized.get() {
++            // Raw GLES writes are invisible to WGPU's initialization tracker.
++            // A partial tracked write clears/initializes the whole subresource
++            // before the first external copy, instead of after it at sampling.
++            // This is once per renderer, never a per-frame CPU image upload.
++            for texture in &self.staging_textures {
++                self.context.queue.write_texture(
++                    wgpu::TexelCopyTextureInfo {
++                        texture, mip_level: 0, origin: wgpu::Origin3d::ZERO,
++                        aspect: wgpu::TextureAspect::All,
++                    },
++                    &[0, 0, 0, 0],
++                    wgpu::TexelCopyBufferLayout {
++                        offset: 0, bytes_per_row: Some(4), rows_per_image: Some(1),
++                    },
++                    wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
++                );
++            }
++            self.context.queue.submit(iter::empty());
++            self.context.make_current();
++            unsafe { self.context.gl_context.finish(); }
++            self.staging_initialized.set(true);
++        }
++        crate::log_quest_experiment(format!(
++            "[Q3PW_STAGING_INIT] requested={} effective={} initialized={}",
++            requested, enabled, self.staging_initialized.get()));
++    }
++
+     pub fn last_copy_was_direct(&self) -> bool { self.last_copy_direct.get() }
+ 
+     pub fn poll_import_copy(&self) -> (bool, Option<f32>) {
+@@ -720,3 +776,212 @@ pub fn compute_target_view_resolution(
+     }
+     target_resolution.as_uvec2()
+ }
++
++// Software GLES test of production staging + production WGSL + projection.
++// EGLImage is created from an owned GL texture; Android AHB import and Qualcomm
++// driver behavior are deliberately not claimed by this test.
++#[cfg(all(test, target_os = "linux"))]
++mod staging_correctness_tests {
++    use super::*;
++    use alvr_common::log;
++    use alvr_session::FoveationProfile;
++    use glow::HasContext;
++
++    fn config(profile: FoveationProfile) -> FoveatedEncodingConfig {
++        FoveatedEncodingConfig { force_enable: false, profile,
++            center_size_x: 0.2, center_size_y: 0.178,
++            center_shift_x: 0., center_shift_y: 0.,
++            edge_ratio_x: 3., edge_ratio_y: 4.,
++            peripheral_softness: 0.5, blur_only: false, follow_gaze: false }
++            .resolved_geometry()
++    }
++
++    unsafe fn texture(gl: &glow::Context, width: u32, height: u32, format: u32, data: Option<&[u8]>) -> glow::Texture {
++        gl.bind_buffer(glow::PIXEL_UNPACK_BUFFER,None);
++        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT,1);
++        gl.pixel_store_i32(glow::UNPACK_ROW_LENGTH,0);
++        gl.pixel_store_i32(glow::UNPACK_SKIP_ROWS,0);
++        gl.pixel_store_i32(glow::UNPACK_SKIP_PIXELS,0);
++        let tex=gl.create_texture().unwrap();
++        gl.bind_texture(glow::TEXTURE_2D,Some(tex));
++        gl.tex_parameter_i32(glow::TEXTURE_2D,glow::TEXTURE_MIN_FILTER,glow::LINEAR as i32);
++        gl.tex_parameter_i32(glow::TEXTURE_2D,glow::TEXTURE_MAG_FILTER,glow::LINEAR as i32);
++        gl.tex_parameter_i32(glow::TEXTURE_2D,glow::TEXTURE_WRAP_S,glow::CLAMP_TO_EDGE as i32);
++        gl.tex_parameter_i32(glow::TEXTURE_2D,glow::TEXTURE_WRAP_T,glow::CLAMP_TO_EDGE as i32);
++        gl.tex_image_2d(glow::TEXTURE_2D,0,format as i32,width as i32,height as i32,0,
++            glow::RGBA,glow::UNSIGNED_BYTE,glow::PixelUnpackData::Slice(data));
++        tex
++    }
++
++    unsafe fn staging_pixel(context: &GraphicsContext, texture: &wgpu::Texture, x: i32, y: i32) -> [u8; 4] {
++        let raw = texture.as_hal::<api::Gles, _, _>(|texture| {
++            let gles::TextureInner::Texture { raw, .. } = texture.unwrap().inner else {
++                panic!("invalid staging texture type");
++            };
++            raw
++        });
++        context.make_current();
++        raw_texture_pixel(context, raw, x, y)
++    }
++
++    unsafe fn raw_texture_pixel(context: &GraphicsContext, raw: glow::Texture, x: i32, y: i32) -> [u8; 4] {
++        let gl = &context.gl_context;
++        let fbo = gl.create_framebuffer().unwrap();
++        gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(fbo));
++        gl.framebuffer_texture_2d(glow::READ_FRAMEBUFFER, glow::COLOR_ATTACHMENT0,
++            glow::TEXTURE_2D, Some(raw), 0);
++        assert_eq!(gl.check_framebuffer_status(glow::READ_FRAMEBUFFER), glow::FRAMEBUFFER_COMPLETE);
++        gl.bind_buffer(glow::PIXEL_PACK_BUFFER, None);
++        gl.pixel_store_i32(glow::PACK_ALIGNMENT,1);
++        gl.pixel_store_i32(glow::PACK_ROW_LENGTH,0);
++        gl.pixel_store_i32(glow::PACK_SKIP_ROWS,0);
++        gl.pixel_store_i32(glow::PACK_SKIP_PIXELS,0);
++        let mut pixel = [0; 4];
++        gl.read_pixels(x, y, 1, 1, glow::RGBA, glow::UNSIGNED_BYTE,
++            glow::PixelPackData::Slice(Some(&mut pixel)));
++        crate::check_error(gl, "software staging initialization control");
++        gl.bind_framebuffer(glow::READ_FRAMEBUFFER, None);
++        gl.delete_framebuffer(fbo);
++        pixel
++    }
++
++    #[test]
++    fn software_gles_staging_both_eyes_survive_fixed_profile_inverse_and_gl_state() {
++        assert_eq!(std::env::var("LIBGL_ALWAYS_SOFTWARE").as_deref(),Ok("1"),
++            "run this gate only in the explicitly software-rendered CI environment");
++        struct Diagnostics;
++        impl log::Log for Diagnostics {
++            fn enabled(&self, metadata: &log::Metadata) -> bool {
++                metadata.level() <= log::Level::Info || metadata.target() == "wgpu_hal::gles::egl"
++            }
++            fn log(&self, record: &log::Record) {
++                if self.enabled(record.metadata()) { eprintln!("{} {}",record.target(),record.args()); }
++            }
++            fn flush(&self) {}
++        }
++        static DIAGNOSTICS: Diagnostics=Diagnostics;
++        log::set_logger(&DIAGNOSTICS).unwrap();
++        log::set_max_level(log::LevelFilter::Debug);
++        let context=Rc::new(GraphicsContext::new_gl());
++        let adapter=context.adapter.get_info();
++        assert_eq!(adapter.device_type,wgpu::DeviceType::Cpu,"this gate must use a CPU renderer");
++        eprintln!("software adapter: {adapter:?}");
++        let gl=&context.gl_context;
++        let version=unsafe { gl.get_parameter_string(glow::VERSION) };
++        assert!(version.starts_with("OpenGL ES"),"external-image regression requires real GLES, got {version}");
++        eprintln!("software GL API: {version}");
++        for profile in [FoveationProfile::Light,FoveationProfile::Medium,FoveationProfile::H264Fit] {
++          for format in [glow::RGBA8,glow::SRGB8_ALPHA8] {
++           for initialize in [true,false] {
++            for isolated in [true,false] {
++                let cfg=config(profile.clone());
++                let expanded=UVec2::new(160,160);
++                let (packed,_) = foveated_encoding_shader_constants(expanded,cfg.clone());
++                unsafe {
++                    context.make_current();
++                    let targets=[texture(gl,160,160,format,None),texture(gl,160,160,format,None)];
++                    let mut renderer=StreamRenderer::new(Rc::clone(&context),expanded,expanded,
++                        [vec![targets[0].0.get()],vec![targets[1].0.get()]],format,
++                        Some(cfg),format==glow::SRGB8_ALPHA8,false,1.0,None);
++                    renderer.set_import_copy_sync(true);
++                    renderer.set_staging_initialization(initialize);
++                    renderer.set_staging_isolation(isolated);
++                   for fresh_frame in 0..2 {
++                    context.make_current();
++                    let colors = if fresh_frame == 0 {
++                        [[192u8,48,32,255],[16u8,144,224,255]]
++                    } else { [[32u8,176,80,255],[208u8,64,144,255]] };
++                    let pixels=(0..packed.y).flat_map(|_| (0..packed.x*2)
++                        .flat_map(|x| colors[usize::from(x>=packed.x)])).collect::<Vec<_>>();
++                    // WGPU's one-texel initialization leaves UNPACK_ROW_LENGTH=1.
++                    // A CPU-uploaded fixture must reset unpack state explicitly;
++                    // the actual Vulkan/AHB producer does not use this upload.
++                    // A fresh GL source also avoids recreating an EGLImage from
++                    // an existing GL-texture sibling on the next frame.
++                    let source=texture(gl,packed.x*2,packed.y,glow::RGBA8,Some(&pixels));
++                    // The real producer is Vulkan/AHB, not a GL source bound in
++                    // this context. Do not carry a fixture-only 2D binding into
++                    // the production external-texture draw.
++                    gl.bind_texture(glow::TEXTURE_2D,None);
++                    gl.finish();
++                    for eye in 0..2 {
++                        let x=(eye as u32*packed.x+packed.x/2) as i32;
++                        assert_eq!(raw_texture_pixel(&context,source,x,(packed.y/2) as i32),colors[eye],
++                            "software source upload must be correct before EGL import");
++                    }
++                    let image_attributes = super::super::image_import_attributes(true).unwrap();
++                    let image=(context.create_image)(context.egl_display.as_ptr(),
++                        context.egl_context.as_ptr(),0x30B1, // EGL_GL_TEXTURE_2D_KHR
++                        source.0.get() as usize as *mut _,image_attributes.as_ptr());
++                    assert!(!image.is_null(),"software EGLImage source creation failed");
++                    if isolated {
++                        // Poison foreign state to verify the opt-in copy restores
++                        // it rather than relying on what the previous draw left.
++                        gl.enable(glow::BLEND); gl.blend_func(glow::ZERO,glow::ZERO);
++                        gl.enable(glow::CULL_FACE); gl.cull_face(glow::FRONT_AND_BACK);
++                        gl.color_mask(false,false,false,false);
++                        if gl.supported_extensions().contains("GL_EXT_sRGB_write_control") {
++                            gl.disable(0x8DB9);
++                        }
++                    }
++                    renderer.staging_renderer.render_egl_image_for_test(image);
++                    (context.destroy_image)(context.egl_display.as_ptr(),image);
++                    gl.delete_texture(source);
++                    let init_control = !initialize && !isolated && fresh_frame == 0
++                        && profile == FoveationProfile::Light && format == glow::RGBA8;
++                    if init_control {
++                        assert_eq!(staging_pixel(&context, &renderer.staging_textures[0],80,80), colors[0],
++                            "raw copy must be correct before WGPU's first sampling");
++                    }
++                    if profile == FoveationProfile::Light && format == glow::RGBA8 {
++                        eprintln!("raw copy diagnostic: initialize={initialize} isolated={isolated} fresh_frame={fresh_frame} corner={:?} x16={:?} center={:?}",
++                            staging_pixel(&context,&renderer.staging_textures[0],0,0),
++                            staging_pixel(&context,&renderer.staging_textures[0],16,0),
++                            staging_pixel(&context,&renderer.staging_textures[0],80,80));
++                    }
++                    let fov=Fov {left:-0.7,right:0.7,up:0.7,down:-0.7};
++                    renderer.render(ptr::null_mut(),[
++                        StreamViewParams {swapchain_index:0,reprojection_rotation:Quat::IDENTITY,fov},
++                        StreamViewParams {swapchain_index:0,reprojection_rotation:Quat::IDENTITY,fov}],None);
++                    // WGPU's EGL guard releases the context after submission.
++                    // Raw GLES readback needs to make the shared context current.
++                    context.make_current();
++                    gl.finish();
++                    if init_control {
++                        assert_eq!(staging_pixel(&context, &renderer.staging_textures[0],80,80), [0,0,0,0],
++                            "pinned WGPU first-use clear must reproduce the untracked-write bug");
++                        eprintln!("confirmed software control: raw copy correct, first-use sampling cleared staging");
++                    }
++                    let fbo=gl.create_framebuffer().unwrap();
++                    for eye in 0..2 {
++                        gl.bind_framebuffer(glow::READ_FRAMEBUFFER,Some(fbo));
++                        gl.framebuffer_texture_2d(glow::READ_FRAMEBUFFER,glow::COLOR_ATTACHMENT0,
++                            glow::TEXTURE_2D,Some(targets[eye]),0);
++                        assert_eq!(gl.check_framebuffer_status(glow::READ_FRAMEBUFFER),glow::FRAMEBUFFER_COMPLETE);
++                        let mut readback=vec![0u8;160*160*4];
++                        gl.bind_buffer(glow::PIXEL_PACK_BUFFER,None);
++                        gl.read_pixels(0,0,160,160,glow::RGBA,glow::UNSIGNED_BYTE,
++                            glow::PixelPackData::Slice(Some(&mut readback)));
++                        crate::check_error(gl,"software production stream readback");
++                        for (pixel_index,pixel) in readback.chunks_exact(4).enumerate() {
++                            let expected = if !initialize && fresh_frame == 0 {
++                                [0,0,0,255] // Explicit reproduction control, not a correctness pass.
++                            } else { colors[eye] };
++                            for c in 0..4 {
++                                assert!((i16::from(pixel[c])-i16::from(expected[c])).abs()<=2,
++                                    "profile={profile:?} format={format} initialize={initialize} isolated={isolated} fresh_frame={fresh_frame} eye={eye} pixel={pixel_index} channel={c} actual={pixel:?} expected={expected:?}");
++                            }
++                        }
++                    }
++                    gl.bind_framebuffer(glow::FRAMEBUFFER,None);
++                    gl.delete_framebuffer(fbo);
++                   }
++                    drop(renderer);
++                    for target in targets { gl.delete_texture(target); }
++                }
++            }
++           }
++          }
++        }
++    }
++}
+diff --git a/alvr/server_core/src/connection.rs b/alvr/server_core/src/connection.rs
+index d537f8f5f1f5b8c73f2629bf553f69730e8926a2..003726ed1c1f1d8150bcdc29d5a009c54ead52f7 100644
+--- a/alvr/server_core/src/connection.rs
++++ b/alvr/server_core/src/connection.rs
+@@ -139,7 +139,8 @@ fn openvr_config_with_env(
+     let (enable_foveated_encoding, foveation_center_size_x, foveation_center_size_y,
+         foveation_center_shift_x, foveation_center_shift_y, foveation_edge_ratio_x,
+         foveation_edge_ratio_y, foveation_peripheral_softness, foveation_blur_only) =
+-        if let Switch::Enabled(config) = &settings.video.foveated_encoding {
++        if let Switch::Enabled(raw_config) = &settings.video.foveated_encoding {
++            let config = raw_config.resolved_geometry();
+             let (center, edge, shift) = match config.profile {
+                 // These named profiles are deliberately fixed-centre. The shader mirrors
+                 // right-eye UVs itself, so a zero shift is the live profile baseline.
+diff --git a/alvr/session/src/settings.rs b/alvr/session/src/settings.rs
+index 6e2b1882009887b5d67836e394df9be8e2ab1267..c90595116aad8bf654f24c7df1ff625da4acc523 100644
+--- a/alvr/session/src/settings.rs
++++ b/alvr/session/src/settings.rs
+@@ -574,6 +574,60 @@ pub struct FoveatedEncodingConfig {
+     pub follow_gaze: bool,
+ }
+ 
++impl FoveatedEncodingConfig {
++    /// Resolve fixed profiles identically on both sides of the stream. Never
++    /// mutate persisted raw Custom fields or silently change a Custom request.
++    pub fn resolved_geometry(&self) -> Self {
++        let mut result = self.clone();
++        let (center, edge) = match self.profile {
++            FoveationProfile::Light => (0.8, 1.5),
++            FoveationProfile::Medium => (0.6, 2.0),
++            FoveationProfile::H264Fit => (0.5, 2.0),
++            FoveationProfile::Custom => return result,
++        };
++        result.center_size_x = center;
++        result.center_size_y = center;
++        result.edge_ratio_x = edge;
++        result.edge_ratio_y = edge;
++        result.center_shift_x = 0.0;
++        result.center_shift_y = 0.0;
++        // These named profiles are fixed-centre; only Custom may follow gaze.
++        result.follow_gaze = false;
++        result
++    }
++}
++
++#[cfg(test)]
++mod fixed_profile_geometry_tests {
++    use super::*;
++    fn stale(profile: FoveationProfile) -> FoveatedEncodingConfig {
++        FoveatedEncodingConfig { force_enable: false, profile,
++            center_size_x: 0.2, center_size_y: 0.178,
++            center_shift_x: 0.25, center_shift_y: -0.1,
++            edge_ratio_x: 3.0, edge_ratio_y: 4.0,
++            peripheral_softness: 0.5, blur_only: false, follow_gaze: true }
++    }
++    #[test]
++    fn fixed_profiles_resolve_stale_fields_without_mutating_the_session() {
++        for (profile, center, edge) in [(FoveationProfile::Light,0.8,1.5),
++            (FoveationProfile::Medium,0.6,2.0),(FoveationProfile::H264Fit,0.5,2.0)] {
++            let raw=stale(profile); let resolved=raw.resolved_geometry();
++            assert_eq!((resolved.center_size_x,resolved.center_size_y),(center,center));
++            assert_eq!((resolved.edge_ratio_x,resolved.edge_ratio_y),(edge,edge));
++            assert_eq!((resolved.center_shift_x,resolved.center_shift_y),(0.0,0.0));
++            assert!(!resolved.follow_gaze);
++            assert_eq!(resolved.peripheral_softness,raw.peripheral_softness);
++            assert_eq!(raw.center_size_x,0.2);
++            assert!(raw.follow_gaze);
++        }
++    }
++    #[test]
++    fn custom_asymmetric_geometry_is_preserved_exactly() {
++        let raw=stale(FoveationProfile::Custom);
++        assert!(raw == raw.resolved_geometry());
++    }
++}
++
+ #[repr(C)]
+ #[derive(SettingsSchema, Clone, Copy, Serialize, Deserialize, Pod, Zeroable)]
+ pub struct ColorCorrectionConfig {

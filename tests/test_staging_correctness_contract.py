@@ -1,0 +1,60 @@
+"""Pinned overlay and safe activation checks; GPU pixels are checked by CI GLES."""
+import hashlib
+import json
+import unittest
+from pathlib import Path
+
+ROOT=Path(__file__).resolve().parents[1]
+
+class StagingCorrectnessContract(unittest.TestCase):
+    def test_overlay_is_hash_pinned_after_session_setting_and_preflight(self):
+        lock=json.loads((ROOT/'sources.lock.json').read_text(encoding='utf-8'))
+        pin=lock['patches']['foveated_staging_correctness']
+        self.assertEqual(hashlib.sha256((ROOT/pin['path']).read_bytes()).hexdigest(),pin['sha256'])
+        fetch=(ROOT/'tools/ci/fetch_sources.sh').read_text(encoding='utf-8')
+        self.assertLess(fetch.index('apply_patch "$dest/ALVR-20.13.0" "$repo/patches/alvr-pyrowave-rdo-session-setting.patch"'),
+                        fetch.index('apply_patch "$dest/ALVR-20.13.0" "$repo/patches/foveated-staging-correctness.patch"'))
+
+    def test_actual_profile_resolver_and_renderer_are_under_native_tests(self):
+        patch=(ROOT/'patches/foveated-staging-correctness.patch').read_text(encoding='utf-8')
+        for text in ('fixed_profiles_resolve_stale_fields_without_mutating_the_session',
+                     'custom_asymmetric_geometry_is_preserved_exactly',
+                     'software_gles_staging_both_eyes_survive_fixed_profile_inverse_and_gl_state',
+                     'codec == CodecType::PyroWave &&',
+                     'requested && self.wait_for_import_copy',
+                     '"debug.q3pw.staging_isolation") == "1"',
+                     '"debug.q3pw.staging_init") == "1"',
+                     '"debug.q3pw.staging_preserve") == "1"',
+                     'default_import_is_unchanged_and_preservation_is_explicit',
+                     'pub fn set_staging_initialization',
+                     'raw copy must be correct before WGPU',
+                     'software source upload must be correct before EGL import',
+                     'gl.pixel_store_i32(glow::UNPACK_ROW_LENGTH,0)',
+                     'gl.pixel_store_i32(glow::PACK_ROW_LENGTH,0)',
+                     'Explicit reproduction control, not a correctness pass.',
+                     '.filter(|c| !c.blur_only).map(|c| c.resolved_geometry())'):
+            self.assertIn(text,patch)
+        self.assertIn('precision highp float;',patch)
+        self.assertIn('precision highp samplerExternalOES;',patch)
+        workflow=(ROOT/'.github/workflows/ci.yml').read_text(encoding='utf-8')
+        self.assertIn('cargo +"$RUST_TOOLCHAIN" test -p alvr_graphics --lib staging_correctness_tests',workflow)
+        self.assertIn("LIBGL_ALWAYS_SOFTWARE: '1'",workflow)
+        production=workflow.split('name: Production foveated staging software GLES regression',1)[1].split('      - name:',1)[0]
+        self.assertIn('libegl-dev libgles-dev',production)
+        self.assertIn('tools/ci/build_gles_only_egl.sh',production)
+        loader=(ROOT/'tools/ci/build_gles_only_egl.sh').read_text(encoding='utf-8')
+        self.assertIn('libEGL.so.1',loader)
+        self.assertIn('patchelf --set-soname libq3pw_real_egl.so.1',loader)
+        probe=(ROOT/'tools/ci/gles_only_egl_probe.c').read_text(encoding='utf-8')
+        self.assertIn('dlopen("libEGL.so.1"',probe)
+        self.assertIn('strncmp(version, "OpenGL ES", 9)',probe)
+        self.assertIn('external-image regression requires real GLES',patch)
+        self.assertNotIn('MESA_NO_ERROR',production)
+
+    def test_both_experiments_are_observable_and_resettable(self):
+        from tools.quest3 import bench, control
+        for prop in ('debug.q3pw.staging_init','debug.q3pw.staging_isolation','debug.q3pw.staging_preserve'):
+            self.assertIn(prop,bench.EXPERIMENT_PROPERTIES)
+            self.assertIn(prop,control.EXPERIMENT_PROPERTIES)
+
+if __name__=='__main__':unittest.main()

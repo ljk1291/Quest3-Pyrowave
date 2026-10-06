@@ -47,6 +47,10 @@
     "nvenc_dimension_preflight": {
       "path": "patches/nvenc-dimension-preflight.patch",
       "sha256": "10087a15c4a936028ccf5bf4668d482e84adbb03eced7631ad63e5ac4ae1438f"
+    },
+    "foveated_staging_correctness": {
+      "path": "patches/foveated-staging-correctness.patch",
+      "sha256": "5669391d973c8b399f053d93335bd796ab2107a6476b6d8674b18187bb9c75ee"
     }
   },
   "rust": "1.97.1",

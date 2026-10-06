@@ -19,7 +19,7 @@ EXPERIMENT_PROPERTIES=('debug.oculus.forceDisplayScaling','debug.oculus.refreshR
     'debug.q3pw.decode_handoff','debug.q3pw.haar_fused','debug.q3pw.dequant_batch','debug.q3pw.convert_compute',
     'debug.q3pw.fragment_min_usage','debug.q3pw.optimal_ahb_usage','debug.q3pw.loop_probe',
     'debug.q3pw.runtime_display_time','debug.q3pw.pass_profile','debug.q3pw.hide_performance_overlay',
-    'debug.q3pw.layer_filter',
+    'debug.q3pw.layer_filter','debug.q3pw.staging_init','debug.q3pw.staging_isolation','debug.q3pw.staging_preserve',
     'debug.xrwired.pyro_precision','debug.xrwired.early_poll','debug.xrwired.perf_level')
 
 def windows_process_running(executable):
