@@ -54,7 +54,7 @@
     },
     "direct_eye_foveation": {
       "path": "patches/direct-eye-foveation.patch",
-      "sha256": "07ae473652f1f25492ff1270ccbafd0aeb87d703d85c3c6e6edf82197fc4cc5e"
+      "sha256": "3c0e470ed3dee013614a7ba8b307c9d3199dd245babb16403ce2ec5e6fc4f259"
     }
   },
   "rust": "1.97.1",

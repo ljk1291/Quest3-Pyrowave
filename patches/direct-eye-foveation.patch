@@ -93,7 +93,7 @@ index 986cf174090318cd5387b7b39f4fa5e39a33803e..3503607d81dbf7b945d5c6cce5242a52
          color = vec3(16.0 / 255.0) + (219.0 / 255.0) * color;
      if (srgb_correction != 0) {
 diff --git a/alvr/graphics/src/direct_eye.rs b/alvr/graphics/src/direct_eye.rs
-index e3257fec20a0549858ed07fcd29fe40525029daf..ec87a02f99c7f8277e465f28d3ae9dcc7f558c72 100644
+index e3257fec20a0549858ed07fcd29fe40525029daf..a35f4fa2f454d794fdef3fcc91604b23c6ec4474 100644
 --- a/alvr/graphics/src/direct_eye.rs
 +++ b/alvr/graphics/src/direct_eye.rs
 @@ -1,4 +1,4 @@
@@ -172,7 +172,7 @@ index e3257fec20a0549858ed07fcd29fe40525029daf..ec87a02f99c7f8277e465f28d3ae9dcc
              gl.compile_shader(shader);
              if !gl.get_shader_compile_status(shader) {
                  return Err(gl.get_shader_info_log(shader));
-@@ -92,10 +130,15 @@ unsafe fn compile_program(gl: &gl::Context) -> Result<gl::Program, String> {
+@@ -92,10 +130,14 @@ unsafe fn compile_program(gl: &gl::Context) -> Result<gl::Program, String> {
  
  impl DirectEyeRenderer {
      /// Any compile/import-target failure leaves the existing renderer usable.
@@ -180,8 +180,7 @@ index e3257fec20a0549858ed07fcd29fe40525029daf..ec87a02f99c7f8277e465f28d3ae9dcc
 -               flip: bool, asynchronous: bool, copy_wait_us: i32, raw_srgb_requested: bool, image_cache_requested: bool) -> Result<Self, String> {
 +    #[expect(clippy::too_many_arguments)]
 +    pub(super) fn new(context: Rc<GraphicsContext>, config: &DirectEyeConfig,
-+               flip: bool,
-+    ffe_params: Option<(gl::UniformLocation, Cell<[[f32; 16]; 2]>)>, asynchronous: bool, copy_wait_us: i32, raw_srgb_requested: bool, image_cache_requested: bool, foveation: Option<&DirectEyeFoveation>) -> Result<Self, String> {
++               flip: bool, asynchronous: bool, copy_wait_us: i32, raw_srgb_requested: bool, image_cache_requested: bool, foveation: Option<&DirectEyeFoveation>) -> Result<Self, String> {
          context.make_current();
          let gl = &context.gl_context;
 +        if foveation.is_some() && !gl.supported_extensions().contains("GL_OES_EGL_image_external_essl3") {
@@ -190,7 +189,7 @@ index e3257fec20a0549858ed07fcd29fe40525029daf..ec87a02f99c7f8277e465f28d3ae9dcc
          unsafe {
              // Removing the paired transfer functions is valid only for the
              // existing SDR identity-gamma path with an sRGB destination.
-@@ -106,7 +149,7 @@ impl DirectEyeRenderer {
+@@ -106,7 +148,7 @@ impl DirectEyeRenderer {
              import_diagnostic(4, format!("[Q3PW_COLOR_COPY] requested={} active={} srgb_target={} correction={} gamma={}",
                  raw_srgb_requested, bypass_srgb, config.srgb_target,
                  config.srgb_correction, config.encoding_gamma));
@@ -199,7 +198,7 @@ index e3257fec20a0549858ed07fcd29fe40525029daf..ec87a02f99c7f8277e465f28d3ae9dcc
              let source_texture = match gl.create_texture() {
                  Ok(texture) => texture,
                  Err(e) => { gl.delete_program(program); return Err(e); }
-@@ -130,6 +173,15 @@ impl DirectEyeRenderer {
+@@ -130,6 +172,15 @@ impl DirectEyeRenderer {
                  gl.uniform_1_i32(Some(&location("fix_limited_range")?), config.fix_limited_range as i32);
                  gl.uniform_1_i32(Some(&location("srgb_correction")?), (config.srgb_correction && !bypass_srgb) as i32);
                  gl.uniform_1_f32(Some(&location("encoding_gamma")?), if bypass_srgb { 0.0 } else { config.encoding_gamma });
@@ -215,7 +214,7 @@ index e3257fec20a0549858ed07fcd29fe40525029daf..ec87a02f99c7f8277e465f28d3ae9dcc
                  for eye in 0..2 {
                      if config.textures[eye].is_empty() {
                          return Err("Direct eye copy empty swapchain".into());
-@@ -147,14 +199,14 @@ impl DirectEyeRenderer {
+@@ -147,14 +198,14 @@ impl DirectEyeRenderer {
                          }
                      }
                  }
@@ -233,7 +232,11 @@ index e3257fec20a0549858ed07fcd29fe40525029daf..ec87a02f99c7f8277e465f28d3ae9dcc
                      image_cache_enabled: Cell::new(image_cache_requested && cfg!(target_os = "android")),
                      image_cache: RefCell::new(Vec::new()), pending: RefCell::new(None), copy_wait_ns: copy_wait_us.clamp(0, 2000) * 1000, bypass_srgb }),
                  Err(e) => {
-@@ -288,7 +340,33 @@ impl DirectEyeRenderer {
+@@ -284,11 +335,37 @@ impl DirectEyeRenderer {
+     pub unsafe fn render(&self, buffer: *mut c_void, indices: [u32; 2]) {
+         self.drain_copy();
+         self.context.make_current();
+-        let gl = &self.context.gl_context;
          let started = Instant::now();
          let cached = self.cached_source_texture(buffer);
          let source_texture = cached.unwrap_or(self.source_texture);
@@ -265,10 +268,11 @@ index e3257fec20a0549858ed07fcd29fe40525029daf..ec87a02f99c7f8277e465f28d3ae9dcc
 +    }
 +
 +    unsafe fn draw(&self, source_texture: gl::Texture, indices: [u32; 2], started: Instant) {
++            let gl = &self.context.gl_context;
              gl.use_program(Some(self.program));
              gl.bind_vertex_array(Some(self.vertex_array));
              gl.viewport(0, 0, self.resolution.x as i32, self.resolution.y as i32);
-@@ -313,6 +391,9 @@ impl DirectEyeRenderer {
+@@ -313,6 +390,9 @@ impl DirectEyeRenderer {
              for (eye, &index) in indices.iter().enumerate() {
                  gl.bind_framebuffer(gl::DRAW_FRAMEBUFFER, Some(self.framebuffers[eye][index as usize]));
                  gl.uniform_1_i32(Some(&self.view_idx), eye as i32);
@@ -278,7 +282,7 @@ index e3257fec20a0549858ed07fcd29fe40525029daf..ec87a02f99c7f8277e465f28d3ae9dcc
                  gl.draw_arrays(gl::TRIANGLE_STRIP, 0, 4);
              }
              // Restore the legacy state for WGPU/lobby/overlay users. This
-@@ -337,10 +418,8 @@ impl DirectEyeRenderer {
+@@ -337,10 +417,8 @@ impl DirectEyeRenderer {
              }
              gl.bind_framebuffer(gl::DRAW_FRAMEBUFFER, None);
              gl.bind_vertex_array(None);
@@ -291,7 +295,7 @@ index e3257fec20a0549858ed07fcd29fe40525029daf..ec87a02f99c7f8277e465f28d3ae9dcc
  
  impl Drop for DirectEyeRenderer {
 diff --git a/alvr/graphics/src/stream.rs b/alvr/graphics/src/stream.rs
-index 1f41570fd3179c0ba5ec72cae005b0170ff64e0b..cebb764beacac8f381eab425c0a6b06f4653d9dc 100644
+index 1f41570fd3179c0ba5ec72cae005b0170ff64e0b..9efed56cbf0802762c095b29644464ca48877e7d 100644
 --- a/alvr/graphics/src/stream.rs
 +++ b/alvr/graphics/src/stream.rs
 @@ -1,9 +1,9 @@
@@ -481,7 +485,7 @@ index 1f41570fd3179c0ba5ec72cae005b0170ff64e0b..cebb764beacac8f381eab425c0a6b06f
          log::set_max_level(log::LevelFilter::Debug);
          let context=Rc::new(GraphicsContext::new_gl());
          let adapter=context.adapter.get_info();
-@@ -984,4 +1048,223 @@ mod staging_correctness_tests {
+@@ -984,4 +1048,226 @@ mod staging_correctness_tests {
            }
          }
      }
@@ -627,8 +631,11 @@ index 1f41570fd3179c0ba5ec72cae005b0170ff64e0b..cebb764beacac8f381eab425c0a6b06f
 +    #[test]
 +    fn default_off_and_ineligible_requests_cannot_select_direct_ffe() {
 +        let cfg = config(FoveationProfile::Medium);
-+        let policy = |req, direct, sync, asynchronous, target, cfg, inverse|
-+            direct_ffe_eligibility(req, direct, sync, asynchronous, target, cfg, inverse);
++        // A fn item (not a closure) so each call may borrow a differently scoped config.
++        fn policy(req: bool, direct: bool, sync: bool, asynchronous: bool, target: &'static str,
++            cfg: Option<&FoveatedEncodingConfig>, inverse: bool) -> &'static str {
++            direct_ffe_eligibility(req, direct, sync, asynchronous, target, cfg, inverse)
++        }
 +        assert_eq!(policy(false, true, true, false, "eligible", Some(&cfg), true), "not_requested");
 +        assert_eq!(policy(true, false, true, false, "eligible", Some(&cfg), true), "direct_eye_copy_required");
 +        assert_eq!(policy(true, true, false, false, "eligible", Some(&cfg), true), "pyrowave_synchronous_import_required");

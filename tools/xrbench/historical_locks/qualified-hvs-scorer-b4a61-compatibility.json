@@ -118,7 +118,7 @@
     {
       "path": "patches.direct_eye_foveation.sha256",
       "old": null,
-      "new": "07ae473652f1f25492ff1270ccbafd0aeb87d703d85c3c6e6edf82197fc4cc5e",
+      "new": "3c0e470ed3dee013614a7ba8b307c9d3199dd245babb16403ce2ec5e6fc4f259",
       "role": "alvr_presentation_and_geometry_only"
     }
   ]
