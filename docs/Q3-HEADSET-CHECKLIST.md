@@ -1,0 +1,885 @@
+# Q4 and owner-supervised headset preparation-only checklist
+
+This is a preparation-only checklist. It does not authorize a headset, router,
+SteamVR, ALVR setting, ADB, or installation action. Use it only after the Q3a/Q3b
+tables, WO-10/WO-8/WO-13 merge, and a verified matching signed pair are available.
+
+## Pinned matching build for later supervised preparation
+
+The owner-reviewed corrected pair is source
+`0f07f05b4df88f8fa08ea034f794cda4be9eaf38`, from manual GitHub Actions
+[run 37249212605](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37249212605).
+Its verified APK SHA-256 is
+`0de40871572a2d83698b841ff28e306a0578788527d77222cdcb5cea9bba0e85`,
+and Windows server ZIP SHA-256 is
+`2b78c2b928871bae3afaf5fe101f4304c3333b32ad06aab83082e9251fb60239`.
+The stable signing certificate is unchanged:
+`4a3fe0a8d47ee67b01710df6ffdc870e91ebc5b8e7feec7c87534944ca2a44aa`.
+The [corrected-pair receipt](../results/quality-candidate-build-rdo-session-2026-10-05.json)
+binds all native payloads, pins and shaders, including the RDO session-setting
+route and exported native getter. On 2026-10-05 the owner authorized installation
+and the a/a2 visual comparison. The corrected APK is now installed and verified;
+preserve 80a1635 and d1c3 artifacts for rollback. No additional installation is
+authorized by this checklist.
+
+### Uninstalled presentation candidate — separate owner approval required
+
+The next source candidate is
+`6ee1ba549fee3f2508efb6a47d6f65247b406436`, from
+[manual run 37398774401](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37398774401).
+All CPU, Android, Windows-native and matching-pair jobs passed. Its APK SHA-256 is
+`72b5a9442c08953c16bec8f8d1f5632682a701c4cf9276ddd67b139ed4facc52`;
+the server ZIP is
+`52e89d1f122f23ee50bc938e716ce4f5d8fe09f2d501e47dc983ed2c89352b89`.
+The stable certificate is the same retained fingerprint above.
+[The independent receipt](../results/foveated-staging-pair-2026-10-06.json) binds
+all metadata, native libraries/shaders/checksums, the RDO getter and native
+presentation/readback/preflight markers. [The review](../results/foveated-staging-source-review-2026-10-06.md)
+separates software correctness from the still-unverified Quest failure.
+
+This single candidate includes the H264Fit/NVENC preflight from `552ffbb` plus the
+geometry/presentation investigation; no interim `552ffbb` installation is needed.
+It is staged and **not installed**. Installed 0f07f05, 80a1635 and d1c3 remain
+available. All three new presentation properties default off. Begin only after
+fresh owner readiness and authorization to replace the installed pair, and use
+the chart gate below before Metro or the decode ladder. This preparation record
+does not promote an optimization or qualify nominal 1000 Mbps or sustained 90 Hz.
+
+### Retained 80a1635 reference and rollback pair
+
+The earlier matching pair is GitHub Actions run `37217852222` from source
+commit `80a16353ca127508fec745dec53dc790ceb77fb2`. Its verified APK is
+`Quest3-Pyrowave-stable.apk` SHA-256
+`3d74c6e76964ecf752a4e0dc5414a562c92e14f2b072411f8f83f5e2d281ed53`,
+signed by certificate SHA-256
+`4a3fe0a8d47ee67b01710df6ffdc870e91ebc5b8e7feec7c87534944ca2a44aa`.
+The matching Windows server ZIP is SHA-256
+`3359e5670580e061609c5b5d7333414536285dde2279bc66aece6bf15b49610a`; its
+server DLL and PyroWave shared-library members are respectively
+`6f40366ed01166541471f22714090cae10b04b344c6fb43dda0f8fffc3de8670` and
+`1b0a6bd0b7c978c063c58f5349f87748fd7d44806dda1ed5fc4111c19d880cc1`.
+The package check also confirms the WO-10 crop, WO-8 Light centre-phase, WO-13 TCP frame-paced network
+tools, and WO-7 RDO-density sources in this pair. See the paired build
+record at [quality-candidate-build-80a1635-2026-10-04.json](../results/quality-candidate-build-80a1635-2026-10-04.json)
+and the eventual combined quality review at
+[metro-q3-combined-2026-10-04.md](../results/metro-q3-combined-2026-10-04.md).
+This pin identifies a build for a later authorized session; it does not
+promote any profile to a runtime default or authorize installation, connection,
+or capture.
+
+## Owner session revision — preparation, then confirmation
+
+The owner has reviewed the overnight results and selected the corrected
+`0f07f05` pair for preparation, replacing the earlier proposed `80a1635` pin.
+The owner requests the visual comparison first: **a then a2 at 500 Mbps as
+diagnostic image checks**, followed by Q4, **a-1000, a2-1000, b, c, conditional c2, d1–d4,
+selected d-Metro**, then **f–h** on the winning runnable cell. Before-Q4 a/a2
+results retain network and sustained-rate qualification as pending; no stable
+90 Hz or transport-capacity pass follows from clear images. The first supervised
+diagnostic session has ended and settings are restored; see the checkpoint
+below. **Wait for the owner's confirmation of a new session before issuing ADB
+commands, starting VR or network tests, or changing settings.** Record the confirmation with the
+finite supervised session evidence; do not use or alter the unattended arm file.
+
+Keep the original d1c3 APK/server artifacts and its extracted server directory
+for rollback, together with 80a1635. Stage the corrected server in a separate
+directory. Build replacement is distinct from settings restoration: after a
+later authorized healthy session, retain its verified corrected pair and both
+earlier pairs for a necessary build rollback.
+Snapshot current settings/registration immediately before the first change,
+restore every changed value exactly, and verify them before telling the owner
+that ALVR is fully restored. The owner performs the VD comparison themselves.
+
+Ask for and retain the owner's actual in-headset judgement for every chart and
+Metro cell, each f off/on/off leg, the blinded g sequence, and h movement test.
+Do not infer an image, tracking, controller, audio or motion judgement from
+telemetry or a previous session. Winning-cell selection requires the owner's
+clarity/periphery/motion judgement as well as the recorded live measurements.
+
+### 2026-10-06 checkpoint: baseline measured; foveated correctness gate still fails
+
+The [latest chart/Metro and partial Q4 report](../results/evening-live-rdo-network-2026-10-06.md)
+supersedes the earlier incomplete comparison as the clean matched diagnostic.
+At Haar/full-FOV/500, the owner judged RDO24 worse in both the normalized chart
+and Metro fence view. Metro legacy/RDO24 measured 83.388/83.931 fresh
+submissions/s and 8.918/8.950 ms median GPU decode. Neither is a sustained90Hz
+pass. Keep a2's offline expectation as historical evidence, not an in-headset
+improvement claim. [Q4 stationary600/800/1000/1200 failed pacing](../results/network-stationary-afk-2026-10-06.md);
+there is no moving-head or nominal1000 qualification. The composite ACK test does
+not isolate a Wi-Fi ceiling.
+
+The requested cropped Medium9/7/RDO24/softness0.5/1000 candidate failed with
+black/flashing imagery and was stopped. The setup helper selected the server's
+named profile but left stale **raw client inverse-map fields**. In pinned0f07f05,
+`client_openxr/src/stream.rs:75` passes the raw configuration and
+`graphics/src/stream.rs:596` consumes raw centre/edge values; the server resolves
+the profile independently in `server_core/src/connection.rs:139`.
+**Before any foveated cell, set and read back every raw parameter on both axes:**
+
+| Named profile | Raw centre x/y | Raw edge x/y | Raw shift x/y |
+|---|---:|---:|---:|
+| Light | 0.8 | 1.5 | 0 |
+| Medium | 0.6 | 2.0 | 0 |
+| H264Fit | 0.5 | 2.0 | 0 |
+
+Require these session fields to match the actual native OpenVR centre/edge/shift
+values. Do not assume the named selection rewrites the raw client fields. At the
+2624×2752 crop, correct Medium maps to2112×2208 per eye; the failed raw0.2/0.178,
+edge3/4 configuration implied1248×1056. Three CPU parity/preflight tests reproduce
+the mismatch and verify matching named profiles. **Session23 activated the corrected
+helper and still failed with black/flashing on the chart.** The native log confirms
+4224×2208 RGBA output and the faster allocation, not a usable presented image.
+Stop the foveated ladder/Metro sequence until the presentation gate passes.
+
+`graphics/src/stream.rs:99` requires foveation off for direct-eye eligibility.
+Record actual renderer/copy-path evidence for d1–d4 and c, not just the requested
+`debug.q3pw.direct_eye_copy` value. Foveated cells currently use the staging path;
+do not label them as measured direct-eye results. The generic Godlike geometry
+evaluator does not model crop plus foveation: retain its limitation and require
+an independent checked crop/render/decoded-geometry receipt before qualification.
+
+Next owner session begins with a short **chart correctness check** at a conservative
+diagnostic rate (500 Mbps or lower), with fixed raw mapping and effective renderer/decoded/staging
+geometry. [PR#58](https://github.com/ljk1291/Quest3-Pyrowave/pull/58) is a source
+candidate: shared named geometry and separate default-off PyroWave image
+preservation, staging initialization and state-isolation experiments. The real
+software GLES regression confirms WGPU's first-use clear after a valid raw copy;
+that startup mechanism alone does not explain persistent Quest flashing. The
+corrected regression passes at `6ee1ba5` in
+[manual run37398774401](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37398774401),
+across both eyes, three profiles and two output formats. Full packaging and
+independent matching-build verification are complete; the candidate is uninstalled. Require
+matching-build verification and separate installation authorization before use;
+then establish a usable chart with preservation/initialization/isolation requested
+and their native effective markers verified. Use the candidate's matching control
+tools; snapshot all three properties, including absent/empty values, before any
+change and retain exact restoration readbacks. Vary one property at a time afterward:
+`debug.q3pw.staging_preserve` with `[Q3PW_STAGING_PRESERVE]`, then
+`debug.q3pw.staging_init`, holding the others fixed. Require
+`[Q3PW_STAGING_INIT] requested/effective/initialized`, observed changing frames,
+and decoded/staging geometry. Test `debug.q3pw.staging_isolation` separately,
+holding initialization and preservation fixed, with `[Q3PW_STAGING]` and
+`[Q3PW_PRESENTATION_GEOMETRY]` markers. A requested property
+is not activation proof. Ask the owner about each chart; stop on black/flashing.
+Create a fresh stream renderer and decoder for each leg: the properties are read
+on decoder initialization, and disabling initialization cannot undo a texture
+that was already initialized. An initialization-off leg must show
+`initialized=false` on its new renderer. Do not count a property readback alone
+or a same-configuration decoder notification as a toggle.
+Software rendering does not establish Android import/Qualcomm/OpenXR correctness.
+Only after an image pass resume Metro or the decode ladder. No rate/default promotion.
+
+Sessions18–23 are restored with zero final errors and owned VR/test jobs stopped;
+VD registration and OpenXR are preserved. Installed0f07f05 is unchanged.
+H264Fit's [PR#57](https://github.com/ljk1291/Quest3-Pyrowave/pull/57) pair is now
+fully built and [verified](../results/h264fit-preflight-pair-2026-10-06.json),
+uninstalled; it does not contain PR58's presentation candidate. Its opt-in NVENC
+capability marker must still be observed in the actual vrserver process before
+claiming activation. Keep width-only c2 conditional on clean c decoding and its
+separate axis-geometry checks. All cells and owner judgements below remain in place.
+
+Tonight's separate stationary network lease is stopped and restored, with zero
+errors/owned jobs and matching VD/driver/OpenXR snapshots. Charging and the owner's
+session-only 5% floor were used; thermal and other stops remained. Battery22–23%.
+[The completed 1000/1200 legs](../results/network-stationary-afk-2026-10-06.md) both
+failed pacing. Nominal1000 is still diagnostic; do not treat it as qualified Rlive.
+Moving Rlive, gameplay and image judgements wait for the owner. Do not repeat the
+completed stationary legs without a new hypothesis.
+
+### Historical preparation finding: native RDO proof is blocked on 80a1635
+
+This records the earlier preparation blocker; the corrected pair below
+supersedes that build pin and supplies the native getter/readback route.
+
+Source inspection during preparation found that the live Windows encoder uses
+`pyrowave_encoder_create()` in `pyrowave_c.cpp`, which sets a release
+`NullLogger` before `Encoder::init()`. That logger suppresses the WO-7
+`PyroWave RDO viewing density` message. The pinned Windows build has
+`PYROWAVE_DEVEL=OFF`; its C API exposes no initialized-density readback.
+Consequently this pair cannot supply the required native RDO confirmation for
+**a, a2 or d**. A process environment value proves intent, not the density
+actually held by the initialized encoder. Do not substitute it for native proof.
+
+The offline frame-bank encoder calls `Encoder` directly, so its retained native
+RDO logs and quality scores are unaffected. The earlier live-log requirement
+was a planned gate, not a gate already demonstrated on 80a1635. A narrowly scoped
+native getter and ALVR log bridge are prepared separately on local
+`codex/wo7-live-readback`; their source checks and standalone CPU parity test
+pass, while native export/build/runtime gates remain open. Using them
+requires a newly built, verified matching pair and an owner decision about the
+explicit 80a1635 pin. Until that decision, retain 80a1635 and mark these live
+RDO-proof gates blocked. No alternate pair is installed automatically.
+
+### 2026-10-05 supervised checkpoint: installed, restored, comparison incomplete
+
+The [supervised diagnostic report](../results/metro-rdo-supervised-2026-10-05.md)
+records verified matching 0f07f05 installation and native RDO markers for a
+(legacy-equivalent 65.28) and a2 (24). Cell a's fresh rate is **84.076/s**,
+GPU decode median **9.033 ms**, decode-to-fence median **11.456 ms**, estimated
+pipeline median **67.170 ms**. The owner confirms compression on diagonal
+chart lines. This is not a stable 90 Hz pass.
+
+A2's chart started, but no complete telemetry capture was collected before the
+stop. The last guard sample was 10% battery; post-stop readback was 9% while
+charging. Controller thermal cutoffs were removed for that session at the
+owner's request, with device protections unchanged. All 48 changed keys have
+been restored and verified; VD, driver registration and OpenXR proofs pass.
+The corrected APK remains installed and both rollback pairs remain staged.
+
+Resume with a clean matched chart comparison: the completed a capture contained
+the Library dashboard, and its scene metadata was missing. Keep it as diagnostic
+evidence, rather than the decode ladder's clean matched timing reference.
+A/a2 Metro, Q4, a-1000/a2-1000 and every later cell remain pending. Require
+sufficient charge and a new finite owner-supervised confirmation before resuming.
+
+### 2026-10-05 corrected pair provenance and RDO route
+
+The separately verified candidate is source `0f07f05b4df88f8fa08ea034f794cda4be9eaf38`,
+from successful manual [CI run 37249212605](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37249212605).
+Its [build receipt](../results/quality-candidate-build-rdo-session-2026-10-05.json)
+binds the matching APK/server, dependency pins, native payloads, shaders, stable
+certificate and exported `pyrowave_encoder_get_rdo_density` symbol. The original
+80a1635, getter-only 71c1be0 and d1c3 artifacts remain staged separately. No pair
+was installed and no headset session began overnight. Installation subsequently
+occurred in the separately authorized evening session documented above.
+
+The dashboard launches `cmd /C start steam://rungameid/250820`; an existing Steam
+process can launch `vrserver.exe` without the dashboard's environment. Directly
+launching `vrmonitor.exe` with a child environment proves the monitor's input,
+but cannot establish the closed-source SteamVR process inheritance. Use the new
+opt-in session setting for reproducible RDO selection instead:
+
+```text
+session_settings.video.pyrowave.rdo_pixels_per_degree.enabled = true
+session_settings.video.pyrowave.rdo_pixels_per_degree.content = 24.0
+```
+
+The Rust connection config transfers it through `pyrowave_rdo_pixels_per_degree`
+to the Windows encoder's create-info; the native getter then reports the stored
+initialized value. Require a fresh native encoder marker in ALVR's warning/event
+log for a2, every RDO24 decode-ladder rung and the selected d-Metro cell:
+
+```text
+[PYROWAVE] native encoder RDO density applied: 24 px/deg, Nyquist 12 cycles/deg, ALVR session RDO setting
+```
+
+Retain the event timestamp, current encoder/process identity and effective value.
+Pinned ALVR `7eda092dbf0002281410a4222683ec228700cffb`,
+`alvr/server_openvr/cpp/alvr_server/Logger.cpp:36`, routes `Warn()` to the
+ALVR warning callback and conditionally to OpenVR `DriverLog` when initialized.
+The Rust bridge is `alvr/server_openvr/src/lib.rs:724` and
+`alvr/server_core/src/c_api.rs:202`. Source alone does not prove a
+`vrserver.txt` file sink; do not make that particular filename the native-proof
+gate. A launch environment or requested setting still cannot replace the fresh
+initialized-encoder warning record.
+
+For **a**, pin the same switch to `65.28` to select the bit-identical legacy
+density independently of inherited environment. Its native marker must report
+approximately 65.2799988 px/deg, 32.6399994 cycles/deg and `legacy 96 DPI @ 1m`.
+This pins the baseline's existing encoder weighting; it does not change a's
+Haar/full-FOV/500 Mbps geometry, codec or target refresh. **a2** changes only
+that density to 24. Snapshot and restore both switch fields exactly. The shipped
+default remains disabled, preserving the environment/legacy selection path.
+
+Position-aware RDO, decoder-offset, width-only H.264 and stock MediaCodec logging
+are separate investigation branches and are excluded from this corrected pair.
+They cannot be activated by changing this pair's settings. Keep their offline
+quality results separate from the runnable headset cells until native build,
+matching-pair and image-correctness gates pass.
+
+The reviewed offline ranking informs the decode ladder's fence preference;
+the position-RDO mode-1 and
+mode-2 experiments used the same fixed 1000-Mbps cap but have regional tradeoffs
+and no matching live pair. Mode 2 is an effective-density divisor, not an
+eye-tracked or peripheral-acuity setting. Do not add either positional variable
+to this checklist or infer a live quality, cost, fresh-submission, latency, or
+90-Hz benefit from its 90-frame offline evidence.
+
+The offline width-only H.264 branch offers a trade-off, not a replacement for c:
+at 700 Mbps/P7 it gains 2.622 dB whole-crop HVS versus H264Fit, but loses
+1.397 dB fence edge PSNR and changes temporal p99 from 4 to 5. Its offline
+allocation is 4096×2784 SBS with eight padding rows; the prospective live crop
+would be 4096×2752. Separate x/y foveation parameters exist, but the vertical
+identity guard and profile require that branch's native build and a newly
+verified matching pair. Neither is in the staged corrected pair. Keep c at
+H264Fit; the owner-added c2 is a conditional separate cell, only after c decodes
+cleanly at 90 Hz and c2's own build, geometry and decoder gates are closed.
+
+The completed reconstruction-offset sweep does not change any live cell:
+none of the four tested offsets improves both the fence and calibrated HVS.
+Keep the legacy zero offset. The uniform 16/20 px/deg rows also trade a very
+small fence gain for HVS loss; a2 and every d rung retain explicit uniform RDO 24.
+
+Private PNG previews produced by different exporters are not colour-comparable.
+Use the standardized full-range BT.709 comparison pack for baseline/a2 image
+review; the original previews remain retained. All codec metrics and source
+hashes are unaffected. Offline preview playback is not a headset, pacing,
+display-FPS or optical-latency measurement.
+
+## Final offline decode-cost ladder — quality only
+
+The [overnight combined table](../results/metro-overnight-quality-2026-10-05.md)
+adds the same Medium/softness-0.5/RDO24/1000 quality ladder and the
+phase-fixed Light comparison. Fence uses frames 10–89; HVS uses all 90.
+
+| Profile | Fence PSNR-Y dB | Temporal p99, luma codes | HVS dB |
+| --- | ---: | ---: | ---: |
+| Medium Haar | 39.714915 | 12 | 36.724382 |
+| Medium 5/3 | 41.273421 | 11 | 37.233930 |
+| Medium 9/7 (retained) | 42.412796 | 9 | 37.356360 |
+| Light 9/7, phase fixed | 40.810309 | 11 | 40.698893 |
+
+Replace the single d candidate with the d1–d4 live decode-time ladder below.
+Medium 9/7 has the highest offline fence score of these four; select it for
+Metro only if its measured fresh rate meets the current-session baseline.
+Light trades 1.602 dB of fence accuracy for
+3.343 dB higher whole-crop HVS against Medium 9/7. This ladder measures image quality only;
+it does not establish which transform is faster on Quest. The Light row
+has a different encoded size and must not be used to infer a decode-speed
+gain. Its baseline phase fix is in the corrected pair; new experimental
+branches are not. Profile individual dequant/iDWT passes on the faster
+allocation path before any further timing or promotion.
+
+No overnight headset session occurred. Require new owner confirmation,
+fresh snapshots, exact native readbacks and owner judgements before Q4
+or a/a2/b/c/c2/d1–d4/d-Metro. All live fields in the offline report remain unset.
+
+## Fixed geometry distinction
+
+The offline crop is a fixed, centred `2624x2776` per eye rectangle derived from
+the `0.8542 / 0.8500` tangent multipliers. It has left offset `(278,274)` and
+right offset `(170,274)` within the `3072x3232` parent eyes. It is the source and
+score geometry for Q3.
+
+The WO-10 runtime crop is different: configure the full `3072x3232` requested
+per-eye render/encode geometry and set
+`session_settings.video.fov_crop.content.horizontal_tangent_multiplier=0.854`
+and `.vertical_tangent_multiplier=0.85`. The runtime aligns upward to
+`2624x2752` per eye (`ceil32(3072*.854)=2624`,
+`ceil32(3232*.85)=2752`). The offline horizontal `.8542` candidate instead
+gives `ceil32(3072*.8542)=2656`; it must not be used for the runtime crop. It must
+never be relabelled as the offline `2624x2776` rectangle. Require the matching
+client/server `[FOV-CROP]` markers, negotiated geometry, decoder geometry, and
+the active multipliers before treating a runtime crop cell as valid.
+
+## Preconditions and retained snapshot
+
+1. The owner starts a supervised lease explicitly covering the finite Q4 and
+   headset cells. Confirm no offline GPU scorer is active and record the selected
+   signed server/APK manifests, commit, dependency lock hash, shader hashes,
+   APK/server checksums and signing-certificate fingerprint.
+2. Save before changing anything: `python -m tools.quest3.control status`, the
+   raw dashboard session document, `python -m tools.quest3.control experiment-properties
+   --adb <ADB>`, current SteamVR/OpenXR registration, relevant ALVR config files,
+   and read-only Wi-Fi state. Pin the Quest serial used for every ADB command.
+  The raw session and experiment-property documents are evidence and per-key
+  restoration inputs, not importable whole-session restore files. The only
+  automatic raw restore helper is `control resolution --restore`, and it
+  restores exactly the two recorded resolution settings.
+   The current `control experiment-properties` and `bench capture` CLIs lack a
+   `--serial` argument. Run them only in the owned child process with
+   `ANDROID_SERIAL` set to the verified Quest serial in that child's environment;
+   retain the launch contract. Use explicit `adb -s <QUEST_SERIAL>` for direct
+   commands. Do not change the user/system environment or rely on default-device
+   selection; the network CLI already requires `--serial`.
+3. Require the Q4 Android receiver binary from the verified pair at
+   `/data/local/tmp/q3pw/tcpframerecv-android`; do not substitute an unverified
+   local binary. Before Q4, record the read-only PC link/driver evidence:
+
+   ```powershell
+   Get-NetAdapter | Select-Object Name,InterfaceDescription,Status,LinkSpeed,DriverInformation
+   ```
+
+   A link below 2.5 GbE makes the nominal 1000 Mbps Q4/live cells unqualified;
+   retain the readback and use only a separately labelled lower-rate diagnostic.
+4. The reviewed PyroWave comparison is the d1–d4 decode-time ladder: Medium
+   Haar, Medium 5/3, Medium 9/7 and phase-fixed Light 9/7, all softness `0.5`,
+   crop, RDO-24 and fixed 1000 Mbps. Its Metro selection depends on the measured
+   fresh rate against cell a and the retained fence scores; no rung is promoted
+   in advance. The prior approximately 82–83 fresh submissions/s is a historical
+   baseline observation, never the current cell-a readback or a 90 Hz pass.
+
+The base controlled PyroWave apply command is:
+
+```powershell
+python -m tools.quest3.control apply --codec PyroWave --mbps <RATE> --hz 90 `
+  --decode-path Compute --chroma 420 --transport Tcp --wavelet <Haar|Cdf53|Cdf97> `
+  --capabilities <CAPABILITIES.json> --render-width 3072 --render-height 3232 `
+  --encoded-width 3072 --encoded-height 3232
+```
+
+It explicitly selects constant bitrate, SDR, 90 Hz, TCP, 4:2:0, Compute and
+turns both foveation settings off. It does **not** reset FOV crop, 10-bit,
+NVENC preset, or AQ. Read back the exact session after every write. For every
+full-FOV cell, explicitly set/read back `video.fov_crop.enabled = false`.
+For a WO-10 crop, apply the base command first, then write and verify these
+exact dashboard paths before the SteamVR restart:
+
+```text
+session_settings.video.fov_crop.enabled = true
+session_settings.video.fov_crop.content.horizontal_tangent_multiplier = 0.854
+session_settings.video.fov_crop.content.vertical_tangent_multiplier = 0.85
+```
+
+### Common Pyro allocation baseline for cells a, a2 and d1–d4/d-Metro
+
+Cells **a**, **a2**, **d1–d4** and **d-Metro** use the same allocation baseline. First record each
+property's literal readback, then set and verify both values before the required
+client/decoder restart:
+
+```powershell
+adb -s <QUEST_SERIAL> shell getprop debug.q3pw.fragment_min_usage
+adb -s <QUEST_SERIAL> shell getprop debug.q3pw.optimal_ahb_usage
+adb -s <QUEST_SERIAL> shell setprop debug.q3pw.fragment_min_usage 1
+adb -s <QUEST_SERIAL> shell setprop debug.q3pw.optimal_ahb_usage 1
+adb -s <QUEST_SERIAL> shell getprop debug.q3pw.fragment_min_usage
+adb -s <QUEST_SERIAL> shell getprop debug.q3pw.optimal_ahb_usage
+```
+
+Require the readback values `1`/`1`, then restart the client/decoder because
+both are initialization options. Require
+`[Q3PW_FRAGMENT_USAGE]` to confirm fragment conversion and all three minimal
+slots. Require `[Q3PW_AHB_USAGE]` to show requested and active `1`, a nonzero
+recommendation, three matching allocations, and no fallback or retry. A
+missing marker, nonzero fallback, changed colour/range/eye mapping, or rate/tail
+regression invalidates that cell; the requested driver recommendation alone is
+not proof of use. On rollback restore each captured literal property value with
+the per-key property restoration procedure and read it back; do not replace an
+original unset/empty state with `0`, and do not use `0` as a generic rollback.
+Keep every other experimental decoder/allocation option unchanged and recorded;
+this checklist contains no allocation on/off experiment.
+
+For a WO-8 foveation candidate, only after the runtime crop is verified, write
+and verify:
+
+```text
+session_settings.video.foveated_encoding.enabled = true
+session_settings.video.foveated_encoding.content.profile.variant = <Light|Medium|H264Fit>
+session_settings.video.foveated_encoding.content.peripheral_softness = <0.0|0.5|1.0>
+session_settings.video.foveated_encoding.content.blur_only = <true|false>
+session_settings.video.foveated_encoding.content.follow_gaze = false
+session_settings.video.clientside_foveation.enabled = false
+```
+
+The existing `control apply` CLI deliberately writes foveation off. Therefore
+the foveation paths must be set through the dashboard's per-setting request
+surface, followed by session readback and a SteamVR restart; `set_values` is
+the Python helper behind `control apply`, not a generic `control` CLI command.
+No later `control apply` may overwrite them unnoticed. `Light`, `Medium`,
+`H264Fit`, and `Custom` are the only FoveationProfile enum values; `Custom`
+also requires recording every centre/edge field it exposes. Quest 3 has no eye tracking: a `Light` candidate above softness `0.5` is a separately labelled diagnostic, not the default winner; the owner must judge both centre detail and peripheral shimmer.
+
+### Light history and the new phase-fix qualification
+
+The retained **pre-phase-fix** offline Light/softness-0 result at
+`2624x2776 -> 2464x2592` per eye showed substantial central-fence loss before
+compression. Its horizontal mapping put encoded pixel centres on source pixel
+boundaries, so the area filter averaged neighbours even at softness 0. That
+historical result is not an eye-assignment fault and must remain attributed to
+the earlier transform.
+
+The newer `wo8-light-centre-phase.patch` moves that half-integral Light lattice
+to the lower source-texel centre and the Quest WGSL inverse subtracts the same
+translation. It has a source/WARP and Python numerical gate, but it has no
+headset quality or timing result yet. It must also be part of the pinned,
+matching signed pair; an unpinned or mismatched phase overlay invalidates the
+cell. The current zero-shift Medium and `H264Fit` profiles have zero phase for
+both the offline `2624x2776` and runtime `2624x2752` geometries, so this repair
+does not change their mapping.
+
+Before accepting any Light live profile, retain the actual runtime mapping and
+geometry, inspect centre fine lines and the Metro fence against the unfoveated
+control, and explicitly record the owner's sharpness/aliasing judgement. The
+runtime crop uses a different height, so neither historical nor repaired
+offline scores establish runtime equivalence. A Light result remains a separate
+controlled candidate until its image-correctness and live metrics pass.
+
+### Runtime foveated geometry: expectation, then readback
+
+These are separate from Q3's fixed offline `2624x2776` crop. Starting with
+WO-10's runtime-cropped `2624x2752` eye, the current WO-8 `encoded_size`
+helper (the ALVR 32-pixel allocation formula) gives the following expected
+per-eye encoded allocations when `blur_only=false`:
+
+| Profile | Centre / edge ratio | Expected per-eye allocation |
+|---|---:|---:|
+| `Light` | `0.8 / 1.5` | `2464x2592` |
+| `Medium` | `0.6 / 2.0` | `2112x2208` |
+| `H264Fit` | `0.5 / 2.0` | `1984x2080` |
+
+With `blur_only=true`, all three profiles retain the complete `2624x2752`
+encoded allocation; it is an image-quality prefilter experiment, not reduced
+encoding. These are preflight expectations only. Every candidate must retain
+its parent runtime crop and the effective encoder/decoder dimensions from
+session and runtime readback after the SteamVR restart. A mismatch, missing
+readback, or reuse of the offline `2776` height makes the cell unqualified.
+
+### Exact dashboard restoration manifest
+
+Before the first write, retain raw values for every path below. Restore only a
+path that this session changed, one path at a time through the dashboard request
+surface, and read it back before restarting SteamVR. There is no generic
+`control set_values` command and a captured session document is not an import
+format.
+
+- The base PyroWave apply changes `preferred_codec.variant`, `preferred_fps`,
+  `bitrate.mode.variant`, `bitrate.mode.ConstantMbps`,
+  `enforce_server_frame_pacing`, `pyrowave.chroma_444`,
+  `pyrowave.transport.variant`, `pyrowave.wavelet.variant`,
+  `pyrowave.decode_path.variant`, `connection.stream_protocol.variant`,
+  `foveated_encoding.enabled`, `foveated_encoding.content.follow_gaze`,
+  `clientside_foveation.enabled`, `encoder_config.enable_hdr`, and
+  `encoder_config.server_overrides_enable_hdr`.
+- A crop cell additionally changes `fov_crop.enabled`,
+  `fov_crop.content.horizontal_tangent_multiplier`, and
+  `fov_crop.content.vertical_tangent_multiplier`.
+- A WO-8 cell additionally changes `foveated_encoding.enabled`,
+  `foveated_encoding.content.profile.variant`,
+  `foveated_encoding.content.peripheral_softness`,
+  `foveated_encoding.content.blur_only`, and
+  `foveated_encoding.content.follow_gaze`; retain all six `center_size_*`,
+  `center_shift_*`, and `edge_ratio_*` values too whenever the saved or tested
+  profile is `Custom`. Restore `clientside_foveation.enabled` separately.
+- A stock codec cell additionally records/restores
+  `encoder_config.nvenc.quality_preset.variant`,
+  `encoder_config.nvenc.adaptive_quantization_mode.variant`,
+  `encoder_config.use_10bit`, and `encoder_config.server_overrides_use_10bit`
+  when they were changed.
+
+`control resolution --restore` is the sole automatic restore: it restores only
+`emulated_headset_view_resolution` and `transcoding_view_resolution` from the
+captured raw values, then requires its own readback. It restores none of the
+paths above.
+
+For stock-codec cells, the exact NVENC controls are
+`session_settings.video.encoder_config.nvenc.quality_preset.variant` (`P1`
+through `P7`) and
+`session_settings.video.encoder_config.nvenc.adaptive_quantization_mode.variant`
+(`Disabled`, `Spatial`, or `Temporal`). Both require a SteamVR restart. Keep
+the Q3-selected preset/AQ tuple for a comparable live stock-codec cell and
+record its readback. A later `P1` change is a separate diagnostic, not an
+equivalent-quality substitute. For HEVC/AV1 Main10, set/read back
+`session_settings.video.encoder_config.use_10bit = true` and
+`session_settings.video.encoder_config.server_overrides_use_10bit = true`
+before the restart. These setting values do not by themselves prove the
+elementary-stream depth or hardware decoder selection.
+
+The live AV1 candidate below intentionally uses **P4 with AQ Disabled** to
+match the retained offline AV1 comparison. The owner-added AV1 Main10 / 200
+Mbps / **P1 with Spatial AQ** row is a separate stock-default control. It must
+be reported as that control and never substituted for the P4/AQ-off live cell
+or described as a same-settings comparison.
+
+The offline P1/Spatial-AQ control explicitly used FFmpeg `aq-strength=8`. In
+the reviewed live ALVR NVENC path, selecting Spatial AQ sets NVENC
+`enableAQ=1`, but the code does not assign `NV_ENC_RC_PARAMS::aqStrength`; the
+strength therefore remains the selected NVENC preset/driver value. Record the
+live setting as Spatial AQ enabled, with AQ strength **unknown** unless an
+encoder-config readback proves it. Do not describe a live P1/Spatial capture as
+an AQ-strength-8 match solely from the setting selection.
+
+### H.264 source-audit verdict and live preflight
+
+`docs/STOCK-H264-FOVEATION-AUDIT.md` finds a codec-independent foveation path:
+the stock H.264 NVENC path can consume `H264Fit`'s single side-by-side texture,
+and the non-Pyro Android MediaCodec/compositor path has the matching inverse
+map. This establishes a source-backed candidate only. It does not establish
+hardware decoder choice, RTX 5080 dimension acceptance, quality, freshness or
+90 Hz operation.
+
+Historical source limitation: checked-in `tools/nvenc_caps` describes an
+unbuilt RTX 3090-era standalone probe and does not consume ALVR's negotiated
+side-by-side geometry or block ALVR before `CreateEncoder()`. The reconstructed
+ALVR Windows path likewise has no integrated H.264 `NV_ENC_CAPS_WIDTH_MAX` /
+`HEIGHT_MAX` gate.
+
+New offline evidence is the owner-authorized, no-encode DirectX capability query
+in [nvenc-dimension-caps-2026-10-05.json](../results/nvenc-dimension-caps-2026-10-05.json).
+It read H.264 limits of 4096 by 4096 on this RTX 5080 and accepted H264Fit's
+3968 by 2080 dimensions. It did not initialize an encoder, encode a frame, query a
+Quest decoder, or measure runtime performance. Cell c remains blocked until the
+same actual negotiated SBS geometry is accepted by a fail-closed pre-CreateEncoder
+live integration/readback, with retained SPS/profile, Android decoder identity,
+quality, freshness and timing gates. The offline capability result is supporting
+hardware-dimension evidence, not a live preflight or a 90 Hz qualification.
+
+The inactive source hook is prepared separately in
+[PR #56](https://github.com/ljk1291/Quest3-Pyrowave/pull/56), tested source
+`0e45e06bacd20255c3706fdfb14c48a4a159988f`, with successful manual CPU-only
+[run 37266489403](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37266489403).
+Only exact `ALVR_NVENC_DIMENSION_PREFLIGHT=1` selects safe width/height queries
+after `FillEncodeConfig` and before `CreateEncoder`; the default makes no
+capability call or marker. Its `Warn("NVENC dimension preflight passed:")`
+record uses the ALVR warning route described above. Do not infer activation from
+a launcher environment, a suppressed Debug message, or a specific log filename.
+The hook is not in the staged 0f07f05 pair and its Windows native compilation,
+matching-build and runtime gates remain open. Do not activate or silently add it
+to a pinned session. Source and CPU CI preparation do not close cell c's live
+geometry, decoder, quality or timing gates.
+
+### Reproducible native RDO selection in the corrected candidate
+
+The verified and now installed `0f07f05` candidate adds the opt-in session switch
+described above. Preserve the raw `enabled` and `content` values before any application
+in a newly authorized owner-supervised session.
+For a, explicitly enable `65.28`; for a2, all d rungs and d-Metro,
+explicitly enable `24.0`. Restart the encoder under the supervised procedure,
+read back both settings, and require its fresh native `Warn()` record to report
+the effective density and `ALVR session RDO setting` source. The explicit legacy
+value uses the unchanged legacy weighting calculation, rather than relying on
+Steam to inherit an unset environment variable.
+
+The environment variable remains supported for standalone offline tools and
+when the session switch is disabled. It is not a reliable live selection method
+when SteamVR is launched through an already-running Steam process. Historical
+80a1635 suppresses the live native readback and remains blocked for a2; the
+corrected candidate resolves that specific blocker without changing the default.
+Restore both raw session-switch values after the comparison and verify them.
+Do not change user/system environment values. Requested settings without the
+native effective-value record do not establish an RDO comparison.
+
+For each live Pyro cell, capture only after streaming is confirmed. Full chart
+and Metro cells retain a recorded 60–90 second interval. The d1–d4 diagnostic
+ladder instead uses about 20 seconds per rung after consistent settling; record
+the actual interval and use `--seconds 20` for each rung. These are time-based
+captures, never 90-frame acceptance intervals:
+
+```powershell
+python -m tools.quest3.bench capture --adb <ADB> --out <CELL_DIR> --seconds <60..90> --hz 90 `
+  --build-manifest <MATCHED_BUILD_MANIFEST.json> --require-resolution-evidence
+```
+
+Use `--resolution-profile` only for an existing matching profile. Current
+profiles do not describe the `2624x2752` WO-10 runtime crop, so a crop cell
+must retain the explicit session/FOV/decoder evidence rather than claim a
+profile check it cannot satisfy. The current `--require-resolution-evidence`
+gate is PyroWave-only and requires `enable_foveated_encoding=false`; do not
+use it to certify WO-8 or stock-codec cells. Preserve their requested,
+negotiated, decoded and effective-config evidence, but leave formal geometry
+acceptance pending a matching gate.
+
+The offline frame-bank `F90:1` header and
+`actual_mbps_external_f90_normalization` normalize a fixed source sequence for
+quality comparison. They are not live encoder cadence, GPU execution, observed
+fence completion, fresh submissions, display FPS, or optical timing. Retain
+live per-frame timestamps and separate runtime telemetry for those claims.
+## Q4 TCP frame-paced network gate
+
+Run without an ALVR video stream. Each command is network-only and records
+sanitized pre/post Wi-Fi link rate, band, channel and width. The ACK is complete
+receiver-read turnaround; it is not one-way latency, decode time, fresh rate,
+or display FPS.
+
+```powershell
+python -m tools.quest3.network --transport tcp --adb <ADB> --serial <QUEST_SERIAL> --ip <QUEST_WIFI_IP> `
+  --tcp-receiver /data/local/tmp/q3pw/tcpframerecv-android --rates 600 800 1000 1200 `
+  --seconds 300 --hz 90 --out <Q4_ROOT>\stationary
+
+python -m tools.quest3.network --transport tcp --adb <ADB> --serial <QUEST_SERIAL> --ip <QUEST_WIFI_IP> `
+  --tcp-receiver /data/local/tmp/q3pw/tcpframerecv-android --rates 800 1000 `
+  --seconds 120 --hz 90 --out <Q4_ROOT>\moving
+```
+
+For every rate retain ACK-delivery p50/p99/p99.9, late-frame share, longest
+completed ACK-delivery stall, censored missing-ACK lower bound, and the synthetic
+`frame_byte_cap`. Q4 uses fixed-size frames; the separate live-cell telemetry
+below supplies the measured variable frame-size p50/p99/max. Reject a rate if its report is incomplete, has a receiver/protocol
+error, partial/unacknowledged/skipped frames, or its moving result has fewer
+than 99.5% on-time scheduled frames. Let `Rmax-moving` be the highest remaining
+moving rate. Define `Rlive=floor(0.85*Rmax-moving)` Mbps, then cap it by the
+selected codec's verified decoder limit. Retain the values rather than assuming
+1000 Mbps. Router channel/width changes, including any 160 MHz or DFS change,
+are owner-only and must be logged as a new network condition.
+
+The exact 500-Mbps a/a2 rate is covered when the same-condition moving result
+qualifies `Rlive >= 500`: record that headroom-based qualification and the passing
+moving rate. This is an inference from the scheduled Q4 screen, not a directly
+measured 500-Mbps network leg. Do not add an unrequested network leg or describe
+it as a measured 500-Mbps result.
+
+The scheduled moving screen tops out at 1000 Mbps, so its 15% headroom rule
+can qualify at most 850 Mbps. It cannot qualify the exact 1000-Mbps PyroWave
+cell by itself. For the owner's next-session approval, include one conditional
+120-second moving 1200-Mbps leg only after the stationary 1200 and moving 1000
+legs pass. A passing 1200 leg yields `Rlive=1020`, before the decoder cap.
+Otherwise keep the nominal 1000-Mbps cell explicitly unqualified; do not
+silently lower it or remove the headroom requirement.
+
+## Live cells, in order
+
+The listed nominal rates are deliberate. The owner-approved visual-first
+exception permits a and a2 at their exact 500 Mbps before Q4, labelled diagnostic
+with network/sustained-rate acceptance pending. Retain matching builds, native
+RDO readbacks, image checks, telemetry, safety stops and exact restoration;
+stop on a fault or disconnect. After Q4 qualifies 1000 Mbps, repeat the matched
+full-FOV Haar pair as **a-1000 then a2-1000**, changing only bitrate from the
+corresponding 500-Mbps cell. This gives four cells that separate bitrate from
+RDO density; the cropped/foveated d ladder cannot substitute for that comparison.
+Keep the same chart, Metro checkpoint, render/encoded dimensions, 90-Hz request,
+allocation settings, settling and capture intervals. Require fresh native RDO
+markers and an owner judgement for each cell. Compare both densities at each
+rate and each rate at a fixed density; report any fresh-rate or latency cost
+alongside image quality. The 1000-Mbps pair and ladder still wait for Q4.
+All other cells run only if Q4 and the selected codec's verified decoder limit
+support their exact rate; otherwise record them unqualified rather than silently
+reducing them to `Rlive`. Full cells retain a 60–90
+second chart capture and the same owner-selected Metro fence scene; d1–d4 use
+the short test-scene timing intervals described below. Preserve the runtime
+marker, requested/negotiated/decoded geometry, codec path, packet-size
+p50/p99/max, and native per-frame encode telemetry.
+
+Keep these fields separate in every result: `gpu_decode_ms` (GPU execution only
+when an explicit decoder GPU query produced it), `decode_to_fence_ms` (the
+observed decode-to-fence wall interval, also labelled `observed_fence_completion_ms`),
+`fresh_submissions_per_s`, and `estimated_pipeline_latency_ms` (ALVR
+`total_pipeline_latency_s`). Do not derive one from another or call any of them
+display/optical FPS or optical latency. For stock AV1/H.264 cells, set
+`gpu_decode_ms = null` unless a stock decoder GPU query is actually available;
+the present source paths do not provide one. Set any missing fresh-rate or
+estimated-pipeline field to `null`, with a reason, rather than filling it from
+the F90 normalization or an offline timing estimate.
+
+### Live telemetry record, initially blank
+
+Populate this table only from the corresponding headset cell. The retained
+approximately 82–83 fresh submissions/s observation belongs to the historical
+baseline; it is not a value for any blank cell and does not establish 90 Hz.
+
+| Cell | GPU decode execution ms | Decode-to-fence ms (observed completion) | Fresh submissions/s | Estimated pipeline latency ms | Optical FPS / latency |
+|---|---:|---:|---:|---:|---:|
+| a | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
+| a2 | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
+| a-1000 | `null` — pending Q4/headset | `null` — pending Q4/headset | `null` — pending Q4/headset | `null` — pending Q4/headset | `null` — no optical measurement |
+| a2-1000 | `null` — pending Q4/headset | `null` — pending Q4/headset | `null` — pending Q4/headset | `null` — pending Q4/headset | `null` — no optical measurement |
+| b | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
+| c | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
+| c2 | `null` — conditional, pending headset/build gates | `null` — conditional, pending headset/build gates | `null` — conditional, pending headset/build gates | `null` — conditional, pending headset/build gates | `null` — no optical measurement |
+| d1 — Medium Haar | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
+| d2 — Medium 5/3 | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
+| d3 — Medium 9/7 | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
+| d4 — Light 9/7 | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — pending headset | `null` — no optical measurement |
+| d-Metro — selected rung | `null` — pending selection/headset | `null` — pending selection/headset | `null` — pending selection/headset | `null` — pending selection/headset | `null` — no optical measurement |
+
+| Cell | Exact intended configuration | Runnable state and gate |
+|---|---|---|
+| a | Today’s full baseline: PyroWave Haar, 4:2:0, Compute, TCP, SDR, 90 Hz, fixed 500 Mbps; `fov_crop=false`, WO-8 off, and the common allocation baseline above. On the corrected candidate, explicitly enable the session RDO switch with content `65.28`; require the native encoder log to report legacy default effective `65.28` px/deg and Nyquist `32.64` cycles/deg (allow the established float-log tolerance). | Run first as the owner-requested before-Q4 diagnostic visual baseline. Record and restore the raw RDO switch `enabled` and `content` values exactly. It is not evidence of a 90 Hz pass merely because the historical rate was ~82–83/s. Q4 transport qualification remains pending; do not silently replace 500 with `Rlive` or infer network acceptance from the image. |
+| a2 | Immediately after a: identical full-FOV Haar / 500 Mbps configuration and common allocation baseline, except the explicit session RDO content is `24.0`. | Run as the second before-Q4 diagnostic visual comparison, with network/sustained-rate acceptance pending. Require the fresh native `Warn()` readback marker above to show effective `24` px/deg, Nyquist `12` cycles/deg and `ALVR session RDO setting`. Offline expectation versus legacy a: fence **+3.7 dB** (measured +3.656 dB), temporal p99 **44 → 33 luma codes**; this is not a promised live quality/rate gain. Restart the encoder with that explicit session setting; retain all other a settings/property values and compare their readbacks. Use the same chart and owner-selected Metro scene and ask the owner for each judgement. Restore both original RDO session-switch values exactly when finished. Missing native activation proof or any other changed comparison knob invalidates the a/a2 comparison. |
+| a-1000 | Identical to a, except fixed bitrate `1000` Mbps: full-FOV Haar, legacy session RDO `65.28`, WO-8 off and the same allocation configuration. | Run after Q4 qualifies the exact rate. Require the fresh legacy native RDO marker; compare settings with a with only bitrate changed. Ask for chart and Metro judgements; retain independent timing/freshness measurements. |
+| a2-1000 | Identical to a-1000, except session RDO content `24.0`; also identical to a2 except fixed bitrate `1000` Mbps. | Run immediately after a-1000, with a fresh RDO24 native marker. No cropped-Haar offline row is a full-FOV comparator, and the a2 500-Mbps offline expectation must not be presented as a measured 1000-Mbps result. Ask for chart and Metro judgements and retain all common gates. |
+| b | Stock single-SBS AV1: WO-10 crop, AV1 Main10 requested, fixed 200 Mbps, 90 Hz, SDR, NVENC `P4`, AQ `Disabled`. Set/read `preferred_codec=AV1`, `use_10bit=true`, `server_overrides_use_10bit=true`, `quality_preset=P4`, and `adaptive_quantization_mode=Disabled`, then restart SteamVR. | This is the P4/AQ-off live comparison, distinct from the offline P1/Spatial-AQ stock-default control. Source supports these settings but AV1 can negotiate/fall back to HEVC. Block/mark inconclusive without AV1 negotiated-codec readback, elementary-stream Main10 proof, MediaCodec identity/output evidence, and the runtime crop proof. `gpu_decode_ms` is null unless a real stock decoder GPU query is added. |
+| c | Stock single-SBS H.264: WO-10 crop + WO-8 `H264Fit`, softness `0.5`, fixed 700 Mbps, 90 Hz, SDR, NVENC `P7`, AQ `Disabled`, 8-bit. | The completed H264Fit row ranks well on the fence; require the final comparison and close the live H.264 audit gates before capture: active-device dimension acceptance/preflight, matching phase-patch provenance, negotiated/decoded `3968x2080` SBS evidence, H.264 SPS/profile evidence, and Quest decoder identity. Explicitly set/read `use_10bit=false`, `server_overrides_use_10bit=true` and AQ `Disabled` to match the offline row, then restore their original values. Stock ALVR two-per-eye H.264 remains unimplemented and the offline dual-stream rows are not runnable live cells. |
+| c2 | Immediately after c, conditional: stock single-SBS width-only H.264 / WO-10 crop / fixed 700 Mbps / 90 Hz / P7 / AQ `Disabled` / SDR / 8-bit, softness `0.5`; compress x only to fit SBS width ≤4096, with full-density y. | Run only if c decodes cleanly at confirmed 90 Hz and meets its fresh-rate/image/decoder gates. Independently require c2's width-only profile and vertical-identity guard in a verified matching signed pair, capability acceptance and negotiated/decoded geometry (prospective `4096x2752` SBS), SPS/profile and Quest decoder evidence. This profile is absent from corrected `0f07f05`: queue c2 until those build gates close, without installing or silently substituting a pair now. Keep c's other settings identical and ask the owner for the c2 image/motion judgement. |
+| d1 | Short decode-time screen: WO-10 crop + WO-8 `Medium`, PyroWave `Haar`; common d ladder settings below. | About 20 s on the fixed test scene; fresh native RDO24 marker, requested/decoded geometry and complete three-metric telemetry required. Retained fence score: **39.714915 dB**. |
+| d2 | Short decode-time screen: WO-10 crop + WO-8 `Medium`, PyroWave `Cdf53`; common d ladder settings below. | About 20 s, same test scene and gates as d1. Retained fence score: **41.273421 dB**. |
+| d3 | Short decode-time screen: WO-10 crop + WO-8 `Medium`, PyroWave `Cdf97`; common d ladder settings below. | About 20 s, same test scene and gates as d1. Retained fence score: **42.412796 dB**. |
+| d4 | Short decode-time screen: WO-10 crop + phase-fixed WO-8 `Light`, PyroWave `Cdf97`; common d ladder settings below. | About 20 s, same test scene and gates as d1; retain Light's phase/mapping and decoded geometry. Retained fence score: **40.810309 dB**. |
+| d-Metro | The eligible d1–d4 rung with the highest retained fence score, applied without changing its other settings. | Run the same owner-selected Metro checkpoint for the full 60–90 s cell and ask the owner for clarity, fence aliasing/peripheral shimmer and motion judgement. Reconfirm its fresh rate and native RDO marker. The short ladder is selection evidence, not stable-90-Hz acceptance or an advance quality sign-off. |
+| f | The winning runnable cell, init-only `debug.q3pw.layer_filter` `0 -> 1 -> 0`, with all other applied keys and `Rlive` unchanged. | Set each value with `adb -s <QUEST_SERIAL> shell setprop debug.q3pw.layer_filter <0|1>`, read it back, and restart the client for every leg. For the `1` leg, require its `[Q3PW_LAYER_FILTER]` startup record to show the requested active flags; missing/unsupported/invalid activation fails the cell. Require identical settings/readback around all legs; judge fence aliasing and any new blur. |
+| g | The winning runnable cell, nominal fixed-rate steps `1000 -> 600 -> 1000` Mbps, 10 seconds each, without telling the owner the transition times. | Run only if the selected codec and network have verified 1000 Mbps support. Keep stream, scene and all non-rate keys fixed; retain packet-size telemetry and the owner's blinded change judgement. If the verified cap `Rlive < 1000`, mark this nominal test unqualified/unavailable. A capped `Rlive -> 600 -> Rlive` sequence may be recorded only as an owner-review alternative, never as the same requested test. |
+| h | The winning runnable cell at `Rlive`, owner turns 360°, crouches and moves a hand near the headset. | Record Q4-style stalls/late frames, fresh submissions, observed fence completion and subjective stutter. |
+
+### d1–d4 timing and Metro selection
+
+Every rung uses PyroWave, WO-10 crop, explicit session RDO `enabled=true` /
+`content=24.0`, fixed 1000 Mbps, 90 Hz, 4:2:0, Compute, TCP, SDR, WO-8
+softness `0.5`, `blur_only=false`, `follow_gaze=false`, clientside foveation off,
+and the same faster allocation configuration. Preserve all other experimental
+options. Verify the native RDO marker, wavelet/profile, effective runtime crop
+and encoded/decoded size after each required encoder/client restart.
+
+Use the same test scene, consistent settling and approximately 20 seconds of
+measurement for each rung. Ask the owner for each in-headset judgement. Record
+actual interval, sample counts, GPU decode execution ms and decode-to-fence ms
+(at least median and p95), plus the native fresh selected-output submissions/s.
+Use `gpu_decode_ms`, `decode_to_fence_ms` and
+`fresh_selected_output_rate_fps` from the corresponding capture, with its native
+source/counter proof. Keep estimated pipeline latency separate. Missing queries,
+completion samples or verified fresh counters leave the rung inconclusive;
+do not fill them from graph FPS, reusable tracking timestamps or offline scores.
+
+Compare each rung's measured fresh rate with **cell a in this session**, using
+matched settled measurement windows (retain a 20-second subwindow of a's
+capture and the rung's actual window). A rung is eligible only with valid
+telemetry, no decoder/device fault, disconnect or visible corruption, and fresh
+submissions/s **at least cell a's measured rate**. Among eligible rungs, prefer
+the highest retained fence score: d3, then d2, then d4, then d1. If none meets
+the baseline rate, mark d-Metro unqualified and report that outcome; do not
+silently lower bitrate or use the historical ~82–83/s as a replacement baseline.
+Run the selected rung as d-Metro for the owner's judgement. A short diagnostic
+screen that matches a sub-90 baseline is not a stable 90 Hz pass.
+
+For any candidate requiring stock H.264 dual-eye transport, stop at the label
+`BLOCKED: WO-11 live dual-stream transport/prototype qualification absent`.
+Never recast the offline two-stream FFmpeg/NVENC proxy as a stock-ALVR selection.
+
+## Per-cell acceptance and rollback
+
+1. A valid cell has matching signed build identity; complete telemetry; settings
+   and runtime readback; exactly the requested codec/wavelet/transport/chroma;
+   the recorded 60–90 second capture interval (about 20 s for diagnostic d1–d4,
+   with the selected d-Metro retaining 60–90 s); no decoder/device failure or
+   disconnect; and an owner image/motion judgement. Missing any item records a
+   failed/inconclusive cell, never a pass.
+2. A stable 90 Hz pass requires confirmed 90 Hz runtime operation and fresh
+   submissions sustained at the declared threshold. Fresh submission rate,
+   observed fence completion, GPU execution and display/optical FPS remain
+   distinct fields. Optical FPS and optical latency stay `null` unless an
+   independent optical measurement exists; no completion or pipeline value may
+   fill either field.
+3. On any failure, stop the current cell and preserve its private logs and
+   partial artifacts. Restore the raw resolution snapshot with `python -m
+   tools.quest3.control resolution --restore <RESOLUTION_SNAPSHOT.json>`.
+   Restore each changed dashboard and Android experiment property from its
+   recorded raw before-value, one key at a time, with readback; no tool may
+   submit a captured whole session document as a replacement. Restart SteamVR
+   when any restored setting has the restart flag. Verify the saved
+   registration/config/APK/server hashes and post-restore session readback.
+4. Restore the saved raw values of both `video.fov_crop` and
+   `video.foveated_encoding` rather than assuming defaults. If the saved crop
+   switch was disabled, verify that the runtime no longer emits an active
+   `[FOV-CROP]` marker; if it was enabled, record that the marker is expected
+   after restoration. Restore the saved router state only by owner action if it
+   was changed.
+5. Do not install, uninstall, pair, or alter Virtual Desktop during this session.
+   After ALVR restoration is independently verified, the owner launches VD and
+   Metro and compares the selected preparation candidate against VD H.264+ Godlike on the same
+   fence scene. Record the owner's clarity, shimmer and motion judgement; the
+   agent does not operate VD.
+
+### T1 direct-eye reconstruction candidate (default off)
+
+`debug.q3pw.direct_eye_foveation=1` requests WO-8 reconstruction inside the
+existing PyroWave direct-eye draw. It requires `debug.q3pw.direct_eye_copy=1`,
+Quest 3, synchronous PyroWave import and `debug.q3pw.async_eye_copy` off.
+Only negotiated Light (phase-fixed), Medium and H264Fit with `blur_only=false`,
+equal expanded/target resolution, no upscaling and RGBA8/sRGB targets are eligible.
+Custom, blur-only, unsupported/missing support and initialization failures retain
+staging. The server mapping and defaults are unchanged. This source candidate
+needs the orchestrator's manual `.github/workflows/ci.yml` dispatch with
+`cpu_only=false`, all jobs passing and a verified matching signed pair before
+the separately authorized supervised check. It has no headset acceptance.
+
+For the next owner-supervised chart check, retain the existing preflight,
+readiness, snapshot, installation and restoration gates above. Snapshot this
+property's exact raw value too. Use a fixed asymmetric LEFT/RIGHT chart at
+500 Mbps or lower, 90 Hz, one fixed WO-8 profile, softness held fixed and
+`follow_gaze=false`; verify resolved/raw geometry and decoded SBS dimensions.
+Establish direct-eye copy and synchronous import first, changing/readback-checking
+one property at a time. Hold allocation, colour, flip, cache and all staging
+properties fixed. Run only `direct_eye_foveation` **0 -> 1 -> 0** with a fresh
+stream renderer/decoder on every leg. Require the initialization marker
+`[Q3PW_DIRECT_FFE] requested=.. effective=.. profile=.. packed_eye=WxH expanded_eye=WxH reason=..`;
+the on leg must say `requested=true effective=true reason=eligible`. Require
+`[Q3PW_PRESENTATION] path=direct_eye_ffe rendered=true` on changing frames,
+and `path=staging rendered=true` on both foveated off legs. A requested property
+or initialization marker alone does not prove which path drew the image.
+
+Ask the owner to check upright, distinct eyes, seam, thin lines, centre joins,
+peripheral shape, changing frames and black/flashing on each leg; stop on
+corruption or faults. Repeat separately for the other two profiles only after
+an image pass, retaining decoded/render geometry and native path markers.
+Test `optimal_ahb_usage` separately (known working staging history used 0;
+failing faster allocations used 0x10000300), never in the same property toggle.
+Restore every raw before-value and verify the existing VD/driver/settings
+snapshots. Record runtime 90-Hz acceptance, standalone decode budget and
+sustained live-VR fresh rate as separate results; this chart check promotes none.

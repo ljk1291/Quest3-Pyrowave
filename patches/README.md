@@ -4,6 +4,27 @@ Local modifications to third-party clones, kept as patches so the clones themsel
 stay out of this history. Each one applies to a public upstream commit, so patch + base fully
 reconstructs the tree.
 
+## `direct-eye-foveation.patch`: T1 opt-in WO-8 reconstruction
+
+Stack last, after `foveated-staging-correctness.patch`; SHA-256 is pinned in
+`sources.lock.json`. The Android init property `debug.q3pw.direct_eye_foveation`
+defaults off and additionally requires direct-eye copy and synchronous PyroWave
+import/copy. Light, Medium and H264Fit reuse the existing WGSL constants and
+per-eye/per-frame parameters, including the Light phase correction. The server,
+WGSL and preceding overlays are unchanged. Rejected requests log a reason and
+retain staging; actual draw-path transitions have native presentation markers.
+
+The shader injection mechanism is adapted from MIT upstream
+`JMS1717/Quest3-Pyrowave` commit
+`2de8ad13973ed9c3a8e72f4c85a79e1e7e5d085a`; its profiles are not copied.
+The inverse is translated from the WO-8 WGSL at fork base
+`6ee1ba549fee3f2508efb6a47d6f65247b406436`. The upstream notice is retained
+under `licenses/JMS1717-Quest3-Pyrowave/`. Production software GLES tests compare
+spatial patterns byte-by-byte with staging + WGSL across both eyes, RGBA8/sRGB,
+three profiles and non-zero centre updates. CPU source/reference checks run in
+`tests`; native policy/constants and Mesa gates run in the manual CI `client`
+job. Source/CPU success does not establish Quest interoperability or 90 Hz.
+
 ## `wo8-light-centre-phase.patch`: Light aligned-centre texel phase correction
 
 This overlay stacks immediately after `wo8-foveation.patch`. A 32-pixel packed
@@ -60,6 +81,7 @@ Two traps when regenerating, both of which have silently produced a patch that d
 
 | Patch | Upstream | Base commit | Applies to |
 |---|---|---|---|
+| `direct-eye-foveation.patch` | `alvr-org/ALVR` | `7eda092` plus all preceding fork ALVR overlays through `foveated-staging-correctness.patch` | T1 default-off direct-eye inverse; no server change |
 | `alvr-20.13.0-galaxy-xr-client.patch` | `alvr-org/ALVR` | `7eda092` (v20.13.0) | older client-only subset, package `alvr.client.galaxy2013`; superseded by the cumulative patch below, do not stack them |
 | `alvr-20.13.0-server-instrumentation.patch` | `alvr-org/ALVR` | `7eda092` (v20.13.0) | **cumulative: the whole 20.13.0 clone** (71 files: client, PyroWave decoder, streamer, frame ids, bitstream tap, PyroWave encoder, the beta's trimmed settings and streaming profiles, headset telemetry and the dashboard test report; version `20.13.0-pyro.1`); apply it alone |
 | `wo8-light-centre-phase.patch` | `alvr-org/ALVR` | `7eda092` (v20.13.0) plus preceding ALVR overlays through `wo8-foveation.patch` | Light sampling-phase overlay; stack after `wo8-foveation.patch` |

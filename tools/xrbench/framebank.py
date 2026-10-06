@@ -424,6 +424,8 @@ _HISTORICAL_HVS_ALLOWED_LOCK_ROLES = {
     'patches.alvr_pyrowave_rdo_live_readback.sha256': 'observability_only',
     'patches.alvr_pyrowave_rdo_session_setting.path': 'session_rdo_setting_only',
     'patches.alvr_pyrowave_rdo_session_setting.sha256': 'session_rdo_setting_only',
+    'patches.direct_eye_foveation.path': 'alvr_presentation_and_geometry_only',
+    'patches.direct_eye_foveation.sha256': 'alvr_presentation_and_geometry_only',
     'patches.foveated_staging_correctness.path': 'alvr_presentation_and_geometry_only',
     'patches.foveated_staging_correctness.sha256': 'alvr_presentation_and_geometry_only',
     'patches.nvenc_dimension_preflight.path': 'encoder_capability_preflight_inactive_only',
@@ -433,7 +435,7 @@ _HISTORICAL_HVS_DESCRIPTOR_RELATIVE = Path(
     'tools/xrbench/historical_locks/qualified-hvs-scorer-b4a61-compatibility.json')
 # Normalized EOL hash of the one reviewed descriptor. It is intentionally not
 # a generic descriptor mechanism: callers must name this tracked proof.
-_HISTORICAL_HVS_DESCRIPTOR_SHA256 = '93cc85b408e6654b0d0e9a53b6c85307bd2a9d4912efb48a60497584be59326c'
+_HISTORICAL_HVS_DESCRIPTOR_SHA256 = '005edd5a7e10beadadff9f1953c92f225d704370face0a9921534b498af1d9cf'
 
 
 def _verify_tools_build_against_lock(tools, metadata_path, *, lock_hash: str, lock_data: dict):

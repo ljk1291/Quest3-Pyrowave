@@ -22,3 +22,10 @@ include third-party code, which stays under its own license:
   Copyright (c) The Khronos Group Inc., unmodified.
 
 The Apache License 2.0 text is at https://www.apache.org/licenses/LICENSE-2.0.
+
+T1 direct-eye foveated reconstruction adapts the shader-injection mechanism from
+JMS1717/Quest3-Pyrowave commit 2de8ad13973ed9c3a8e72f4c85a79e1e7e5d085a
+(upstream/main, MIT). Copyright (c) 2026 JMS1717 - Quest3-Pyrowave changes.
+The exact upstream MIT notice is retained in licenses/JMS1717-Quest3-Pyrowave/LICENSE.
+The inverse is translated from this fork's MIT ALVR/WGSL WO-8 mapping, including
+the Light centre-phase overlay; upstream profile constants are not imported.

@@ -40,7 +40,8 @@ def load():
                       ("alvr_pyrowave_rdo_live_readback", "patches/alvr-pyrowave-rdo-live-readback.patch"),
                       ("alvr_pyrowave_rdo_session_setting", "patches/alvr-pyrowave-rdo-session-setting.patch"),
                       ("nvenc_dimension_preflight", "patches/nvenc-dimension-preflight.patch"),
-                      ("foveated_staging_correctness", "patches/foveated-staging-correctness.patch")):
+                      ("foveated_staging_correctness", "patches/foveated-staging-correctness.patch"),
+                      ("direct_eye_foveation", "patches/direct-eye-foveation.patch")):
         patch = patches.get(key, {})
         if (not isinstance(patch, dict) or patch.get("path") != path
                 or not re.fullmatch(r"[0-9a-f]{64}", patch.get("sha256", ""))):
@@ -54,7 +55,7 @@ def main():
     parser.add_argument("--value", choices=("rust", "android_ndk", "pyrowave_rdo_density_patch_sha256",
                         "pyrowave_rdo_live_readback_patch_sha256", "pyrowave_rdo_session_setting_patch_sha256",
                         "wo8_light_centre_phase_patch_sha256", "alvr_pyrowave_rdo_live_readback_patch_sha256",
-                        "alvr_pyrowave_rdo_session_setting_patch_sha256", "nvenc_dimension_preflight_patch_sha256", "foveated_staging_correctness_patch_sha256"))
+                        "alvr_pyrowave_rdo_session_setting_patch_sha256", "nvenc_dimension_preflight_patch_sha256", "foveated_staging_correctness_patch_sha256", "direct_eye_foveation_patch_sha256"))
     args = parser.parse_args()
     data = load()
     if args.value:
@@ -67,6 +68,7 @@ def main():
             "alvr_pyrowave_rdo_session_setting_patch_sha256": "alvr_pyrowave_rdo_session_setting",
             "nvenc_dimension_preflight_patch_sha256": "nvenc_dimension_preflight",
             "foveated_staging_correctness_patch_sha256": "foveated_staging_correctness",
+            "direct_eye_foveation_patch_sha256": "direct_eye_foveation",
         }
         if args.value in patch_values:
             print(data["patches"][patch_values[args.value]]["sha256"])

@@ -1,0 +1,225 @@
+{
+  "schema": 1,
+  "kind": "t1_direct_eye_foveation_source_checkpoint",
+  "date": "2026-10-06",
+  "branch": "codex/t1-direct-eye-foveation",
+  "base_repository_commit": "6ee1ba549fee3f2508efb6a47d6f65247b406436",
+  "validation_state": "source_and_cpu_only_native_ci_pending",
+  "upstream_mechanism": {
+    "repository": "https://github.com/JMS1717/Quest3-Pyrowave",
+    "commit": "2de8ad13973ed9c3a8e72f4c85a79e1e7e5d085a",
+    "license": "MIT",
+    "notice": "licenses/JMS1717-Quest3-Pyrowave/LICENSE"
+  },
+  "overlay": {
+    "path": "patches/direct-eye-foveation.patch",
+    "sha256": "07ae473652f1f25492ff1270ccbafd0aeb87d703d85c3c6e6edf82197fc4cc5e",
+    "base_alvr_commit": "7eda092dbf0002281410a4222683ec228700cffb",
+    "apply_after": "patches/foveated-staging-correctness.patch"
+  },
+  "runtime": {
+    "property": "debug.q3pw.direct_eye_foveation",
+    "default_off": true,
+    "initialization": "new stream renderer/decoder only",
+    "requires": [
+      "Quest3 PyroWave direct_eye_copy",
+      "synchronous import/copy",
+      "negotiated WO-8 inverse",
+      "Light / Medium / H264Fit",
+      "blur_only=false",
+      "no upscaling",
+      "equal expanded and target resolution",
+      "RGBA8 or SRGB8_ALPHA8 target",
+      "GL_OES_EGL_image_external_essl3"
+    ],
+    "mapping": "production WGSL static constants and 16 dynamic floats per eye; same Light phase translation, right-eye mirroring and per-eye clamp-to-edge bounds",
+    "server_mapping_changed": false,
+    "wgsl_changed": false,
+    "default_draw_body_changed": false,
+    "markers": [
+      "[Q3PW_DIRECT_FFE] requested/effective/profile/packed_eye/expanded_eye/reason",
+      "[Q3PW_PRESENTATION] direct_requested/direct_eligible/direct_effective",
+      "[Q3PW_PRESENTATION] path=direct_eye_ffe|direct_eye|staging rendered=true"
+    ]
+  },
+  "changed_files": [
+    ".github/workflows/ci.yml",
+    "NOTICE",
+    "docs/ARTIFACT-QUALITY-STATUS.md",
+    "docs/Q3-HEADSET-CHECKLIST.md",
+    "licenses/JMS1717-Quest3-Pyrowave/LICENSE",
+    "patches/README.md",
+    "patches/direct-eye-foveation.patch",
+    "results/t1-direct-eye-foveation-source-2026-10-06.json",
+    "sources.lock.json",
+    "tests/test_direct_eye_foveation_contract.py",
+    "tools/ci/fetch_sources.sh",
+    "tools/ci/source_lock.py",
+    "tools/quest3/bench.py",
+    "tools/quest3/control.py",
+    "tools/tests/test_xrbench_framebank.py",
+    "tools/xrbench/framebank.py",
+    "tools/xrbench/historical_locks/qualified-hvs-scorer-b4a61-compatibility.json"
+  ],
+  "inner_overlay_files": [
+    "alvr/client_openxr/src/stream.rs",
+    "alvr/graphics/resources/direct_eye_foveation.glsl",
+    "alvr/graphics/resources/direct_eye_fragment.glsl",
+    "alvr/graphics/src/direct_eye.rs",
+    "alvr/graphics/src/stream.rs"
+  ],
+  "tests_in_execution_order": [
+    {
+      "command": "python -m unittest tests.test_direct_eye_foveation_contract tests.test_staging_correctness_contract -v",
+      "result": "7 passed (initial four T1 tests); unselected sqrt warnings subsequently suppressed only in CPU evaluator"
+    },
+    {
+      "command": "python -m pytest tools/tests/test_ci_pins.py tools/tests/test_build_metadata.py -q",
+      "result": "not run: default Python lacks pytest"
+    },
+    {
+      "command": "existing validation-env Python -m pytest tools/tests/test_ci_pins.py tools/tests/test_build_metadata.py -q",
+      "result": "17 passed"
+    },
+    {
+      "command": "python -m unittest discover -s tests -v",
+      "result": "111 run; 106 passed; 5 optional chart pixel dependency skips (before fifth T1 test)"
+    },
+    {
+      "command": "python -m unittest tools.tests.test_xrbench_framebank tools.tests.test_xrbench_foveation tools.tests.test_xrbench_pyro_q3_framebank tools.tests.test_xrbench_hvs_scorer -q",
+      "result": "76 run; 71 passed; 3 g++ skips; 2 errors: historical HVS compatibility omitted the new patch and local cv2 missing. Compatibility corrected without changing scorer identities."
+    },
+    {
+      "command": "python -m unittest tests.test_direct_eye_foveation_contract -v",
+      "result": "5 passed including nonzero per-eye update/repeat versus independent CPU reference"
+    },
+    {
+      "command": "existing validation-env Python -m pytest XRBench modules -q -k not-libvmaf-test",
+      "result": "collection blocked: environment lacks numpy (3 collection errors)"
+    },
+    {
+      "command": "default Python with read-only existing pytest site-packages appended; pytest XRBench modules -q -k not-libvmaf-test",
+      "result": "72 passed; 3 skipped (g++ unavailable); 1 deselected (cv2 unavailable)"
+    },
+    {
+      "command": "python -m unittest discover -s tests -q (final)",
+      "result": "112 run; 107 passed; 5 optional chart pixel dependency skips"
+    },
+    {
+      "command": "default Python with read-only existing pytest site-packages appended; pytest tools/tests/test_ci_pins.py tools/tests/test_build_metadata.py -q (final)",
+      "result": "17 passed"
+    },
+    {
+      "command": "git diff --check; reconstructed tree git diff --check",
+      "result": "passed at each check; tracked-file LF/CRLF informational warnings only"
+    },
+    {
+      "command": "git -C ws/alvr apply --check -R ../../patches/direct-eye-foveation.patch",
+      "result": "passed at each check"
+    },
+    {
+      "command": "fresh local git archive of locked ALVR base plus complete fetch_sources ALVR stack",
+      "result": "all 11 patches apply with --check; all five T1 files match working source byte-for-byte"
+    },
+    {
+      "command": "source-lock, checklist prefix and unchanged production-section audit",
+      "result": "all patch hashes pass; inherited checklist prefix unchanged; WGSL, cache, fence, drop and default draw body match exact preimage (excluding opt-in uniform upload)"
+    }
+  ],
+  "ci_required": {
+    "workflow": ".github/workflows/ci.yml",
+    "dispatch": {
+      "cpu_only": false
+    },
+    "job": "client",
+    "step": "Production foveated staging software GLES regression",
+    "commands": [
+      "cargo +$RUST_TOOLCHAIN test -p alvr_graphics --lib direct_eye_foveation_policy_tests",
+      "software llvmpipe/GLES cargo test -p alvr_graphics --lib staging_correctness_tests -- --nocapture --test-threads=1"
+    ],
+    "additional_required_jobs": [
+      "tests",
+      "streamer",
+      "matching-pair"
+    ],
+    "local_native_status": "not run: no local Rust toolchain or usable WSL; no dependency/system installation attempted"
+  },
+  "software_pixel_gate": {
+    "oracle": "existing production GLES staging + production WGSL FFE",
+    "profiles": [
+      "Light",
+      "Medium",
+      "H264Fit"
+    ],
+    "eyes": [
+      "left",
+      "right"
+    ],
+    "formats": [
+      "RGBA8",
+      "SRGB8_ALPHA8"
+    ],
+    "tolerance_bytes": 2,
+    "expanded_eye": [
+      176,
+      160
+    ],
+    "pattern": [
+      "x/y gradients",
+      "one-texel lines",
+      "distinct per-eye channel/line offsets",
+      "changing fresh-frame content"
+    ],
+    "center_updates": [
+      [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      [
+        [
+          0.21,
+          -0.17
+        ],
+        [
+          -0.23,
+          0.19
+        ]
+      ],
+      "repeat retained nonzero centres"
+    ],
+    "uses_production_draw": true,
+    "android_ahb_interop_proven": false
+  },
+  "historical_hvs_compatibility": "explicit presentation-only path/hash rows appended, descriptor pin updated; qualified scorer, binary, shader, source, imports and historical source-lock identities untouched",
+  "hardware_verification": "docs/Q3-HEADSET-CHECKLIST.md: T1 direct-eye reconstruction candidate; separate matching-build/install/session authorization, conservative asymmetric chart, one-property 0/1/0 sequence with fresh renderer/decoder each leg and exact restoration",
+  "hardware_actions_performed": false,
+  "adb_used": false,
+  "arm_file_touched": false,
+  "gpu_workload_run": false,
+  "push_or_pr": false,
+  "rate_evidence": {
+    "runtime_90hz_acceptance": null,
+    "standalone_decode_budget": null,
+    "sustained_live_vr_90hz": null
+  },
+  "known_limits": [
+    "Native Rust compilation, actual shader linking and Mesa byte parity await CI.",
+    "No Quest/Qualcomm/Vulkan AHB/OpenXR interop or live image/timing acceptance.",
+    "Staging fallback may retain the known Quest black/flashing failure; failure logging does not repair it.",
+    "The faster AHB allocation and thermal/network performance are unverified.",
+    "Synthetic nonzero centres exercise the existing update API; named fixed profiles resolve follow_gaze=false.",
+    "Source-only results do not qualify Godlike 90 Hz or image quality against VD."
+  ],
+  "worktree_state_at_validation": "uncommitted and unstaged; git add denied when creating the worktree index.lock outside the writable root",
+  "commit_attempt": {
+    "created": false,
+    "head_remains": "6ee1ba549fee3f2508efb6a47d6f65247b406436",
+    "reason": "Permission denied creating .git/worktrees/t1-direct-eye-foveation/index.lock; no escalation or retry outside the sandbox"
+  }
+}

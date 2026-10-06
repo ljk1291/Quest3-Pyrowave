@@ -59,6 +59,12 @@ actual_staging_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256
 [ "$actual_staging_patch" = "$expected_staging_patch" ] || { echo "Foveated staging correctness patch hash differs" >&2; exit 1; }
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/foveated-staging-correctness.patch"
 
+expected_direct_ffe_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value direct_eye_foveation_patch_sha256)
+actual_direct_ffe_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/direct-eye-foveation.patch")
+[ "$actual_direct_ffe_patch" = "$expected_direct_ffe_patch" ] || { echo "Direct eye foveation patch hash differs" >&2; exit 1; }
+apply_patch "$dest/ALVR-20.13.0" "$repo/patches/direct-eye-foveation.patch"
+
+
 checkout "$PYROWAVE_URL" "$dest/pyrowave" "$PYROWAVE_BASE"
 # pyrowave's checkout_granite.sh pins a newer Granite (9d44761), which spiked encoder p99 to 14 ms;
 # the measurements used 842d9d5, cloned here with all of its submodules.

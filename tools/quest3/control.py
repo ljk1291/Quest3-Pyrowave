@@ -13,7 +13,7 @@ from .resolution import ENCODE_FIELD, RENDER_FIELD, aligned_eye, assignments, pr
 API='http://127.0.0.1:8082/api/dashboard-request'
 EVENTS='ws://127.0.0.1:8082/api/events'
 CLIENT_PACKAGE_ID=json.loads((Path(__file__).resolve().parents[2] / 'fork.json').read_text(encoding='utf-8'))['client_package_id']
-EXPERIMENT_PROPERTIES=('debug.oculus.forceDisplayScaling','debug.oculus.refreshRate','debug.q3pw.direct_eye_copy',
+EXPERIMENT_PROPERTIES=('debug.oculus.forceDisplayScaling','debug.oculus.refreshRate','debug.q3pw.direct_eye_copy','debug.q3pw.direct_eye_foveation',
     'debug.q3pw.async_eye_copy','debug.q3pw.copy_wait_us','debug.q3pw.raw_srgb_copy','debug.q3pw.image_cache',
     'debug.q3pw.frame_wait_us','debug.q3pw.pre_wait_poll','debug.q3pw.repeat_render','debug.q3pw.decode_workers',
     'debug.q3pw.decode_handoff','debug.q3pw.haar_fused','debug.q3pw.dequant_batch','debug.q3pw.convert_compute',
@@ -165,7 +165,7 @@ def experiment_properties(adb, disable=False, disable_experiments=False):
     if disable_experiments:
         # Do not touch direct_flip_y: an unset property intentionally means the source default true.
         changes.extend((
-            ('debug.q3pw.direct_eye_copy',''),('debug.q3pw.async_eye_copy',''),
+            ('debug.q3pw.direct_eye_copy',''),('debug.q3pw.direct_eye_foveation',''),('debug.q3pw.async_eye_copy',''),
             ('debug.q3pw.copy_wait_us',''),('debug.q3pw.raw_srgb_copy',''),
             ('debug.q3pw.image_cache',''),('debug.q3pw.frame_wait_us',''),
             ('debug.q3pw.pre_wait_poll',''),('debug.q3pw.repeat_render',''),

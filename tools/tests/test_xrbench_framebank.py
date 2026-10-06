@@ -494,6 +494,10 @@ class FrameBankTests(unittest.TestCase):
                                'new': 'patches/nvenc-dimension-preflight.patch', 'role': 'encoder_capability_preflight_inactive_only'},
                               {'path': 'patches.nvenc_dimension_preflight.sha256', 'old': None,
                                'new': '10087a15c4a936028ccf5bf4668d482e84adbb03eced7631ad63e5ac4ae1438f', 'role': 'encoder_capability_preflight_inactive_only'}]}
+            direct_ffe = json.loads((root / 'sources.lock.json').read_text())['patches']['direct_eye_foveation']
+            descriptor['allowed_current_lock_changes'].extend(
+                {'path': 'patches.direct_eye_foveation.' + field, 'old': None, 'new': direct_ffe[field],
+                 'role': 'alvr_presentation_and_geometry_only'} for field in ('path', 'sha256'))
             descriptor_path = folder / 'compatibility.json'; descriptor_path.write_text(json.dumps(descriptor))
             with self.assertRaisesRegex(ValueError, 'not the reviewed tracked proof'):
                 fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)
