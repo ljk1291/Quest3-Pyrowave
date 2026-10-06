@@ -3,6 +3,11 @@ Quest3-Pyrowave
 Quest 3 port and reproducibility/benchmark tooling Copyright (c) 2026 JMS1717.
 Based on Terminal-ennui Galaxy XR ALVR Research, with original history and credits retained.
 
+The opt-in decoder global-priority request/retry in tools/pyroclient is adapted from
+JMS1717/Quest3-Pyrowave tools/pyroclient/pyroclient.cpp at commit
+8fb4656c3949b9538b22286a9a2068b98fa0ed75 (MIT; Copyright (c) 2026 JMS1717).
+The fork retains default priority and adds explicit low/medium/high selection and CPU tests.
+
 Galaxy XR ALVR Research
 
 The original work in this repository is under the MIT License (LICENSE). Some files modify or

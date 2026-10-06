@@ -1,5 +1,11 @@
 # pyroclient — PyroWave decode on the headset, as RGBA8 AHardwareBuffers
 
+Optional `debug.q3pw.decode_priority=low|medium|high` is read at native device
+creation. Unset/`default` preserves the original queue; unsupported/rejected
+requests fall back to it. `[Q3PW_DECODE_PRIORITY]` records the actual accepted
+priority, extension, family, fallback and Vulkan results. See
+[T3 policy, evidence and supervised A/B protocol](../../docs/DECODE-PRIORITY.md).
+
 The ALVR client's PyroWave decoder. It gives the GLES client exactly what MediaCodec gives it —
 an `AHardwareBuffer` to wrap in an `EGLImage` — so the existing staging and render path is
 unchanged. Built on the borrowed-`VkDevice` path proven in `tools/pyrowave_android`.
