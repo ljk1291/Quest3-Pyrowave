@@ -1,5 +1,6 @@
 """The lockfile, not workflow environment defaults, defines reconstructed inputs."""
 import json
+import hashlib
 import re
 import subprocess
 import sys
@@ -9,6 +10,18 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 LOCK = json.loads((REPO / "sources.lock.json").read_text())
+
+
+def test_frame_dump_overlay_hash_and_order():
+    pin = LOCK['patches']['frame_dump']
+    assert pin['path'] == 'patches/frame-dump.patch'
+    assert hashlib.sha256((REPO / pin['path']).read_bytes()).hexdigest() == pin['sha256']
+    script = (REPO / 'tools/ci/fetch_sources.sh').read_text()
+    assert script.index('direct-eye-foveation.patch') < script.index('frame-dump.patch')
+    assert '--value frame_dump_patch_sha256' in script
+    result = subprocess.run([sys.executable, 'tools/ci/source_lock.py', '--value', 'frame_dump_patch_sha256'],
+                            cwd=REPO, capture_output=True, text=True, check=True)
+    assert result.stdout.strip() == pin['sha256']
 
 
 def test_lock_has_full_source_revisions():

@@ -63,6 +63,10 @@
     "foveation_shader_linkage": {
       "path": "patches/foveation-shader-linkage.patch",
       "sha256": "ce058af34dbc850d81005c3e7d1d90bdc415711e734a72b42830bdb5b972ed62"
+    },
+    "frame_dump": {
+      "path": "patches/frame-dump.patch",
+      "sha256": "b45f80b0b8be93bc474f176c0cfe90c11bc0867a81d09dea54ba1efcfb9815f6"
     }
   },
   "rust": "1.97.1",

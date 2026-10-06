@@ -43,7 +43,8 @@ def load():
                       ("foveated_staging_correctness", "patches/foveated-staging-correctness.patch"),
                       ("presentation_filters", "patches/presentation-filters.patch"),
                       ("direct_eye_foveation", "patches/direct-eye-foveation.patch"),
-                      ("foveation_shader_linkage", "patches/foveation-shader-linkage.patch")):
+                      ("foveation_shader_linkage", "patches/foveation-shader-linkage.patch"),
+                      ("frame_dump", "patches/frame-dump.patch")):
         patch = patches.get(key, {})
         if (not isinstance(patch, dict) or patch.get("path") != path
                 or not re.fullmatch(r"[0-9a-f]{64}", patch.get("sha256", ""))):
@@ -59,7 +60,7 @@ def main():
                         "wo8_light_centre_phase_patch_sha256", "alvr_pyrowave_rdo_live_readback_patch_sha256",
                         "alvr_pyrowave_rdo_session_setting_patch_sha256", "nvenc_dimension_preflight_patch_sha256", "foveated_staging_correctness_patch_sha256",
                         "presentation_filters_patch_sha256", "direct_eye_foveation_patch_sha256",
-                        "foveation_shader_linkage_patch_sha256"))
+                        "foveation_shader_linkage_patch_sha256", "frame_dump_patch_sha256"))
     args = parser.parse_args()
     data = load()
     if args.value:
@@ -75,6 +76,7 @@ def main():
             "presentation_filters_patch_sha256": "presentation_filters",
             "direct_eye_foveation_patch_sha256": "direct_eye_foveation",
             "foveation_shader_linkage_patch_sha256": "foveation_shader_linkage",
+            "frame_dump_patch_sha256": "frame_dump",
         }
         if args.value in patch_values:
             print(data["patches"][patch_values[args.value]]["sha256"])
@@ -101,6 +103,7 @@ def main():
         "ALVR_PYROWAVE_RDO_LIVE_READBACK_PATCH_SHA256": data["patches"]["alvr_pyrowave_rdo_live_readback"]["sha256"],
         "ALVR_PYROWAVE_RDO_SESSION_SETTING_PATCH_SHA256": data["patches"]["alvr_pyrowave_rdo_session_setting"]["sha256"],
         "NVENC_DIMENSION_PREFLIGHT_PATCH_SHA256": data["patches"]["nvenc_dimension_preflight"]["sha256"],
+        "FRAME_DUMP_PATCH_SHA256": data["patches"]["frame_dump"]["sha256"],
     }
     for key, value in values.items():
         print(f"{key}={value}" if args.github_env else f"{key}={shlex.quote(value)}")
