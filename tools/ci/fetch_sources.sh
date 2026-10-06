@@ -59,6 +59,12 @@ actual_staging_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256
 [ "$actual_staging_patch" = "$expected_staging_patch" ] || { echo "Foveated staging correctness patch hash differs" >&2; exit 1; }
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/foveated-staging-correctness.patch"
 
+# T2 presentation overlay stacks after the complete baseline; shader defaults are immutable.
+expected_presentation_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value presentation_filters_patch_sha256)
+actual_presentation_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/presentation-filters.patch")
+[ "$actual_presentation_patch" = "$expected_presentation_patch" ] || { echo "Presentation filter patch hash differs" >&2; exit 1; }
+apply_patch "$dest/ALVR-20.13.0" "$repo/patches/presentation-filters.patch"
+
 checkout "$PYROWAVE_URL" "$dest/pyrowave" "$PYROWAVE_BASE"
 # pyrowave's checkout_granite.sh pins a newer Granite (9d44761), which spiked encoder p99 to 14 ms;
 # the measurements used 842d9d5, cloned here with all of its submodules.

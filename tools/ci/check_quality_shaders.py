@@ -9,9 +9,10 @@ REPO = Path(__file__).resolve().parents[2]
 MANIFEST = REPO / 'tools/windows/quality-shaders.json'
 SHADER = 'alvr/server_openvr/cpp/alvr_server/shader/'
 WINDOWS = 'alvr/server_openvr/cpp/platform/win32/'
-SOURCES = ('FrameRender.fx', 'FrameRenderPSArea.hlsl', 'RgbToYuvPlanar.hlsl', 'RgbToYuvPlanarDither.hlsl')
-BINARY = ('FrameRenderPS.cso', 'rgbtoyuvplanar.cso', 'FrameRenderPSArea.cso', 'rgbtoyuvplanardither.cso')
+SOURCES = ('FrameRender.fx', 'FrameRenderPSArea.hlsl', 'FrameRenderPSAdaptive.hlsl', 'RgbToYuvPlanar.hlsl', 'RgbToYuvPlanarDither.hlsl')
+BINARY = ('FrameRenderPS.cso', 'rgbtoyuvplanar.cso', 'FrameRenderPSArea.cso', 'FrameRenderPSAdaptive.cso', 'rgbtoyuvplanardither.cso')
 VARIANTS = (('FrameRenderPSArea.hlsl', 'PS', 'FrameRenderPSArea.cso'),
+            ('FrameRenderPSAdaptive.hlsl', 'main', 'FrameRenderPSAdaptive.cso'),
             ('RgbToYuvPlanarDither.hlsl', 'main', 'rgbtoyuvplanardither.cso'))
 FOVEATION_VARIANT = ('CompressAxisAlignedPixelShader.hlsl', 'main', 'CompressAxisAlignedPixelShader.cso')
 
@@ -23,6 +24,8 @@ def main():
     p.add_argument('alvr',type=Path);p.add_argument('--fxc',type=Path)
     p.add_argument('--compile-out',type=Path);p.add_argument('--write',action='store_true')
     a=p.parse_args(); actual=hashes(a.alvr)
+    if (a.alvr/SHADER/'FrameRenderPSAdaptive.hlsl').read_bytes() != (REPO/'tools/downsample/frame_downsample.hlsl').read_bytes():
+        raise SystemExit('Embedded Adaptive source differs from canonical HLSL')
     if a.write:
         if not a.fxc or not a.fxc.is_file(): p.error('--write requires the actual fxc executable')
         MANIFEST.write_text(json.dumps({'schema':1,'sdk':'10.0.26100.0','fxc_sha256':sha(a.fxc),

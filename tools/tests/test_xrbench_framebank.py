@@ -424,8 +424,8 @@ class FrameBankTests(unittest.TestCase):
         root = Path(fb.__file__).resolve().parents[2]
         snapshot = root / 'tools/xrbench/historical_locks/sources.lock.b4a61b3ae0bdff818de18c8f97a1a2a1ba80ace7bf636de48093d22ad5aba23b.json'
         historical_hash, historical_lock = fb._load_lock(snapshot)
-        current_hash, _ = fb._load_lock(root / 'sources.lock.json')
-        self.assertNotEqual(historical_hash, current_hash)
+        live_current_hash, _ = fb._load_lock(root / 'sources.lock.json')
+        self.assertNotEqual(historical_hash, live_current_hash)
         with self.tmp() as t:
             folder = Path(t); tools = {}
             for name, filename in (('encode', 'pyrowave-encode.exe'), ('decode', 'pyrowave-decode.exe'),
@@ -495,12 +495,35 @@ class FrameBankTests(unittest.TestCase):
                               {'path': 'patches.nvenc_dimension_preflight.sha256', 'old': None,
                                'new': '10087a15c4a936028ccf5bf4668d482e84adbb03eced7631ad63e5ac4ae1438f', 'role': 'encoder_capability_preflight_inactive_only'}]}
             descriptor_path = folder / 'compatibility.json'; descriptor_path.write_text(json.dumps(descriptor))
+            # The reviewed historical exception is finite. New presentation overlays
+            # must not silently widen it. Exercise acceptance against the exact lock
+            # described by this fixture, and rejection against newer live locks.
+            reviewed_current = json.loads(json.dumps(historical_lock))
+            for row in descriptor['allowed_current_lock_changes']:
+                parts = row['path'].split('.')
+                node = reviewed_current
+                for part in parts[:-1]:
+                    node = node.setdefault(part, {})
+                self.assertEqual(node.get(parts[-1]), row['old'])
+                node[parts[-1]] = row['new']
+            reviewed_path = folder / 'reviewed-current-lock.json'
+            reviewed_path.write_text(json.dumps(reviewed_current))
+            current_hash, current_lock = fb._load_lock(reviewed_path)
+            original_load_lock = fb._load_lock
+            def fixture_load_lock(path):
+                return (current_hash, current_lock) if Path(path) == root / 'sources.lock.json' else original_load_lock(path)
             with self.assertRaisesRegex(ValueError, 'not the reviewed tracked proof'):
                 fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)
-            def historical():
+            def historical(use_reviewed_fixture=True):
                 with mock.patch.object(fb, '_HISTORICAL_HVS_DESCRIPTOR_RELATIVE', descriptor_path), \
-                     mock.patch.object(fb, '_HISTORICAL_HVS_DESCRIPTOR_SHA256', fb._lock_sha256(descriptor_path)):
+                     mock.patch.object(fb, '_HISTORICAL_HVS_DESCRIPTOR_SHA256', fb._lock_sha256(descriptor_path)), \
+                     mock.patch.object(fb, '_load_lock', side_effect=fixture_load_lock if use_reviewed_fixture else original_load_lock):
                     return fb.verify_historical_hvs_scorer(tools, meta_path, descriptor_path)
+            if fb._lock_change_rows(historical_lock, original_load_lock(root / 'sources.lock.json')[1]) != \
+                    sorted(({'path': row['path'], 'old': row['old'], 'new': row['new']}
+                            for row in descriptor['allowed_current_lock_changes']), key=lambda row: row['path']):
+                with self.assertRaisesRegex(ValueError, 'lock changes exceed'):
+                    historical(use_reviewed_fixture=False)
             with self.assertRaisesRegex(ValueError, 'source provenance'):
                 fb.verify_tools_build(tools, meta_path)
             record = historical()

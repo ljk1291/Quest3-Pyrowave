@@ -1106,3 +1106,30 @@ LOW is an A/B candidate: upstream reduced eye-copy waits but lengthened decode,
 so our completion-bound Godlike workload may regress. Runtime acceptance,
 standalone 11.11-ms completion and sustained live 90 fresh/s remain separate,
 unverified T3 gates. No default or active-queue promotion.
+
+### 2026-10-06 — T2 presentation filters, source/software checkpoint
+
+Owner-requested T2 work on `codex/t2-presentation-filters`, base `6ee1ba5`: additive
+compositor token parser plus all-codec Bilinear/Adaptive/Area session selector,
+independent exact render/stream dashboard controls, native requested/effective and
+actual submitted-geometry markers. Upstream adaptations are pinned to
+`2de8ad13973ed9c3a8e72f4c85a79e1e7e5d085a`; default shaders, settings and source
+revisions remain unchanged. See [configuration and exact inventory](T2-PRESENTATION-FILTERS.md)
+and [sanitized software evidence](../results/T2-PRESENTATION-FILTERS-2026-10-06.json).
+
+Clean full-stack apply/reverse and all 16 reconstructed file comparisons passed;
+all eight prior shader hashes are unchanged. Pinned FXC regenerated the variants;
+Adaptive/Area/dither/foveation WARP checks passed. Local Python: 118 unittest cases
+(5 skipped), 50 focused frame-bank/pin/metadata tests, 861 broader tools tests
+(15 skipped, 16 subtests). Four stale upstream README/link failures reproduce on
+`6ee1ba5` and remain recorded. The historical HVS test now uses its recorded lock
+fixture and checks newer-lock rejection; production proof/scorer code stays fixed.
+The T2 lock is intentionally not qualified for historical scoring.
+
+Local Rust execution and full native integration are pending Actions. Dispatch
+`ci.yml` with `cpu_only=false` after this work is available remotely; require tests,
+client, streamer and matching-pair. No push/PR/dispatch occurred. Changes remain
+uncommitted because the sandbox denies the linked worktree's external Git index
+lock. No hardware, GPU benchmark, install, arm or system/headset/VR setting action
+occurred. Runtime acceptance, standalone decode budget and sustained live 90 Hz
+are separately unverified. Owner-supervised in-headset sign-off remains required.

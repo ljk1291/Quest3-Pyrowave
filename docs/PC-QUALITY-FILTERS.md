@@ -73,3 +73,14 @@ dither may add a visible pattern or consume bits. Reject a candidate if those tr
 lose the recorded objective, even if a timing proxy improves. Owner headset judgement
 and endurance remain required before promotion. No speedup estimate or stable 90 Hz
 claim is made here.
+
+## T2 session selector, 2026-10-06
+
+The additive presentation overlay makes WO-5 Area selectable through
+`video.pyrowave.render_downsample_filter`, alongside Bilinear (unchanged default)
+and upstream-derived Adaptive. Explicit Area/Adaptive apply to every codec and do
+not depend on Steam process environment inheritance. Dither retains its old gate;
+legacy environment Area remains available under Bilinear with its original gate.
+See [T2 settings, restart/log checks, geometry, provenance and risks](T2-PRESENTATION-FILTERS.md).
+Software WARP and CPU checks are pixel/source evidence, not live timing or headset
+quality acceptance. No existing installation or hardware setting was touched.

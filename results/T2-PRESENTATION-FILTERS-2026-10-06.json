@@ -1,0 +1,85 @@
+{
+  "schema": 1,
+  "kind": "source_and_software_presentation_filter_validation",
+  "date": "2026-10-06",
+  "fork_base": "6ee1ba5",
+  "branch": "codex/t2-presentation-filters",
+  "upstream_adaptation_commit": "2de8ad13973ed9c3a8e72f4c85a79e1e7e5d085a",
+  "alvr_base": "7eda092dbf0002281410a4222683ec228700cffb",
+  "runtime_defaults": {
+    "layer_filter": "unchanged numeric 0/unset",
+    "render_downsample_filter": "Bilinear",
+    "legacy_shader_manifest_entries_unchanged": 8,
+    "legacy_frame_cbuffer_bytes": 16,
+    "quality_frame_cbuffer_bytes": 48,
+    "dependency_revisions_changed": false,
+    "new_overlay_pin": "presentation_filters"
+  },
+  "checks": {
+    "clean_complete_predecessor_stack_apply": "pass",
+    "new_overlay_clean_apply_and_reverse": "pass",
+    "new_overlay_reconstructed_files_compared_byte_for_byte": 16,
+    "prior_shader_sources_and_embedded_binaries_compared": 8,
+    "fxc_sdk": "10.0.26100.0",
+    "fxc_sha256": "31fa10504b1551337de4d06ec2194143885a76a8b5a81177999e2faa34729183",
+    "experimental_shaders_rebuilt_with_embedded_hash_match": "pass",
+    "adaptive_source_sha256": "9785dd34759c3321eb250051df445c1e10af53cc3e5364a334ec16cefe900045",
+    "adaptive_dxbc_sha256": "f11dbc314e092a520665ca6399b9a08365c282d2741a552605f575dbaf950c05",
+    "software_warp": {
+      "status": "pass",
+      "compiler": "MSVC /std:c++17 /O2 /W4 /WX",
+      "device_type": "D3D_DRIVER_TYPE_WARP",
+      "adaptive_direct_reference_cases": 180,
+      "checks": ["identity", "DC", "fractional and anisotropic scale", "3x cap", "both eyes", "flipped eye bounds", "seam clamp", "gamma", "transfer and clamp bits", "existing Area", "existing dither", "existing foveation"],
+      "random_pattern_gamma_absolute_tolerance": 0.003,
+      "performance_measurement": false,
+      "shader_compiler_warnings": "existing Area/transfer pow and X4000 warnings; no new Adaptive warnings"
+    },
+    "python_tests": {
+      "tests_unittest_discovery": {"run": 118, "passed": 113, "skipped": 5},
+      "focused_framebank_pins_metadata_pytest": {"passed": 50},
+      "tools_pytest_excluding_four_confirmed_baseline_doc_failures": {"passed": 861, "skipped": 15, "subtests_passed": 16},
+      "baseline_doc_failure_confirmation": {
+        "reference": "6ee1ba5 complete git archive",
+        "failed": 4,
+        "tests": [
+          "tools/tests/test_markdown_links.py::test_relative_markdown_links_resolve",
+          "tools/tests/test_readme_toggles.py::test_experiment_controls_match_the_dashboard",
+          "tools/tests/test_readme_toggles.py::test_advanced_controls_match_the_dashboard",
+          "tools/tests/test_readme_toggles.py::test_the_recommended_profile_is_named_as_in_the_dashboard"
+        ],
+        "classification": "pre-existing stale upstream README/link expectations"
+      },
+      "initial_broad_run": "5 failures: four confirmed baseline documentation failures and the historical-lock fixture assumption corrected in this change",
+      "initial_environment_collection_attempt": "missing numpy/cv2 in validation environment; resolved for subsequent execution using the existing benchmark environment and validation pytest packages"
+    },
+    "rust_tests": {
+      "local_execution": "not run: rustc unavailable",
+      "pure_layer_policy_tests_added_or_retained": 6,
+      "ci_tests": ["layer token policy", "Bilinear fresh/legacy migration and saved selection for every codec", "OpenvrConfig setting propagation for every codec"],
+      "actions_execution": "pending"
+    },
+    "diff_whitespace": "pass",
+    "historical_scorer_production_exception": "unchanged; new current lock remains deliberately rejected"
+  },
+  "delivery": {
+    "commit": null,
+    "state": "uncommitted: sandbox refused linked-worktree Git index.lock outside writable root",
+    "push": false,
+    "pull_request": false,
+    "ci_dispatched": false,
+    "required_workflow": ".github/workflows/ci.yml",
+    "required_input": "cpu_only=false",
+    "required_jobs": ["tests", "client", "streamer", "matching-pair"]
+  },
+  "hardware": {
+    "actions_taken": false,
+    "settings_changed": false,
+    "installations_changed": false,
+    "arm_file_used": false,
+    "runtime_rate_accepted": null,
+    "standalone_decode_budget_met": null,
+    "sustained_live_90hz": null,
+    "headset_quality_accepted": null
+  }
+}

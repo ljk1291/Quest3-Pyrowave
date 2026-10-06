@@ -1,5 +1,18 @@
 # Patches
 
+## `presentation-filters.patch`: T2 compositor tokens and PC session downsample
+
+Additive overlay after `foveated-staging-correctness.patch`, on the complete locked
+ALVR `7eda092dbf0002281410a4222683ec228700cffb` stack. Its SHA-256 is pinned in
+`sources.lock.json` and checked before application. Numeric layer modes remain;
+tokens and Adaptive/reference tests are adapted from JMS1717/Quest3-Pyrowave
+`2de8ad13973ed9c3a8e72f4c85a79e1e7e5d085a`. Bilinear uses unchanged legacy DXBC
+and cbuffer; Adaptive has separately FXC-compiled embedded DXBC, recorded in the
+quality shader manifest. Area is the unchanged WO-5 shader made selectable by the
+same session selector for all codecs. Exact geometry controls are independently
+exposed without changing profile assignments. See [T2](../docs/T2-PRESENTATION-FILTERS.md)
+for the exact inventory, software checks, configuration and unverified gates.
+
 Local modifications to third-party clones, kept as patches so the clones themselves (2–4 GB each)
 stay out of this history. Each one applies to a public upstream commit, so patch + base fully
 reconstructs the tree.

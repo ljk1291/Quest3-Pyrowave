@@ -15,6 +15,26 @@ static void check(HRESULT hr) { if (FAILED(hr)) throw std::runtime_error("D3D ca
 static void require(bool value, const char *why) { if (!value) throw std::runtime_error(why); }
 static float u32bits(unsigned value) { float out; std::memcpy(&out,&value,sizeof(out)); return out; }
 
+// Independent direct convolution; the shader uses paired bilinear fetches.
+static double cubic(double x) {
+    x=std::abs(x);
+    if(x<1) return (1.5*x-2.5)*x*x+1;
+    if(x<2) return ((-.5*x+2.5)*x-4)*x+2;
+    return 0;
+}
+static double adaptiveReference(const std::vector<float>& image,unsigned sw,unsigned sh,
+        double cx,double cy,double sx,double sy,int loX,int hiX,int loY,int hiY) {
+    require(image.size()==size_t(sw)*sh,"reference geometry");
+    sx=std::clamp(sx,1.,3.);sy=std::clamp(sy,1.,3.);
+    double sum=0,weight=0;
+    for(int y=int(std::floor(cy-.5-2*sy));y<=int(std::floor(cy-.5+2*sy));y++)
+        for(int x=int(std::floor(cx-.5-2*sx));x<=int(std::floor(cx-.5+2*sx));x++) {
+            const double w=cubic((x+.5-cx)/sx)*cubic((y+.5-cy)/sy);
+            sum+=w*image[size_t(std::clamp(y,loY,hiY))*sw+std::clamp(x,loX,hiX)];weight+=w;
+        }
+    return (std::max)(0.,sum/weight);
+}
+
 struct Warp {
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
@@ -108,14 +128,57 @@ struct Warp {
 
 int main(int argc,char **argv) {
     try {
-        require(argc==4,"expected area, dither and foveation CSO paths");Warp w;
+        require(argc==5,"expected area, dither, foveation and adaptive CSO paths");Warp w;
         auto area=w.shader(argv[1]),dither=w.shader(argv[2]),foveated=w.shader(argv[3]);
+        auto adaptive=w.shader(argv[4]);
         const std::vector<float> params={1,0,0,0,0,0,1,1,0,0,1,1},uv={0,0,1,1};
         auto dc=w.draw(area.Get(),std::vector<float>(64,.37f),8,8,4,4,params,uv)[0];
         for(float x:dc) require(std::abs(x-.37f)<1e-6f,"area DC changed");
         std::vector<float> checker(64);for(unsigned y=0;y<8;y++)for(unsigned x=0;x<8;x++)checker[y*8+x]=float((x+y)%2);
         auto average=w.draw(area.Get(),checker,8,8,4,4,params,uv)[0];
         for(float x:average) require(std::abs(x-.5f)<1e-6f,"checkerboard area average");
+
+        for(auto* ps:{area.Get(),adaptive.Get()}) {
+            auto identity=w.draw(ps,checker,8,8,8,8,params,uv)[0];
+            for(unsigned i=0;i<64;i++)require(std::abs(identity[i]-checker[i])<1e-6f,"filter identity");
+            auto constant=w.draw(ps,std::vector<float>(64,.37f),8,8,5,3,params,uv)[0];
+            for(float x:constant)require(std::abs(x-.37f)<1e-5f,"filter DC");
+        }
+        // Fractional/anisotropic/minifying and magnifying footprints, including >3x cap.
+        // Each case compares all pixels of both eyes, flipped bounds, non-flat data,
+        // transfer/gamma/clamping and the clamped Catmull-Rom negative lobes.
+        std::vector<float> pattern(20*12);
+        for(unsigned y=0;y<12;y++)for(unsigned x=0;x<20;x++)
+            pattern[y*20+x]=.2f+.6f*float(((x*17+y*23)%31))/30.f;
+        for(unsigned dw:{3u,7u,16u})for(unsigned dh:{3u,9u,16u})for(unsigned eye:{0u,1u}) {
+            for(bool flip:{false,true})for(unsigned control:{0u,2u,4u,32u,64u}) {
+                const float u0=eye? .5f:0.f,u1=eye?1.f:.5f;
+                const std::vector<float> bounds={flip?u1:u0,1.f/12,flip?u0:u1,11.f/12};
+                auto p=params;p[0]=.8f;
+                p[4]=u0;p[5]=1.f/12;p[6]=u1;p[7]=11.f/12;
+                p[8]=u0;p[9]=1.f/12;p[10]=u1;p[11]=11.f/12;
+                auto out=w.draw(adaptive.Get(),pattern,20,12,dw,dh,p,bounds,false,eye|control)[0];
+                for(unsigned y=0;y<dh;y++)for(unsigned x=0;x<dw;x++) {
+                    const double t=(x+.5)/dw;
+                    double expected=adaptiveReference(pattern,20,12,
+                        (flip?u1-t*(u1-u0):u0+t*(u1-u0))*20,1+(y+.5)*10/dh,
+                        10./dw,10./dh,eye?10:0,eye?19:9,1,10);
+                    if(control==32)expected=std::clamp(expected,0.,1.);
+                    expected=std::pow(expected,.8);
+                    if(control==2)expected=expected<=.0031308?expected*12.92:1.055*std::pow(expected,1./2.4)-.055;
+                    if(control==4)expected=expected<=.04045?expected/12.92:std::pow((expected+.055)/1.055,2.4);
+                    if(control==64)expected=std::clamp(expected,0.,1.);
+                    // D3D linear sampling has finite subtexel precision; sharp random
+                    // inputs amplify that rounding after gamma. Bound it to 0.3%.
+                    if (!std::isfinite(out[y*dw+x]) || std::abs(out[y*dw+x]-expected)>=.003) {
+                        std::cerr<<"Adaptive mismatch dw="<<dw<<" dh="<<dh<<" eye="<<eye
+                            <<" flip="<<flip<<" control="<<control<<" x="<<x<<" y="<<y
+                            <<" got="<<out[y*dw+x]<<" expected="<<expected<<'\n';
+                        throw std::runtime_error("Adaptive differs from direct 2D reference/transfer");
+                    }
+                }
+            }
+        }
 
         // Execute the exact embedded WO-8 shader through WARP. targetResolution
         // and optimizedResolution are uint2 fields, hence their raw bit values.
@@ -201,6 +264,10 @@ int main(int argc,char **argv) {
         seamParams[8]=.5f;
         auto right=w.draw(area.Get(),stereo,8,8,2,4,seamParams,{.5f,0,1,1},false,1)[0];
         for(float x:right)require(std::abs(x-1)<1e-6f,"right eye selection/boundary");
+        auto adaptiveLeft=w.draw(adaptive.Get(),stereo,8,8,3,5,seamParams,{0,0,.5f,1})[0];
+        auto adaptiveRight=w.draw(adaptive.Get(),stereo,8,8,3,5,seamParams,{1,1,.5f,0},false,1)[0];
+        for(float x:adaptiveLeft)require(std::abs(x)<1e-6f,"Adaptive left eye seam");
+        for(float x:adaptiveRight)require(std::abs(x-1)<1e-6f,"Adaptive right/flipped eye seam");
         // Identity planar coefficients isolate quantization from color-matrix math.
         const std::vector<float> planar={0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0};
         for(float code:{0.f,16.f,24.f,48.f,128.f,235.f,255.f}) {
@@ -212,6 +279,6 @@ int main(int argc,char **argv) {
             float sum=0;for(float x:plane){require(x==48 || x==49,"dither range");sum+=x;}
             require(sum/16==48.25f,"dither mean bias");
         }
-        std::cout<<"WARP area/dither correctness passed; no hardware timing claim\n";return 0;
+        std::cout<<"WARP adaptive/area/dither/foveation correctness passed; no hardware timing claim\n";return 0;
     } catch(const std::exception &e){std::cerr<<e.what()<<'\n';return 1;}
 }
