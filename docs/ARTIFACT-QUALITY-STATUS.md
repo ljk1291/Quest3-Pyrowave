@@ -1157,3 +1157,24 @@ base and is carried forward from the main checkout with authorization text intac
 No ADB, install, device/VR/GPU work, settings changes, arm-file operation, push or
 PR occurred. Runtime rate acceptance, standalone decode budget and sustained
 live VR remain unverified; no profile or default is promoted.
+
+### 2026-10-06 — T1–T3 combined candidate staged (planner integration)
+
+`codex/t123-candidate` at `7705a40` combines T3 (opt-in decode queue priority),
+T2 (compositor sharpening tokens; session-selected Bilinear/Adaptive/Area PC
+downsample) and T1 (opt-in foveated reconstruction in the direct-eye draw) on
+base `6ee1ba5`. CI integration found and fixed three defects the sandboxed
+implementer could not compile: T1's direct-eye signature/binding/test-lifetime
+errors, T2's Windows LF byte comparison and T2's private-module test import.
+[Manual run 37444400918](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37444400918)
+passed tests, client, streamer and matching-pair. The pair is downloaded,
+verified with the stable certificate and **not installed**; every new marker is
+present in the shipped binaries. [Receipt](../results/t123-candidate-pair-2026-10-06.json).
+
+Next owner-supervised session (needs fresh readiness and installation
+authorization): chart first at <=500 Mbps — `direct_eye_foveation` 0/1/0 on a
+fixed WO-8 profile (stop on black/flashing); compositor `layer_filter`
+off / `supersample_hq` / `sharpen_hq+supersample_hq`; `decode_priority`
+default/low/default on the full-FOV baseline; then Metro fence candidates chosen
+from the T4 500 Mbps re-score and a back-to-back VD H.264+ 500 comparison.
+No default changes; all live fields remain unset until measured.

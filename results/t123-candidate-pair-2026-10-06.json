@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "kind": "staged_matching_pair_receipt",
+  "source_commit": "7705a406eb7945cc4fc2acd96cf2b6cd2a6a508c",
+  "branch": "codex/t123-candidate",
+  "base_candidate": "6ee1ba549fee3f2508efb6a47d6f65247b406436",
+  "manual_run_id": 37444400918,
+  "ci_jobs": {"tests": "success", "client": "success", "streamer": "success", "matching-pair": "success"},
+  "matching_pair_verified": true,
+  "installed": false,
+  "runtime_activation_verified": false,
+  "quest_image_correctness_verified": false,
+  "stable_certificate_sha256": "4a3fe0a8d47ee67b01710df6ffdc870e91ebc5b8e7feec7c87534944ca2a44aa",
+  "apk_sha256": "00b8004ad6c38e5249d51e5508adae2439f6732644a84ce48df249a258a7499b",
+  "server_zip_sha256": "caf83a52c9f5629c2f52075e54259c4fce08c47cd19a1eb9d83c03dff808b71f",
+  "sources_lock_sha256": "c12f97ddabac3de61004cfd4905f7d09b03fbd8aa9c6247fd1896dd4adde8649",
+  "overlays_added_over_base": {
+    "presentation_filters": "71b548c97c66c7210a34b6c6e619e8f671a1f6baa21818aef57374b57d375f75",
+    "direct_eye_foveation": "3c0e470ed3dee013614a7ba8b307c9d3199dd245babb16403ce2ec5e6fc4f259"
+  },
+  "native_source_change_outside_overlays": "tools/pyroclient decode_priority (T3)",
+  "features": {
+    "T1_direct_eye_foveation": {"property": "debug.q3pw.direct_eye_foveation=1", "requires": ["debug.q3pw.direct_eye_copy=1", "synchronous import (no async_eye_copy)"], "markers_present": ["[Q3PW_DIRECT_FFE]", "debug.q3pw.direct_eye_foveation"], "binary": "lib/arm64-v8a/libalvr_client_openxr.so"},
+    "T2_compositor_filter_tokens": {"property": "debug.q3pw.layer_filter=sharpen_hq+supersample_hq", "markers_present": ["[Q3PW_LAYER_FILTER]", "active_flags=0x"], "binary": "lib/arm64-v8a/libalvr_client_openxr.so", "note": "token literals are not stored as text (compiled comparisons); the T2-only log format fragments are present"},
+    "T2_pc_downsample": {"setting": "session_settings.video.pyrowave.render_downsample_filter = Bilinear|Adaptive|Area", "markers_present": ["[Q3PW_DOWNSAMPLE]", "[FrameRender] game render", "render_downsample_filter"], "binary": "bin/win64/driver_alvr_server.dll"},
+    "T3_decode_priority": {"property": "debug.q3pw.decode_priority=low|medium|high", "markers_present": ["[Q3PW_DECODE_PRIORITY]"], "binary": "libpyroclient.so"}
+  },
+  "integration_fixes_after_codex": [
+    "T1: stray ffe_params parameter, missing gl binding in draw(), closure-lifetime test (CI 37438592098)",
+    "T2: canonical downsample HLSL pinned to LF for the Windows byte comparison (CI 37438592098)",
+    "T2: server_core test imported private alvr_session::settings module (CI 37439751497)"
+  ],
+  "limitations": [
+    "Not installed. Installation needs separate owner authorization; 0f07f05, 80a1635 and d1c3 remain the rollback set.",
+    "All new behaviour is default-off; marker presence in binaries does not prove runtime activation.",
+    "Software GLES gates do not establish Android AHB import, Qualcomm or OpenXR correctness; the Quest black/flashing fix is unverified.",
+    "No runtime acceptance, standalone decode budget, sustained live 90 Hz, optical or in-headset quality result follows from this build."
+  ]
+}
