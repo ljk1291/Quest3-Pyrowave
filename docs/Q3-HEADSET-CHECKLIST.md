@@ -22,6 +22,29 @@ and the a/a2 visual comparison. The corrected APK is now installed and verified;
 preserve 80a1635 and d1c3 artifacts for rollback. No additional installation is
 authorized by this checklist.
 
+### Uninstalled presentation candidate — separate owner approval required
+
+The next source candidate is
+`6ee1ba549fee3f2508efb6a47d6f65247b406436`, from
+[manual run 37398774401](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37398774401).
+All CPU, Android, Windows-native and matching-pair jobs passed. Its APK SHA-256 is
+`72b5a9442c08953c16bec8f8d1f5632682a701c4cf9276ddd67b139ed4facc52`;
+the server ZIP is
+`52e89d1f122f23ee50bc938e716ce4f5d8fe09f2d501e47dc983ed2c89352b89`.
+The stable certificate is the same retained fingerprint above.
+[The independent receipt](../results/foveated-staging-pair-2026-10-06.json) binds
+all metadata, native libraries/shaders/checksums, the RDO getter and native
+presentation/readback/preflight markers. [The review](../results/foveated-staging-source-review-2026-10-06.md)
+separates software correctness from the still-unverified Quest failure.
+
+This single candidate includes the H264Fit/NVENC preflight from `552ffbb` plus the
+geometry/presentation investigation; no interim `552ffbb` installation is needed.
+It is staged and **not installed**. Installed 0f07f05, 80a1635 and d1c3 remain
+available. All three new presentation properties default off. Begin only after
+fresh owner readiness and authorization to replace the installed pair, and use
+the chart gate below before Metro or the decode ladder. This preparation record
+does not promote an optimization or qualify nominal 1000 Mbps or sustained 90 Hz.
+
 ### Retained 80a1635 reference and rollback pair
 
 The earlier matching pair is GitHub Actions run `37217852222` from source
@@ -72,6 +95,96 @@ Metro cell, each f off/on/off leg, the blinded g sequence, and h movement test.
 Do not infer an image, tracking, controller, audio or motion judgement from
 telemetry or a previous session. Winning-cell selection requires the owner's
 clarity/periphery/motion judgement as well as the recorded live measurements.
+
+### 2026-10-06 checkpoint: baseline measured; foveated correctness gate still fails
+
+The [latest chart/Metro and partial Q4 report](../results/evening-live-rdo-network-2026-10-06.md)
+supersedes the earlier incomplete comparison as the clean matched diagnostic.
+At Haar/full-FOV/500, the owner judged RDO24 worse in both the normalized chart
+and Metro fence view. Metro legacy/RDO24 measured 83.388/83.931 fresh
+submissions/s and 8.918/8.950 ms median GPU decode. Neither is a sustained90Hz
+pass. Keep a2's offline expectation as historical evidence, not an in-headset
+improvement claim. [Q4 stationary600/800/1000/1200 failed pacing](../results/network-stationary-afk-2026-10-06.md);
+there is no moving-head or nominal1000 qualification. The composite ACK test does
+not isolate a Wi-Fi ceiling.
+
+The requested cropped Medium9/7/RDO24/softness0.5/1000 candidate failed with
+black/flashing imagery and was stopped. The setup helper selected the server's
+named profile but left stale **raw client inverse-map fields**. In pinned0f07f05,
+`client_openxr/src/stream.rs:75` passes the raw configuration and
+`graphics/src/stream.rs:596` consumes raw centre/edge values; the server resolves
+the profile independently in `server_core/src/connection.rs:139`.
+**Before any foveated cell, set and read back every raw parameter on both axes:**
+
+| Named profile | Raw centre x/y | Raw edge x/y | Raw shift x/y |
+|---|---:|---:|---:|
+| Light | 0.8 | 1.5 | 0 |
+| Medium | 0.6 | 2.0 | 0 |
+| H264Fit | 0.5 | 2.0 | 0 |
+
+Require these session fields to match the actual native OpenVR centre/edge/shift
+values. Do not assume the named selection rewrites the raw client fields. At the
+2624×2752 crop, correct Medium maps to2112×2208 per eye; the failed raw0.2/0.178,
+edge3/4 configuration implied1248×1056. Three CPU parity/preflight tests reproduce
+the mismatch and verify matching named profiles. **Session23 activated the corrected
+helper and still failed with black/flashing on the chart.** The native log confirms
+4224×2208 RGBA output and the faster allocation, not a usable presented image.
+Stop the foveated ladder/Metro sequence until the presentation gate passes.
+
+`graphics/src/stream.rs:99` requires foveation off for direct-eye eligibility.
+Record actual renderer/copy-path evidence for d1–d4 and c, not just the requested
+`debug.q3pw.direct_eye_copy` value. Foveated cells currently use the staging path;
+do not label them as measured direct-eye results. The generic Godlike geometry
+evaluator does not model crop plus foveation: retain its limitation and require
+an independent checked crop/render/decoded-geometry receipt before qualification.
+
+Next owner session begins with a short **chart correctness check** at a conservative
+diagnostic rate (500 Mbps or lower), with fixed raw mapping and effective renderer/decoded/staging
+geometry. [PR#58](https://github.com/ljk1291/Quest3-Pyrowave/pull/58) is a source
+candidate: shared named geometry and separate default-off PyroWave image
+preservation, staging initialization and state-isolation experiments. The real
+software GLES regression confirms WGPU's first-use clear after a valid raw copy;
+that startup mechanism alone does not explain persistent Quest flashing. The
+corrected regression passes at `6ee1ba5` in
+[manual run37398774401](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37398774401),
+across both eyes, three profiles and two output formats. Full packaging and
+independent matching-build verification are complete; the candidate is uninstalled. Require
+matching-build verification and separate installation authorization before use;
+then establish a usable chart with preservation/initialization/isolation requested
+and their native effective markers verified. Use the candidate's matching control
+tools; snapshot all three properties, including absent/empty values, before any
+change and retain exact restoration readbacks. Vary one property at a time afterward:
+`debug.q3pw.staging_preserve` with `[Q3PW_STAGING_PRESERVE]`, then
+`debug.q3pw.staging_init`, holding the others fixed. Require
+`[Q3PW_STAGING_INIT] requested/effective/initialized`, observed changing frames,
+and decoded/staging geometry. Test `debug.q3pw.staging_isolation` separately,
+holding initialization and preservation fixed, with `[Q3PW_STAGING]` and
+`[Q3PW_PRESENTATION_GEOMETRY]` markers. A requested property
+is not activation proof. Ask the owner about each chart; stop on black/flashing.
+Create a fresh stream renderer and decoder for each leg: the properties are read
+on decoder initialization, and disabling initialization cannot undo a texture
+that was already initialized. An initialization-off leg must show
+`initialized=false` on its new renderer. Do not count a property readback alone
+or a same-configuration decoder notification as a toggle.
+Software rendering does not establish Android import/Qualcomm/OpenXR correctness.
+Only after an image pass resume Metro or the decode ladder. No rate/default promotion.
+
+Sessions18–23 are restored with zero final errors and owned VR/test jobs stopped;
+VD registration and OpenXR are preserved. Installed0f07f05 is unchanged.
+H264Fit's [PR#57](https://github.com/ljk1291/Quest3-Pyrowave/pull/57) pair is now
+fully built and [verified](../results/h264fit-preflight-pair-2026-10-06.json),
+uninstalled; it does not contain PR58's presentation candidate. Its opt-in NVENC
+capability marker must still be observed in the actual vrserver process before
+claiming activation. Keep width-only c2 conditional on clean c decoding and its
+separate axis-geometry checks. All cells and owner judgements below remain in place.
+
+Tonight's separate stationary network lease is stopped and restored, with zero
+errors/owned jobs and matching VD/driver/OpenXR snapshots. Charging and the owner's
+session-only 5% floor were used; thermal and other stops remained. Battery22–23%.
+[The completed 1000/1200 legs](../results/network-stationary-afk-2026-10-06.md) both
+failed pacing. Nominal1000 is still diagnostic; do not treat it as qualified Rlive.
+Moving Rlive, gameplay and image judgements wait for the owner. Do not repeat the
+completed stationary legs without a new hypothesis.
 
 ### Historical preparation finding: native RDO proof is blocked on 80a1635
 

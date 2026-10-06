@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "source_commit": "6ee1ba549fee3f2508efb6a47d6f65247b406436",
+  "manual_run_id": 37398774401,
+  "matching_pair_verified": true,
+  "installed": false,
+  "runtime_activation_verified": false,
+  "quest_image_correctness_verified": false,
+  "stable_certificate_sha256": "4a3fe0a8d47ee67b01710df6ffdc870e91ebc5b8e7feec7c87534944ca2a44aa",
+  "apk_sha256": "72b5a9442c08953c16bec8f8d1f5632682a701c4cf9276ddd67b139ed4facc52",
+  "server_zip_sha256": "52e89d1f122f23ee50bc938e716ce4f5d8fe09f2d501e47dc983ed2c89352b89",
+  "sources_lock_sha256": "ddbacec8def9c3326e300e8620a2c4832058191a8b257aff7bc4767e119c9adf",
+  "presentation_overlay_sha256": "5669391d973c8b399f053d93335bd796ab2107a6476b6d8674b18187bb9c75ee",
+  "getter_export_present": [
+    "bin/win64/libpyrowave-shared-0.dll"
+  ],
+  "rdo_readback_marker_present": [
+    "bin/win64/driver_alvr_server.dll"
+  ],
+  "nvenc_preflight_marker_present": [
+    "bin/win64/driver_alvr_server.dll"
+  ],
+  "android_presentation_markers_present": [
+    "[Q3PW_STAGING]",
+    "[Q3PW_STAGING_INIT]",
+    "[Q3PW_STAGING_PRESERVE]",
+    "[Q3PW_PRESENTATION_GEOMETRY]",
+    "[Q3PW_PRESENTATION]",
+    "debug.q3pw.staging_isolation",
+    "debug.q3pw.staging_init",
+    "debug.q3pw.staging_preserve"
+  ],
+  "staging_fragment_explicit_precision_embedded": true,
+  "native_sha256": {
+    "lib/arm64-v8a/libalvr_client_openxr.so": "a4b2f725655914b74faf7e9f706b401416b72240d1367681c85975cc1c8324e2",
+    "lib/arm64-v8a/libc++_shared.so": "f9992c4ba6b7c5a716e3a202fceb1ce029d6a2b0605838ac6b3219f489dd7970",
+    "lib/arm64-v8a/libopenxr_loader.so": "b5f805512706a3e01ae523d7216f676854d3f1e1a26ff55268fcb451e6ff0a80",
+    "lib/arm64-v8a/libpyroclient.so": "bd33b0fa2ac6eb600c16806f645b4704afa4144a501fed08835efa39bc6c246d",
+    "lib/arm64-v8a/libpyrowave-shared.so": "8e9189f026d2555f7ba0b27ac6398def69098f0d82f1104c5d91ac425b31bac9",
+    "bin/win64/driver_alvr_server.dll": "56939e84dd1ad9b438fd7ef3cdf4ae6301181f3c0d60789a501298443da66a3f",
+    "bin/win64/libpyrowave-shared-0.dll": "e3421752e0814cc59e310bc7a4e79b4505cbd282618e92062d98da1d72affae6"
+  },
+  "experimental_staging_isolation_default": false,
+  "rollback_pairs_retained": [
+    "0f07f05",
+    "80a1635",
+    "d1c3"
+  ],
+  "experimental_staging_initialization_default": false,
+  "experimental_staging_preservation_default": false,
+  "limitations": [
+    "Native files parsed as bytes only; no DLL load, ADB, installation or runtime launch.",
+    "Software GLES pixels do not prove Android AHB import, Qualcomm driver or OpenXR presentation.",
+    "Installed 0f07f05 remains unchanged; session23 black/flashing has not been retested on Quest."
+  ]
+}

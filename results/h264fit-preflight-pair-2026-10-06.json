@@ -1,0 +1,34 @@
+{
+  "source_commit": "552ffbb3cc0d4618126704883fa0b19405e0e465",
+  "manual_run_id": 37384674287,
+  "matching_pair_verified": true,
+  "stable_certificate_sha256": "4a3fe0a8d47ee67b01710df6ffdc870e91ebc5b8e7feec7c87534944ca2a44aa",
+  "apk_sha256": "d38702e46e665468e2bc9757db48c6dc5b6b176e07ff68ff0d6fec5556f91408",
+  "server_zip_sha256": "6617ebb8cfce3abdeba214123e3e5a16e231c4843429f47caa11e97b01394c41",
+  "sources_lock_sha256": "1fdd3882c5bec0b11408a26733b4845caadb0edeee9d55cb81c1c55e55ebec39",
+  "getter_export_present": [
+    "bin/win64/libpyrowave-shared-0.dll"
+  ],
+  "preflight_marker_present": [
+    "bin/win64/driver_alvr_server.dll"
+  ],
+  "rdo_marker_present": [
+    "bin/win64/driver_alvr_server.dll"
+  ],
+  "native_sha256": {
+    "bin/win64/libpyrowave-shared-0.dll": "55f477ec53947b5f0e7a215731a97943ac6d915830bc618985d3db26cfad4739",
+    "bin/win64/driver_alvr_server.dll": "2563200d96ad62abdf291a655a0cace184ad45b5efb365491eb88902746c4cfa"
+  },
+  "installed": false,
+  "runtime_activation_verified": false,
+  "decoder_and_shader_change": false,
+  "rollback_pairs_retained": [
+    "0f07f05",
+    "80a1635",
+    "d1c3"
+  ],
+  "limitations": [
+    "DLLs parsed as bytes; not loaded or executed. Marker presence is not runtime activation.",
+    "The installed foveated PyroWave staging path remains an image-correctness failure."
+  ]
+}

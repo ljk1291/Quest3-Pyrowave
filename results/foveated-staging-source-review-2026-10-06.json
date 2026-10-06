@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-06",
+  "candidate_source_commit": "6ee1ba549fee3f2508efb6a47d6f65247b406436",
+  "candidate_pair_receipt": "foveated-staging-pair-2026-10-06.json",
+  "presentation_overlay_sha256": "5669391d973c8b399f053d93335bd796ab2107a6476b6d8674b18187bb9c75ee",
+  "manual_run_id": 37398774401,
+  "full_ci_success": true,
+  "software_client_log_sha256": "9fe4febfc1bae31f8772714e7aa3492c377f7b62886fcf9b1fe0d957fd09747e",
+  "native_streamer_log_sha256": "1c8b812d11fc7a7f0c15cee6c70a78dd7ef29e111020cdc0d87b59f8b33c0256",
+  "native_windows_fixed_profiles_and_custom_geometry_passed": true,
+  "dependency_sources": {
+    "alvr": {
+      "url": "https://github.com/alvr-org/ALVR",
+      "commit": "7eda092dbf0002281410a4222683ec228700cffb"
+    },
+    "pyrowave": {
+      "url": "https://github.com/Themaister/pyrowave",
+      "commit": "d2997ac172bdc00e29c58e3f2938acb7e94580bf"
+    },
+    "granite": {
+      "url": "https://github.com/Themaister/Granite",
+      "commit": "842d9d5686ba8c799a7d34a78a68f98d6aeb5a68"
+    },
+    "cargo_apk": {
+      "url": "https://github.com/zarik5/cargo-apk",
+      "commit": "0fd3126dad5aa1c5f0f26cdae3410f2e5af62c60"
+    }
+  },
+  "local_focused_cpu_tests_passed": 55,
+  "software_regression": {
+    "backend": "real Mesa GLES 3.2 / llvmpipe / CPU adapter",
+    "code": "production Rust staging draw, WGSL inverse map and projection",
+    "profiles": [
+      "Light",
+      "Medium",
+      "H264Fit"
+    ],
+    "output_formats": [
+      "RGBA8",
+      "SRGB8_ALPHA8"
+    ],
+    "initialization_states": [
+      true,
+      false
+    ],
+    "isolation_states": [
+      true,
+      false
+    ],
+    "changing_frames_per_configuration": 2,
+    "stereo_render_checks": 48,
+    "positive_stereo_checks": 36,
+    "first_frame_clear_reproduction_controls": 12,
+    "eyes_checked": 2,
+    "pixels_per_eye": 25600,
+    "byte_tolerance": 2,
+    "raw_copy_before_first_clear_verified": true,
+    "fixture_source_preserved": true,
+    "fixture_source_upload_checked": true,
+    "android_ahb_import_exercised": false,
+    "fine_pattern_or_orientation_quality_proven": false,
+    "performance_measurement": false
+  },
+  "review": [
+    {
+      "location": "alvr/session/src/settings.rs; server_core/src/connection.rs; client_openxr/src/stream.rs",
+      "change": "One fixed-profile geometry resolver; Custom fields preserved; blur-only avoids inverse squeeze.",
+      "evidence": "Native profile regressions and software inverse-map tests.",
+      "scope": "Foveation configuration correctness; codec bitstream algorithms unchanged."
+    },
+    {
+      "location": "alvr/graphics/resources/staging_fragment.glsl",
+      "change": "Explicit float/external-sampler precision.",
+      "evidence": "Strict Mesa GLES compiler and production pixel gate pass.",
+      "scope": "Portability fix; not proof of the Quest failure cause."
+    },
+    {
+      "location": "alvr/graphics/src/stream.rs",
+      "change": "Default-off once-per-renderer tracked initialization before raw GLES writes.",
+      "evidence": "Software control copies valid pixels, then first WGPU sampling clears them; opt-in first frame survives.",
+      "scope": "Confirmed software startup issue; cannot by itself explain persistent Quest flashing."
+    },
+    {
+      "location": "alvr/graphics/src/lib.rs; staging.rs",
+      "change": "Default-off EGL_IMAGE_PRESERVED_KHR request, fatal on unsupported preserved import.",
+      "evidence": "Native policy test keeps legacy null attributes when off; direct-eye image-cache source already requests preservation.",
+      "scope": "Quest import hypothesis; software GL fixture uses preservation for a defined source oracle."
+    },
+    {
+      "location": "alvr/graphics/src/staging.rs",
+      "change": "Default-off owned VAO, explicit draw state and framebuffer check.",
+      "evidence": "Software positive checks pass with deliberately hostile blend/cull/mask state.",
+      "scope": "No general WGPU cache-corruption claim; synchronous copy and decoder lease retained."
+    }
+  ],
+  "fixture_corrections": [
+    "Reset pixel unpack/readback row stride; source check before EGL import.",
+    "Fresh preserved GL source per frame; reacquire EGL context after WGPU releases it.",
+    "CI-only real GLES loader/probe; no fake extensions, errors or pixels; not shipped."
+  ],
+  "installed_revision": "0f07f05b4df88f8fa08ea034f794cda4be9eaf38",
+  "installed_pair_changed": false,
+  "new_pair_installed": false,
+  "quest_failure_fixed_claim": false,
+  "new_runtime_timing_collected": false,
+  "stable_90hz_claim": false,
+  "optical_fps": null,
+  "next_gate": "Fresh owner-authorized installation and finite chart at <=500 Mbps; native effective markers and exact restoration; vary one option at a time.",
+  "limitations": [
+    "Constant changing eye colours do not validate spatial detail, chroma, orientation, Android import, Qualcomm or OpenXR.",
+    "Session23 still failed after raw mapping correction; no new Quest image judgement exists.",
+    "1000/1200 stationary composite network legs failed pacing; no moving-head or nominal1000 qualification."
+  ]
+}

@@ -5,6 +5,130 @@ agent (Codex). Codex reads it at every checkpoint and appends to **Log**. The ow
 Claude may reorder **Queue** or add **Notes for Codex** between checkpoints. Keep
 entries short and link to evidence.
 
+## Overnight source and network checkpoint — 2026-10-06
+
+Session 23 corrected the Medium raw fields and **still produced black/flashing**
+on the owner's chart check. It was stopped and restored; sessions 18–23 have
+zero final restoration errors and no owned VR/test jobs. The native log confirms
+4224×2208 RGBA output, Compute CDF 9/7 and the faster AHardwareBuffer allocation.
+Correcting raw profile fields was necessary but did not fix presentation. The
+installed pair remains 0f07f05. No new installation or default promotion.
+
+[Draft PR #58](https://github.com/ljk1291/Quest3-Pyrowave/pull/58) shares fixed-profile
+geometry between the server and client, skips inverse squeezing for blur-only
+frames, and adds separate default-off PyroWave image-preservation, staging
+initialization and state-isolation experiments with native geometry/path markers.
+It is stacked on the H264Fit candidate. The
+production staging/inverse/projection software regression checks both eyes,
+RGBA8 and sRGB output, all three fixed profiles, and injected hostile GL state.
+CI now requires a real software GLES context: the pinned loader prefers desktop
+GL when EGL advertises both APIs. The CI-only versioned EGL wrapper and smoke
+probe confirmed OpenGL ES3.2/Mesa/llvmpipe, with real entry points, errors and
+pixels. Strict ES compilation also exposed a missing float-precision declaration
+in the inherited staging shader; the overlay declares it explicitly. Readback
+reacquires the EGL context after WGPU releases it. The production test then
+returned black at its first pixel. A control confirmed a correct raw copy followed
+by WGPU's first-use clear; an opt-in tracked initialization precedes the first raw
+copy. The preserved-import option matches the existing direct-eye image-cache
+source policy; legacy staging passes no preservation attribute. This is a source
+difference, not verified Quest causation. The latest software fixture resets CPU
+upload row stride after the one-texel WGPU initialization, verifies source pixels
+before EGL import and uses a fresh, explicitly preserved GL source each frame.
+The previous mixed-eye fixture failure is not evidence of a live encoder fault.
+55 focused CPU checks and the production software GLES pixel gate pass at
+source `6ee1ba549fee3f2508efb6a47d6f65247b406436` in
+[manual run 37398774401](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37398774401).
+All CPU, Android, Windows-native and matching-pair jobs passed. The pair is
+**staged and independently verified, not installed**: metadata, certificate,
+native payloads/shaders/checksums, exported getter and embedded experiment markers
+are bound by [the receipt](../results/foveated-staging-pair-2026-10-06.json).
+[The source/software review](../results/foveated-staging-source-review-2026-10-06.md)
+and [JSON evidence](../results/foveated-staging-source-review-2026-10-06.json)
+record the exact overlay, dependency revisions and successful native logs.
+This is not proof of a Quest fix. Android import, Qualcomm and OpenXR
+still require a separately authorized chart correctness check before Metro/timing.
+
+The H264Fit/preflight pair from source `552ffbb3cc0d4618126704883fa0b19405e0e465`
+is now fully built and verified, **not installed**. All jobs in
+[manual run 37384674287](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37384674287)
+passed. [The receipt](../results/h264fit-preflight-pair-2026-10-06.json) binds the
+matching metadata, stable certificate, native payloads/shaders/checksums,
+exported RDO getter and embedded readback/preflight markers. Marker presence
+does not prove runtime activation. 0f07f05, 80a1635 and d1c3 rollback artifacts remain.
+
+The owner authorized finite AFK **network-only** work, then explicitly accepted
+a 5% battery stop. The session requires charging and retains temperature/severe
+thermal, device/telemetry, compute/VRAM, sustained competing-load, idle and stop
+checks, exact job registration and independent restoration. It does not read or
+edit the arm file. A resident VD Streamer is accepted only with the current
+disconnection attestation, no VR runtime and a readable non-VD focused activity.
+58 private CPU checks pass, including the session-only 5% floor and all remaining
+stops. [Stationary 1000/1200-Mbps five-minute legs completed](../results/network-stationary-afk-2026-10-06.md):
+746.102/760.934 Mbps acknowledged payload, ACK p99 34.857/42.072 ms, 100% late
+scheduled slots and 6853/9877 skipped deadlines. Both fail pacing despite complete,
+uncontended delivery with zero partial/unacknowledged/bad frames. Retained600/800
+were not repeated. This composite sender/receiver/ACK test does not isolate Wi-Fi;
+there is no Rlive or moving-head qualification. [JSON provenance](../results/network-stationary-afk-2026-10-06.json)
+binds receiver/controller hashes and safety summaries.
+
+The lease is **stopped and restored**, zero errors/owned jobs; the exact temporary
+receiver-file key is restored and VD, driver and OpenXR snapshots match. Battery
+22–23%, charging throughout; 38–41°C, thermal status0, no affected timing samples.
+No VR app, image test, settings change or installation occurred. No further hardware
+work tonight; moving-head qualification and all visual judgements need the owner.
+
+## Supervised checkpoint — 2026-10-06 (before session 23)
+
+Sessions 18–22 are stopped and restored, with zero final restoration errors,
+exact changed-key readbacks and VD/driver/OpenXR verification. The installed
+pair remains **0f07f05**; no new pair was installed. All owned VR/test jobs and
+the client are stopped. Retained rollback artifacts are intact. See the
+[matched chart/Metro and partial Q4 report](../results/evening-live-rdo-network-2026-10-06.md)
+and its [JSON evidence](../results/evening-live-rdo-network-2026-10-06.json).
+
+At full-FOV Haar/500, Metro yielded **83.388 vs 83.931 fresh submissions/s** for
+legacy RDO versus RDO24, **8.918 vs 8.950 ms GPU decode**, and **81.502 vs
+80.311 ms estimated pipeline latency**. The owner reported compression/blur
+for legacy and judged RDO24 worse. The matched normalized chart likewise
+favoured legacy. Both confirm runtime 90 Hz but fail sustained fresh 90 Hz;
+these short diagnostic captures do not qualify endurance or optical FPS.
+Stationary Q4 600/800 completed but failed pacing; no moving Rlive or nominal
+1000-Mbps qualification exists. The full-FOV 1000 attempt lost ADB before
+Metro capture. USB reconnection enabled exact restoration.
+
+The owner requested the offline quality candidate next: cropped Medium CDF97,
+softness0.5, RDO24, 1000. It produced black/flashing imagery and was stopped
+immediately. **The setup helper omitted raw client-field synchronization.**
+The server selected centre0.6/edge2; client inverse mapping retained
+centre0.2/0.178 and edge3/4, implying a different staging allocation. Also,
+`graphics/src/stream.rs` disables direct-eye eligibility while foveation is
+enabled. A requested direct-copy property is not proof it activates. These
+are verified setup/path differences; the sole cause of the visual failure is
+not yet proven. No quality or speed conclusion about correctly configured
+Medium9/7 follows. The future helper now sets matching raw fields and rejects
+mismatch; three CPU parity tests pass. It has not been rerun in hardware.
+
+Priority is a finite, freshly owner-confirmed **chart correctness check** with
+matching raw/server fields, observed decoded geometry and actual staging/copy
+path evidence before another Metro or d1–d4 timing run. Keep the 1000 rate
+diagnostic until transport qualification. Do not repeat the failed setup or
+promote RDO24, foveation or any decoder default.
+
+The H264Fit matching-build candidate is [draft PR #57](https://github.com/ljk1291/Quest3-Pyrowave/pull/57),
+source `552ffbb3cc0d4618126704883fa0b19405e0e465`: corrected 0f07f05 plus the
+opt-in native NVENC dimension preflight, build pins and explicit inactive-only
+HVS provenance compatibility. [Manual build 37384674287](https://github.com/ljk1291/Quest3-Pyrowave/actions/runs/37384674287)
+has passed CPU/Android and Windows native compilation; native regression tests
+and final matching-artifact verification remain pending at this checkpoint.
+No installation or runtime activation is authorized by this build record.
+
+Private guard recovery found that a device-read exception could lose native
+stop receipts held only in memory. They now persist before restoration reads;
+47 CPU checks pass, including preservation after simulated ADB loss. The
+one-off session21 recovery used native exited creation times or two kernel
+unallocated-PID proofs plus empty VR inventory, without kills or invented exit
+codes. Original failure records and recovery evidence are retained privately.
+
 ## Evening supervised checkpoint — 2026-10-05
 
 The owner-authorized visual-first session is stopped and all 48 changed keys
@@ -288,6 +412,17 @@ Read with Get-NetAdapter; no network changes. Negotiated link speed is not goodp
 
 ## Queue (current owner goal)
 
+### Current overnight request, 2026-10-06
+
+Fix and review the failed foveated presentation path through source/CPU/remote CI
+work: complete at `6ee1ba5`, with source/software review and a verified uninstalled
+matching pair. Quest image correctness remains the next owner gate. Keep
+candidate builds uninstalled. The finite stationary network-only
+lease has finished with all retained stops and the explicitly approved 5% battery
+floor; it is restored and its results are published. Do not reopen hardware work
+tonight. Morning hardware requires fresh owner readiness and, for a new pair,
+installation authorization. Do not start Metro or an image/timing test tonight.
+
 ### Owner headset request, 2026-10-04 — prepare and wait
 
 The latest owner message authorizes preparing the supervised headset sequence,
@@ -506,6 +641,24 @@ Take the first unblocked item. Items marked ∥ are independent.
      checkpoint-only records.
 
 ## Log
+
+- 2026-10-06 overnight: matched session23 Medium mapping still failed the chart;
+  restored, no quality/timing claim. H264Fit 552ffbb pair fully verified and
+  uninstalled. PR58 adds shared geometry, three independent opt-in presentation
+  experiments and a passing production software GLES regression. The signed
+  candidate pair `6ee1ba5` is fully built, independently verified and uninstalled.
+  Native fixed-profile/Custom regressions and the 48-case software stereo gate
+  pass; Quest image correctness remains untested. The owner
+  approved finite AFK stationary network work and a 5% battery floor; strict
+  other stops remain. No arm edit, VR app, new installation or default promotion.
+
+- 2026-10-06 morning handoff: stationary 1000/1200 completed and failed pacing,
+  with 746.102/760.934 Mbps acknowledged payload. This composite test does not
+  isolate Wi-Fi capacity. The finite AFK lease is restored, zero errors/jobs;
+  battery 22–23%, charging, thermal status0. Installed 0f07f05 and all rollback
+  pairs are preserved. Source/CI preparation is complete and stopped for owner
+  review; next hardware is a freshly authorized short chart with the verified
+  candidate, native option/geometry evidence and exact restoration.
 
 - 2026-10-05 evening, owner-supervised visual-first session: matching corrected
   pair installed; a native legacy marker and a2 native RDO24 marker verified.

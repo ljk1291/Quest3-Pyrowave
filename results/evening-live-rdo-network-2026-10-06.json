@@ -1,0 +1,544 @@
+{
+  "schema": 1,
+  "kind": "supervised_diagnostic_live_rdo_and_partial_q4",
+  "source_commit": "0f07f05b4df88f8fa08ea034f794cda4be9eaf38",
+  "profile": {
+    "render_eye": [
+      3072,
+      3232
+    ],
+    "encode_eye": [
+      3072,
+      3232
+    ],
+    "decoded_stereo": [
+      6144,
+      3232
+    ],
+    "codec": "PyroWave",
+    "wavelet": "Haar",
+    "chroma": "420",
+    "decode_path": "Compute",
+    "requested_hz": 90,
+    "transport": "TCP",
+    "crop": false,
+    "foveation": false
+  },
+  "rows": [
+    {
+      "session": 18,
+      "cell": "a",
+      "scene": "normalized stereo chart",
+      "raw_report_sha256": "9825c867edf7078b79304757494138a9dea3dd66b2de4341810838d47a318110",
+      "report_status": "measured",
+      "duration_requested_s": 60,
+      "fresh_submissions_per_s": 83.51057378378722,
+      "gpu_decode_ms": {
+        "n": 5003,
+        "p01": 7.3417747680000005,
+        "p50": 8.968073,
+        "p95": 9.366765599999999,
+        "p99": 9.57561136,
+        "max": 10.143541
+      },
+      "decode_to_fence_ms": {
+        "n": 5003,
+        "p01": 11.01454236,
+        "p50": 11.471616,
+        "p95": 12.253886799999998,
+        "p99": 12.67300326,
+        "max": 13.228439
+      },
+      "estimated_pipeline_ms": {
+        "n": 5009,
+        "p01": 63.106024,
+        "p50": 73.32502000000001,
+        "p95": 83.44242200000001,
+        "p99": 91.76197920000003,
+        "max": 138.00573
+      },
+      "native_effective_rdo_ppd": 65.2799988,
+      "build_identity_verified": true,
+      "fresh_runtime_evidence": true,
+      "resolution_evidence": {
+        "status": "verified",
+        "mismatches": [],
+        "expected_profile": "godlike-3072",
+        "aligned_requested_render_eye": [
+          3072,
+          3232
+        ],
+        "aligned_requested_encode_eye": [
+          3072,
+          3232
+        ],
+        "negotiated_render_eye": [
+          3072,
+          3232
+        ],
+        "negotiated_encode_eye": [
+          3072,
+          3232
+        ],
+        "observed_decoded_stereo_frames": [
+          [
+            6144,
+            3232
+          ]
+        ],
+        "pc_source_pixel_ratio": 1.0,
+        "scope": "Geometry only; a SteamVR recommendation is not proof of game texture size, image quality, optical presentation, or sustained performance."
+      },
+      "scene_geometry_evidence": {
+        "status": "verified",
+        "source_eye_size": [
+          3072,
+          3232
+        ],
+        "normalized_chart": true,
+        "negotiated_render_eye": [
+          3072,
+          3232
+        ]
+      },
+      "telemetry_complete": true,
+      "stream_error_count": 0,
+      "owner_judgement": "Still visible but much better, only really visible on the pink/magenta colour",
+      "stable_90hz_pass": false,
+      "optical_fps": null,
+      "optical_motion_to_photon_ms": null
+    },
+    {
+      "session": 18,
+      "cell": "a2",
+      "scene": "normalized stereo chart",
+      "raw_report_sha256": "4908d69d1046de99b34aad354dc9d1454237914a515ea47033cab747a76ff5f7",
+      "report_status": "measured",
+      "duration_requested_s": 60,
+      "fresh_submissions_per_s": 83.82565629742017,
+      "gpu_decode_ms": {
+        "n": 4938,
+        "p01": 7.34844302,
+        "p50": 8.9992445,
+        "p95": 9.315871999999999,
+        "p99": 9.49072941,
+        "max": 10.079374
+      },
+      "decode_to_fence_ms": {
+        "n": 4938,
+        "p01": 11.02968952,
+        "p50": 11.4379435,
+        "p95": 12.172868750000001,
+        "p99": 12.560760160000001,
+        "max": 13.914481
+      },
+      "estimated_pipeline_ms": {
+        "n": 5028,
+        "p01": 53.77025386,
+        "p50": 73.15550250000001,
+        "p95": 75.82956825,
+        "p99": 82.61331632,
+        "max": 112.91006
+      },
+      "native_effective_rdo_ppd": 24.0,
+      "build_identity_verified": true,
+      "fresh_runtime_evidence": true,
+      "resolution_evidence": {
+        "status": "verified",
+        "mismatches": [],
+        "expected_profile": "godlike-3072",
+        "aligned_requested_render_eye": [
+          3072,
+          3232
+        ],
+        "aligned_requested_encode_eye": [
+          3072,
+          3232
+        ],
+        "negotiated_render_eye": [
+          3072,
+          3232
+        ],
+        "negotiated_encode_eye": [
+          3072,
+          3232
+        ],
+        "observed_decoded_stereo_frames": [
+          [
+            6144,
+            3232
+          ]
+        ],
+        "pc_source_pixel_ratio": 1.0,
+        "scope": "Geometry only; a SteamVR recommendation is not proof of game texture size, image quality, optical presentation, or sustained performance."
+      },
+      "scene_geometry_evidence": {
+        "status": "verified",
+        "source_eye_size": [
+          3072,
+          3232
+        ],
+        "normalized_chart": true,
+        "negotiated_render_eye": [
+          3072,
+          3232
+        ]
+      },
+      "telemetry_complete": true,
+      "stream_error_count": 0,
+      "owner_judgement": "Worse",
+      "stable_90hz_pass": false,
+      "optical_fps": null,
+      "optical_motion_to_photon_ms": null
+    },
+    {
+      "session": 21,
+      "cell": "a",
+      "scene": "Metro fence checkpoint",
+      "raw_report_sha256": "ac5680610de5b5cd716fcfec081d019f1d1af83dfc830d2fd18c21bbe23e30de",
+      "report_status": "measured",
+      "duration_requested_s": 30,
+      "fresh_submissions_per_s": 83.38782577007633,
+      "gpu_decode_ms": {
+        "n": 2536,
+        "p01": 7.3371249999999995,
+        "p50": 8.918073,
+        "p95": 9.343502749999999,
+        "p99": 9.470580700000001,
+        "max": 9.835417
+      },
+      "decode_to_fence_ms": {
+        "n": 2536,
+        "p01": 10.70256625,
+        "p50": 11.414663000000001,
+        "p95": 12.152761250000001,
+        "p99": 12.41459955,
+        "max": 13.046772
+      },
+      "estimated_pipeline_ms": {
+        "n": 2504,
+        "p01": 70.07989475,
+        "p50": 81.501765,
+        "p95": 92.43998699999999,
+        "p99": 114.65966370000001,
+        "max": 147.84981
+      },
+      "native_effective_rdo_ppd": 65.2799988,
+      "build_identity_verified": true,
+      "fresh_runtime_evidence": true,
+      "resolution_evidence": {
+        "status": "verified",
+        "mismatches": [],
+        "expected_profile": "godlike-3072",
+        "aligned_requested_render_eye": [
+          3072,
+          3232
+        ],
+        "aligned_requested_encode_eye": [
+          3072,
+          3232
+        ],
+        "negotiated_render_eye": [
+          3072,
+          3232
+        ],
+        "negotiated_encode_eye": [
+          3072,
+          3232
+        ],
+        "observed_decoded_stereo_frames": [
+          [
+            6144,
+            3232
+          ]
+        ],
+        "pc_source_pixel_ratio": 1.0,
+        "scope": "Geometry only; a SteamVR recommendation is not proof of game texture size, image quality, optical presentation, or sustained performance."
+      },
+      "scene_geometry_evidence": {
+        "status": "unknown",
+        "reason": "scene_metadata_missing"
+      },
+      "telemetry_complete": true,
+      "stream_error_count": 0,
+      "owner_judgement": "Im at the fence scene, a lot of compression and blur",
+      "stable_90hz_pass": false,
+      "optical_fps": null,
+      "optical_motion_to_photon_ms": null
+    },
+    {
+      "session": 21,
+      "cell": "a2",
+      "scene": "Metro fence checkpoint",
+      "raw_report_sha256": "b49fc0251e7e57faef072332287487d0d693216df8191b1122e47fb657fb1247",
+      "report_status": "measured",
+      "duration_requested_s": 30,
+      "fresh_submissions_per_s": 83.9309671908882,
+      "gpu_decode_ms": {
+        "n": 2532,
+        "p01": 7.327012427,
+        "p50": 8.950182000000002,
+        "p95": 9.266835449999999,
+        "p99": 9.61315804,
+        "max": 9.960677
+      },
+      "decode_to_fence_ms": {
+        "n": 2532,
+        "p01": 10.94214216,
+        "p50": 11.432293,
+        "p95": 12.3348526,
+        "p99": 12.71450607,
+        "max": 13.615678
+      },
+      "estimated_pipeline_ms": {
+        "n": 2519,
+        "p01": 76.33810700000001,
+        "p50": 80.31144,
+        "p95": 91.59038199999999,
+        "p99": 91.81531260000001,
+        "max": 124.83168
+      },
+      "native_effective_rdo_ppd": 24.0,
+      "build_identity_verified": true,
+      "fresh_runtime_evidence": true,
+      "resolution_evidence": {
+        "status": "verified",
+        "mismatches": [],
+        "expected_profile": "godlike-3072",
+        "aligned_requested_render_eye": [
+          3072,
+          3232
+        ],
+        "aligned_requested_encode_eye": [
+          3072,
+          3232
+        ],
+        "negotiated_render_eye": [
+          3072,
+          3232
+        ],
+        "negotiated_encode_eye": [
+          3072,
+          3232
+        ],
+        "observed_decoded_stereo_frames": [
+          [
+            6144,
+            3232
+          ]
+        ],
+        "pc_source_pixel_ratio": 1.0,
+        "scope": "Geometry only; a SteamVR recommendation is not proof of game texture size, image quality, optical presentation, or sustained performance."
+      },
+      "scene_geometry_evidence": {
+        "status": "unknown",
+        "reason": "scene_metadata_missing"
+      },
+      "telemetry_complete": true,
+      "stream_error_count": 0,
+      "owner_judgement": "Scene visible\u2014worse",
+      "stable_90hz_pass": false,
+      "optical_fps": null,
+      "optical_motion_to_photon_ms": null
+    }
+  ],
+  "network_rows": [
+    {
+      "rate_mbps": 600,
+      "phase": "stationary",
+      "raw_report_sha256": "87f442aff9b93bf309e6a55ffa8bad042a42c8cfd36ff13c4f1a37179ff7fc33",
+      "complete": true,
+      "timing_valid": true,
+      "duration_s": 300.0107352999912,
+      "acknowledged_payload_mbps": 597.5339341798722,
+      "ack_p50_ms": 9.827450005104765,
+      "ack_p99_ms": 22.308661006391056,
+      "ack_p99_9_ms": 34.60066420258964,
+      "longest_ack_stall_ms": 391.34519998333417,
+      "late_frame_percent": 28.68148148148148,
+      "skipped_frame_deadlines": 110,
+      "partial_frames": 0,
+      "unacknowledged_frames": 0,
+      "bad_received_frames": 0,
+      "frame_byte_cap": 833333,
+      "wifi_link_mbps": 1200,
+      "wifi_channel_width_mhz": null,
+      "pacing_screen_pass": false
+    },
+    {
+      "rate_mbps": 800,
+      "phase": "stationary",
+      "raw_report_sha256": "60992da043e79162544951d954b48583358e0b3e3aa37aa55024bcdc3106b407",
+      "complete": true,
+      "timing_valid": true,
+      "duration_s": 300.0296403999964,
+      "acknowledged_payload_mbps": 683.9619848706202,
+      "ack_p50_ms": 24.190800002543256,
+      "ack_p99_ms": 45.49546501220909,
+      "ack_p99_9_ms": 166.3736394976151,
+      "longest_ack_stall_ms": 206.1696999880951,
+      "late_frame_percent": 100.0,
+      "skipped_frame_deadlines": 3914,
+      "partial_frames": 0,
+      "unacknowledged_frames": 0,
+      "bad_received_frames": 0,
+      "frame_byte_cap": 1111111,
+      "wifi_link_mbps": 1200,
+      "wifi_channel_width_mhz": null,
+      "pacing_screen_pass": false
+    }
+  ],
+  "restoration": [
+    {
+      "session": 18,
+      "status": "restored",
+      "changed_key_count": 48,
+      "error_count": 0,
+      "verification": {
+        "vd_hashes": true,
+        "driver_registration": true,
+        "openxr_runtime": true
+      }
+    },
+    {
+      "session": 19,
+      "status": "restored",
+      "changed_key_count": 1,
+      "error_count": 0,
+      "verification": {
+        "vd_hashes": true,
+        "driver_registration": true,
+        "openxr_runtime": true
+      }
+    },
+    {
+      "session": 20,
+      "status": "restored",
+      "changed_key_count": 48,
+      "error_count": 0,
+      "verification": {
+        "vd_hashes": true,
+        "driver_registration": true,
+        "openxr_runtime": true
+      }
+    },
+    {
+      "session": 21,
+      "status": "restored",
+      "changed_key_count": 48,
+      "error_count": 0,
+      "verification": {
+        "vd_hashes": true,
+        "driver_registration": true,
+        "openxr_runtime": true
+      }
+    },
+    {
+      "session": 22,
+      "status": "restored",
+      "changed_key_count": 69,
+      "error_count": 0,
+      "verification": {
+        "vd_hashes": true,
+        "driver_registration": true,
+        "openxr_runtime": true
+      }
+    },
+    {
+      "session": 23,
+      "status": "restored",
+      "changed_key_count": 75,
+      "error_count": 0,
+      "verification": {
+        "vd_hashes": true,
+        "driver_registration": true,
+        "openxr_runtime": true
+      }
+    }
+  ],
+  "failed_quality_candidate": {
+    "profile": "cropped Medium CDF97 / softness 0.5 / RDO 24 / 1000 Mbps",
+    "status": "image_correctness_failed_setup_mismatch",
+    "owner_judgement": "I see only black and flashing when I turn my head, nothing else is visible in the headset",
+    "raw_foveation_client": {
+      "center_size_x": 0.2,
+      "center_size_y": 0.178,
+      "center_shift_x": 0.0,
+      "center_shift_y": 0.0,
+      "edge_ratio_x": 3.0,
+      "edge_ratio_y": 4.0
+    },
+    "native_foveation_server": {
+      "center_size_x": 0.6,
+      "center_size_y": 0.6,
+      "center_shift_x": 0.0,
+      "center_shift_y": 0.0,
+      "edge_ratio_x": 2.0,
+      "edge_ratio_y": 2.0
+    },
+    "requested_direct_eye_copy": true,
+    "direct_eye_eligible": false,
+    "native_rdo_ppd": 24.0,
+    "negotiated_render_eye": [
+      2624,
+      2752
+    ],
+    "expected_codec_eye": [
+      2112,
+      2208
+    ],
+    "fresh_submissions_per_s": null,
+    "gpu_decode_ms": null,
+    "decode_to_fence_ms": null,
+    "estimated_pipeline_ms": null,
+    "diagnosis": "Server resolves named Medium to centre 0.6 / edge 2; client inverse mapping consumes stale raw fields. The setup helper omitted raw-field synchronization. Foveated rendering uses staging in this build. These are verified setup/path differences, not a proven sole cause of black/flashing.",
+    "actual_decoded_geometry_verified": false,
+    "usable": false,
+    "stable_90hz_pass": false
+  },
+  "corrected_candidate_recheck": {
+    "profile": "cropped Medium CDF97 / softness 0.5 / RDO 24 / 1000 Mbps",
+    "session": 23,
+    "status": "image_correctness_failed_with_matching_raw_fields",
+    "owner_judgement": "Still black/flashing",
+    "matching_raw_native_foveation_parameters": true,
+    "raw_native_parity_receipt_sha256": "9d702b340fa632e49f35b16938eb1983c62213733bc367c59ba7067682c3a73a",
+    "native_log_sha256": "1fa69d5ab3081c96f76bbee88b663930f3fa328bf6abe63d33327196ca522a40",
+    "decoded_stereo_native_log": [
+      4224,
+      2208
+    ],
+    "expected_staging_eye": [
+      2112,
+      2208
+    ],
+    "staging_geometry_observed": false,
+    "compute_cdf97_confirmed": true,
+    "optimal_ahb_usage_confirmed": true,
+    "fragment_min_usage_confirmed": true,
+    "direct_eye_eligible": false,
+    "native_rdo_ppd": 24.0,
+    "fresh_submissions_per_s": null,
+    "gpu_decode_ms": null,
+    "decode_to_fence_ms": null,
+    "estimated_pipeline_ms": null,
+    "usable": false,
+    "stable_90hz_pass": false,
+    "diagnosis": "Raw-field synchronization is necessary but did not cure the failure. The matched test still produced black/flashing; staging/presentation correctness must pass before Metro or timing."
+  },
+  "session21_1000_outcome": "Native legacy RDO and 1000 Mbps selected, but ADB went offline before Metro relaunch/capture. No image judgement or completed measurement. USB reconnection enabled exact restoration.",
+  "recovery": "After ADB loss, stopped-runtime receipts were lost when restoration aborted before saving its in-memory state. One-off CPU-tested recovery proved native exited creation times or twice kernel-confirmed unallocated PIDs, with no VR inventory and no kills. Missing exit codes were not invented. Native stop receipts are now persisted before device reads; 47 private CPU tests pass.",
+  "session20_outcome": "Controllers unresponsive in SteamVR and Meta menu; stopped and restored without comparison. Owner restarted Quest before session 21.",
+  "limitations": [
+    "90 Hz runtime acceptance and GPU execution, completion latency, fresh submissions and estimated pipeline latency are separate measurements; no stable 90 Hz or optical claim.",
+    "Chart scene geometry is verified; Metro stream geometry is verified but game internal raster dimensions are not.",
+    "Native legacy RDO is 65.2799988 px/deg; explicit session value 65.28 is legacy-equivalent. RDO 24 is opt-in.",
+    "Improvement from the earlier chart preceded the RDO change; it cannot be attributed to RDO 24.",
+    "Headset screenshots are qualitative and downsampled; no screenshot-derived PSNR or optical FPS.",
+    "Q4 includes Windows/Python sender scheduling, receiver scheduling and return-path ACK delay. Failures do not isolate a Wi-Fi-only cause.",
+    "Only stationary 600/800 Mbps completed. Remaining Q4 and moving legs are incomplete; no Rlive is qualified.",
+    "1000 Mbps live rows, if present, are owner-requested diagnostics above qualified capacity, not network or stability passes.",
+    "The later session-18 monitor PermissionError did not erase its completed captures; original cause is unproven. Bounded atomic-write retries and traceback retention passed CPU tests.",
+    "Owned process/settings restoration preserves unowned SteamVR UI writes; whole-file equality is not asserted."
+  ]
+}
