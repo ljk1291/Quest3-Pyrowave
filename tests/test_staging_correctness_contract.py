@@ -28,5 +28,7 @@ class StagingCorrectnessContract(unittest.TestCase):
         workflow=(ROOT/'.github/workflows/ci.yml').read_text(encoding='utf-8')
         self.assertIn('cargo +"$RUST_TOOLCHAIN" test -p alvr_graphics --lib staging_correctness_tests',workflow)
         self.assertIn("LIBGL_ALWAYS_SOFTWARE: '1'",workflow)
+        production=workflow.split('name: Production foveated staging software GLES regression',1)[1].split('      - name:',1)[0]
+        self.assertIn('libegl-dev libgles-dev',production)
 
 if __name__=='__main__':unittest.main()

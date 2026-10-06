@@ -100,7 +100,7 @@ jobs:
           MESA_LOADER_DRIVER_OVERRIDE: llvmpipe
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libegl-mesa0 libgl1-mesa-dri libgles2 libudev-dev xvfb xauth
+          sudo apt-get install -y --no-install-recommends libegl-dev libgles-dev libegl-mesa0 libgl1-mesa-dri libgles2 libudev-dev xvfb xauth
           cd "$XRWIRED_INPUTS/research/ALVR-20.13.0"
           xvfb-run -a cargo +"$RUST_TOOLCHAIN" test -p alvr_graphics --lib staging_correctness_tests -- --nocapture --test-threads=1
       - name: Compositor filter policy checks (no OpenXR runtime)
