@@ -189,7 +189,7 @@ index 93cd6baee3242b80126299b874d0c0b4a6ac887b..2c22792ef84fbef2259493caf025c534
          )]
          .into_iter()
 diff --git a/alvr/server_core/src/connection.rs b/alvr/server_core/src/connection.rs
-index 003726ed1c1f1d8150bcdc29d5a009c54ead52f7..6e3ac1e428421039cba76137a7f1433b322d67bf 100644
+index 003726ed1c1f1d8150bcdc29d5a009c54ead52f7..84359750ddaf6cf98271e6cebb7ce5a7683750a9 100644
 --- a/alvr/server_core/src/connection.rs
 +++ b/alvr/server_core/src/connection.rs
 @@ -269,6 +269,7 @@ fn openvr_config_with_env(
@@ -206,7 +206,7 @@ index 003726ed1c1f1d8150bcdc29d5a009c54ead52f7..6e3ac1e428421039cba76137a7f1433b
      }
 +    #[test]
 +    fn downsample_setting_reaches_native_config_for_every_codec() {
-+        use alvr_session::settings::{CodecType, RenderDownsampleFilter};
++        use alvr_session::{CodecType, RenderDownsampleFilter};
 +        for codec in [CodecType::H264, CodecType::Hevc, CodecType::AV1, CodecType::PyroWave] {
 +            for filter in [RenderDownsampleFilter::Bilinear, RenderDownsampleFilter::Adaptive, RenderDownsampleFilter::Area] {
 +                let mut saved = serde_json::to_value(SessionConfig::default()).unwrap();

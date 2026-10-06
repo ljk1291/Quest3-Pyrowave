@@ -54,7 +54,7 @@
     },
     "presentation_filters": {
       "path": "patches/presentation-filters.patch",
-      "sha256": "3316be0e1fb9ec453d1c40a4e7584baa8a621be901c77080b7a55061d166c044"
+      "sha256": "71b548c97c66c7210a34b6c6e619e8f671a1f6baa21818aef57374b57d375f75"
     },
     "direct_eye_foveation": {
       "path": "patches/direct-eye-foveation.patch",
