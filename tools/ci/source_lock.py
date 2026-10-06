@@ -45,7 +45,8 @@ def load():
                       ("direct_eye_foveation", "patches/direct-eye-foveation.patch"),
                       ("foveation_shader_linkage", "patches/foveation-shader-linkage.patch"),
                       ("frame_dump", "patches/frame-dump.patch"),
-                      ("frame_loss_diagnostics", "patches/frame-loss-diagnostics.patch")):
+                      ("frame_loss_diagnostics", "patches/frame-loss-diagnostics.patch"),
+                      ("client_output_queue", "patches/client-output-queue.patch")):
         patch = patches.get(key, {})
         if (not isinstance(patch, dict) or patch.get("path") != path
                 or not re.fullmatch(r"[0-9a-f]{64}", patch.get("sha256", ""))):
@@ -62,7 +63,7 @@ def main():
                         "alvr_pyrowave_rdo_session_setting_patch_sha256", "nvenc_dimension_preflight_patch_sha256", "foveated_staging_correctness_patch_sha256",
                         "presentation_filters_patch_sha256", "direct_eye_foveation_patch_sha256",
                         "foveation_shader_linkage_patch_sha256", "frame_dump_patch_sha256",
-                        "frame_loss_diagnostics_patch_sha256"))
+                        "frame_loss_diagnostics_patch_sha256", "client_output_queue_patch_sha256"))
     args = parser.parse_args()
     data = load()
     if args.value:
@@ -80,6 +81,7 @@ def main():
             "foveation_shader_linkage_patch_sha256": "foveation_shader_linkage",
             "frame_dump_patch_sha256": "frame_dump",
             "frame_loss_diagnostics_patch_sha256": "frame_loss_diagnostics",
+            "client_output_queue_patch_sha256": "client_output_queue",
         }
         if args.value in patch_values:
             print(data["patches"][patch_values[args.value]]["sha256"])
@@ -108,6 +110,7 @@ def main():
         "NVENC_DIMENSION_PREFLIGHT_PATCH_SHA256": data["patches"]["nvenc_dimension_preflight"]["sha256"],
         "FRAME_DUMP_PATCH_SHA256": data["patches"]["frame_dump"]["sha256"],
         "FRAME_LOSS_DIAGNOSTICS_PATCH_SHA256": data["patches"]["frame_loss_diagnostics"]["sha256"],
+        "CLIENT_OUTPUT_QUEUE_PATCH_SHA256": data["patches"]["client_output_queue"]["sha256"],
     }
     for key, value in values.items():
         print(f"{key}={value}" if args.github_env else f"{key}={shlex.quote(value)}")

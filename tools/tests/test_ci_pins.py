@@ -12,6 +12,20 @@ REPO = Path(__file__).resolve().parents[2]
 LOCK = json.loads((REPO / "sources.lock.json").read_text())
 
 
+def test_output_queue_overlay_hash_and_order():
+    pin = LOCK['patches']['client_output_queue']
+    assert pin['path'] == 'patches/client-output-queue.patch'
+    assert hashlib.sha256((REPO / pin['path']).read_bytes()).hexdigest() == pin['sha256']
+    script = (REPO / 'tools/ci/fetch_sources.sh').read_text()
+    assert script.index('frame-loss-diagnostics.patch') < script.index(
+        '--value client_output_queue_patch_sha256') < script.index(
+        'apply_patch "$dest/ALVR-20.13.0" "$repo/patches/client-output-queue.patch"')
+    result = subprocess.run([sys.executable, 'tools/ci/source_lock.py', '--value',
+                             'client_output_queue_patch_sha256'],
+                            cwd=REPO, capture_output=True, text=True, check=True)
+    assert result.stdout.strip() == pin['sha256']
+
+
 def test_frame_dump_overlay_hash_and_order():
     pin = LOCK['patches']['frame_dump']
     assert pin['path'] == 'patches/frame-dump.patch'
@@ -63,7 +77,7 @@ def test_fetch_script_reads_lock_and_applies_the_complete_alvr_stack_in_order():
              "alvr-pyrowave-rdo-live-readback.patch", "alvr-pyrowave-rdo-session-setting.patch",
              "foveated-staging-correctness.patch", "presentation-filters.patch",
              "direct-eye-foveation.patch", "foveation-shader-linkage.patch",
-             "frame-dump.patch", "frame-loss-diagnostics.patch")
+             "frame-dump.patch", "frame-loss-diagnostics.patch", "client-output-queue.patch")
     positions = [script.index(f'apply_patch "$dest/ALVR-20.13.0" "$repo/patches/{name}"') for name in names]
     assert positions == sorted(positions)
 
@@ -182,6 +196,7 @@ def test_lock_emitter_uses_exact_values():
     assert actual["WO8_LIGHT_CENTRE_PHASE_PATCH_SHA256"] == LOCK["patches"]["wo8_light_centre_phase"]["sha256"]
     assert actual["FRAME_DUMP_PATCH_SHA256"] == LOCK["patches"]["frame_dump"]["sha256"]
     assert actual["FRAME_LOSS_DIAGNOSTICS_PATCH_SHA256"] == LOCK["patches"]["frame_loss_diagnostics"]["sha256"]
+    assert actual["CLIENT_OUTPUT_QUEUE_PATCH_SHA256"] == LOCK["patches"]["client_output_queue"]["sha256"]
 
 
 def test_toolchain_is_read_from_the_lock_by_posix_builds():

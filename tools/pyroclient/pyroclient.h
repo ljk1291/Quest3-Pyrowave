@@ -57,6 +57,10 @@ int pyroclient_decode(pyroclient *c, AHardwareBuffer **out, pyroclient_frame_inf
 // could be dequeued while GPU work runs. Ring size must leave at least one free slot.
 int pyroclient_decode_guarded(pyroclient *c, AHardwareBuffer **out, pyroclient_frame_info *info,
                              AHardwareBuffer *protected_a, AHardwareBuffer *protected_b);
+// FIFO caller protects every pending output plus its render lease. The list is
+// borrowed only for this synchronous call. NULL is valid only with count zero.
+int pyroclient_decode_guarded_many(pyroclient *c, AHardwareBuffer **out, pyroclient_frame_info *info,
+                                  AHardwareBuffer *const *protected_buffers, size_t protected_count);
 
 // Throw away whatever is queued (e.g. a frame whose deadline passed).
 void pyroclient_clear(pyroclient *c);

@@ -5,7 +5,7 @@ import unittest
 from tempfile import TemporaryDirectory
 
 from tools.quest3.frame_loss_analysis import analyze, COUNTERS, STAGES
-from tools.quest3.frame_loss_profiles import install, CELLS, PROPERTIES
+from tools.quest3.frame_loss_profiles import install, CELLS, PROPERTIES, PROPERTY_DEFAULTS
 
 
 class FrameLossAnalysisTests(unittest.TestCase):
@@ -64,7 +64,7 @@ class FrameLossProfilesTests(unittest.TestCase):
         install(harness)
         for key in PROPERTIES:
             self.assertIn(key, harness.MANAGED_PROPERTIES)
-            self.assertEqual(harness.profile('sanity')['properties'][key], '0')
+            self.assertEqual(harness.profile('sanity')['properties'][key], PROPERTY_DEFAULTS[key])
         for name in CELLS:
             spec = harness.profile(name)
             self.assertEqual(spec['cell'], name)
@@ -75,6 +75,31 @@ class FrameLossProfilesTests(unittest.TestCase):
         nopace = harness.profile('loss-nopace500')['settings']
         self.assertFalse(nopace['session_settings.video.enforce_server_frame_pacing'])
         self.assertEqual(nopace['session_settings.connection.statistics_history_size'], 1024)
+
+    def test_queue_cells_reset_to_control_and_keep_pacing_and_stats_identity(self):
+        def base(name):
+            return {'cell': name, 'properties': {
+                'debug.q3pw.frame_wait_us': '0', 'debug.q3pw.runtime_display_time': '0',
+                'debug.q3pw.decode_handoff': '1', 'debug.q3pw.decode_workers': '2',
+                'debug.q3pw.output_queue': '3', 'debug.q3pw.output_queue_max_age_us': '1'},
+                'settings': {'session_settings.video.enforce_server_frame_pacing': True,
+                             'session_settings.video.bitrate.mode.ConstantMbps': 500}}
+        harness = SimpleNamespace(profile=base, ORDER=(), MANAGED_PROPERTIES=())
+        install(harness)
+        for name, depth, wait in [('queue2-500', '2', '0'), ('queue2-wait-500', '2', '1000'),
+                                  ('loss-control500', '1', '0'), ('loss-wait500', '1', '1000')]:
+            with self.subTest(name=name):
+                spec = harness.profile(name)
+                props = spec['properties']
+                self.assertEqual(props['debug.q3pw.output_queue'], depth)
+                self.assertEqual(props['debug.q3pw.output_queue_max_age_us'], '22223')
+                self.assertEqual(props['debug.q3pw.frame_wait_us'], wait)
+                self.assertEqual(props['debug.q3pw.runtime_display_time'], '0')
+                self.assertEqual(props['debug.q3pw.decode_handoff'], '0')
+                self.assertEqual(props['debug.q3pw.decode_workers'], '1')
+                self.assertEqual(props['debug.q3pw.stats_source_ts'], '1')
+                self.assertTrue(spec['settings']['session_settings.video.enforce_server_frame_pacing'])
+                self.assertEqual(spec['settings']['session_settings.video.bitrate.mode.ConstantMbps'], 500)
 
 
 if __name__ == '__main__':

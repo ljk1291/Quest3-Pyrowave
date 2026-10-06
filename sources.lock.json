@@ -71,6 +71,10 @@
     "frame_loss_diagnostics": {
       "path": "patches/frame-loss-diagnostics.patch",
       "sha256": "4eba7040a23edcebd5be06fbcdcb68511983c7144177803c3946e2db3360d54c"
+    },
+    "client_output_queue": {
+      "path": "patches/client-output-queue.patch",
+      "sha256": "7117623a8d8e1eb20dd1c89947831d57b69b1f2b4c56c319466674af22a7ef8f"
     }
   },
   "rust": "1.97.1",

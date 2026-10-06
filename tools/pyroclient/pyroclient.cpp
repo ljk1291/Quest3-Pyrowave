@@ -957,15 +957,26 @@ extern "C" int pyroclient_decode(pyroclient *c, AHardwareBuffer **out, pyroclien
 
 extern "C" int pyroclient_decode_guarded(pyroclient *c, AHardwareBuffer **out, pyroclient_frame_info *info,
                                           AHardwareBuffer *protected_a, AHardwareBuffer *protected_b) {
-    if (!c || !out || !c->submission_state.can_submit()) return -1;
+    AHardwareBuffer *protected_buffers[] = {protected_a, protected_b};
+    return pyroclient_decode_guarded_many(c, out, info, protected_buffers, 2);
+}
+
+extern "C" int pyroclient_decode_guarded_many(pyroclient *c, AHardwareBuffer **out, pyroclient_frame_info *info,
+                                             AHardwareBuffer *const *protected_buffers, size_t protected_count) {
+    if (!c || !out || (protected_count && !protected_buffers) || !c->submission_state.can_submit()) return -1;
     *out = nullptr;
     // Partial reconstruction requires pristine low-frequency bands. The old UDP caller
     // decoded arbitrary packet subsets, which can make the entire picture disappear.
     // Both transports now require a fully validated frame before recording GPU work.
     if (!pyrowave_decoder_decode_is_ready(c->decoder, false)) return -3;
     if (info) { *info = pyroclient_frame_info{}; info->complete = pyrowave_decoder_decode_is_ready(c->decoder, false) ? 1 : 0; }
+    const auto is_protected = [&](AHardwareBuffer *buffer) {
+        for (size_t i = 0; i < protected_count; ++i)
+            if (protected_buffers[i] == buffer) return true;
+        return false;
+    };
     uint32_t attempts = 0;
-    while (c->ring[c->next_slot].ahb == protected_a || c->ring[c->next_slot].ahb == protected_b) {
+    while (is_protected(c->ring[c->next_slot].ahb)) {
         c->next_slot = (c->next_slot + 1) % (uint32_t)c->ring.size();
         if (++attempts == c->ring.size()) return -4;
     }

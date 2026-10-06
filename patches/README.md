@@ -1,8 +1,19 @@
 # Patches
 
+## `client-output-queue.patch`: opt-in decoded output FIFO
+
+Additive overlay last, after `frame-loss-diagnostics.patch`, SHA-256 pinned in
+`sources.lock.json`. TCP PyroWave `debug.q3pw.output_queue=2` or `3` enables FIFO
+selection, counted drop-oldest overflow and bounded source-age catch-up. Unset/1
+preserves the existing slot. The native ring grows only with effective depth;
+this overlay requires the guarded-many API in this tree's `tools/pyroclient`.
+Depth >1 with decode handoff logs a depth-1 fallback. See
+[OUTPUT-QUEUE](../docs/OUTPUT-QUEUE.md) for buffer lifetime reasoning, latency
+costs, configuration and candidate hardware cells. Upstream credits are unchanged.
+
 ## `frame-loss-diagnostics.patch`: default-off frame accounting
 
-Additive overlay last, after `frame-dump.patch`, SHA-256 pinned in
+Additive overlay after `frame-dump.patch`, before `client-output-queue.patch`, SHA-256 pinned in
 `sources.lock.json`. `ALVR_FRAME_LOSS=1` (server) and
 `debug.q3pw.frame_loss=1` (client) enable cumulative per-second counters from
 encode through eye release and statistics joins. The separate client property

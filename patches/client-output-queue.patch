@@ -1,0 +1,408 @@
+diff --git a/alvr/client_core/src/video_decoder/mod.rs b/alvr/client_core/src/video_decoder/mod.rs
+index 619f760a869aa1e0ed7b213e88125c9a5a44f076..97c49b84ceb84a2018b6b27be7bd27e6689ad388 100644
+--- a/alvr/client_core/src/video_decoder/mod.rs
++++ b/alvr/client_core/src/video_decoder/mod.rs
+@@ -10,7 +10,7 @@ pub mod telemetry;
+ 
+ use alvr_common::anyhow::Result;
+ use alvr_session::{CodecType, MediacodecProperty};
+-use std::time::Duration;
++use std::{collections::VecDeque, time::Duration};
+ 
+ /// The DecoderConfig payload the server's PyroWave encoder sends in place of SPS/PPS:
+ /// u32 width, u32 height, u8 chroma444, u8 full_range, little endian.
+@@ -157,8 +157,7 @@ pub fn dist(samples: &mut Vec<f32>) -> String {
+     )
+ }
+ 
+-/// The newest decoded frame, handed out once. Intra-only codecs can always skip to the newest.
+-#[derive(Default)]
++/// Bounded decoded-output FIFO. Depth one preserves the latest-frame slot policy.
+ pub struct FrameSlot {
+     inner: alvr_common::parking_lot::Mutex<FrameSlotState>,
+     producer_ready: alvr_common::parking_lot::Condvar,
+@@ -168,7 +167,9 @@ pub struct FrameSlot {
+ struct FrameSlotState {
+     handoff_enabled: bool,
+     awaiting_copy_submit: bool,
+-    pending: Option<(Duration, usize)>,
++    pending: VecDeque<(Duration, usize)>,
++    depth: usize,
++    max_age: Duration,
+     latest_order: Option<u64>,
+     superseded: u64,
+     /// The render loop can hold a dequeued buffer across xrWaitFrame. Keep it out
+@@ -176,16 +177,37 @@ struct FrameSlotState {
+     leased: usize,
+ }
+ 
++impl Default for FrameSlot {
++    fn default() -> Self {
++        Self::new(1, Duration::ZERO)
++    }
++}
++
+ impl FrameSlot {
++    pub fn new(depth: usize, max_age: Duration) -> Self {
++        assert!((1..=3).contains(&depth));
++        Self {
++            inner: alvr_common::parking_lot::Mutex::new(FrameSlotState {
++                pending: VecDeque::with_capacity(depth),
++                depth,
++                max_age,
++                ..Default::default()
++            }),
++            producer_ready: alvr_common::parking_lot::Condvar::new(),
++        }
++    }
++
+     /// Enable only for a single TCP worker. This is scheduling, not buffer release:
+     /// the consumer lease remains protected until a subsequent frame is taken.
+     pub fn enable_copy_handoff(&self) {
+-        self.inner.lock().handoff_enabled = true;
++        let mut state = self.inner.lock();
++        assert_eq!(state.depth, 1, "copy handoff requires depth one");
++        state.handoff_enabled = true;
+     }
+     pub fn wait_producer_ready(&self, running: impl Fn() -> bool) -> bool {
+         let mut state = self.inner.lock();
+         while running() && state.handoff_enabled
+-            && (state.pending.is_some() || state.awaiting_copy_submit)
++            && (!state.pending.is_empty() || state.awaiting_copy_submit)
+         {
+             self.producer_ready.wait_for(&mut state, Duration::from_millis(10));
+         }
+@@ -215,9 +237,18 @@ impl FrameSlot {
+             }
+             state.latest_order = Some(order);
+         }
+-        if state.pending.replace((timestamp, buffer)).is_some() {
+-            alvr_common::frame_loss::count("replaced_before_present");
+-            state.superseded += 1;
++        if state.pending.len() == state.depth {
++            state.drop_oldest();
++        }
++        state.pending.push_back((timestamp, buffer));
++        // Tracking keys may repeat or regress. Only a strictly positive age
++        // beyond the bound permits catch-up; never rewrite the statistics key.
++        // Trim at publication so telemetry includes these drops immediately.
++        while state.depth > 1 && state.pending.len() > 1
++            && state.pending.front().is_some_and(|(oldest, _)|
++                timestamp.saturating_sub(*oldest) > state.max_age)
++        {
++            state.drop_oldest();
+         }
+         true
+     }
+@@ -226,20 +257,51 @@ impl FrameSlot {
+     }
+     pub fn take(&self) -> Option<(Duration, usize)> {
+         let mut state = self.inner.lock();
+-        let frame = state.pending.take()?;
++        let frame = state.pending.pop_front()?;
+         alvr_common::frame_loss::count("dequeued");
+         state.leased = frame.1;
+         state.awaiting_copy_submit = state.handoff_enabled;
+         Some(frame)
+     }
+-    /// Exclude both possible consumer buffers before reserving a native output
+-    /// slot: the currently leased one and the pending one that could be taken.
+-    pub fn protected_buffers(&self) -> [usize; 2] {
++    /// Snapshot the lease and ALL pending outputs before native reservation.
++    /// A consumer can take several of these while decode runs. Independent
++    /// workers own disjoint rings, so another worker cannot publish our buffer.
++    pub fn protected_buffers(&self) -> [usize; 4] {
+         let state = self.inner.lock();
+-        [state.leased, state.pending.map_or(0, |(_, buffer)| buffer)]
++        let mut protected = [0; 4];
++        protected[0] = state.leased;
++        for (index, (_, buffer)) in state.pending.iter().enumerate() {
++            protected[index + 1] = *buffer;
++        }
++        protected
+     }
+ }
+ 
++impl FrameSlotState {
++    fn drop_oldest(&mut self) {
++        if self.pending.pop_front().is_some() {
++            alvr_common::frame_loss::count("replaced_before_present");
++            self.superseded += 1;
++        }
++    }
++}
++
++/// Only TCP PyroWave opts in. Handoff serializes production and cannot fill a FIFO.
++pub fn pyrowave_output_depth(value: &str, handoff_requested: bool) -> usize {
++    if handoff_requested { return 1; }
++    match value.trim() {
++        "2" => 2,
++        "3" => 3,
++        _ => 1,
++    }
++}
++
++/// Source-key age bound; default is two 90 Hz display periods, in microseconds.
++pub fn pyrowave_output_max_age(value: &str) -> Duration {
++    Duration::from_micros(value.trim().parse::<u64>().ok()
++        .filter(|age| (1..=1_000_000).contains(age)).unwrap_or(22_223))
++}
++
+ /// Bound the experimental independent TCP decoders; the default stays one worker.
+ pub fn pyrowave_worker_count(value: &str) -> usize {
+     if value.trim() == "2" { 2 } else { 1 }
+@@ -568,6 +630,92 @@ mod tests {
+         assert!(slot.take().is_none());
+     }
+ 
++    #[test]
++    fn output_fifo_orders_frames_and_empty_preserves_repeat_lease() {
++        let slot = FrameSlot::new(2, Duration::from_millis(23));
++        assert_eq!(slot.take(), None);
++        slot.publish(Duration::from_millis(1), 0x10);
++        slot.publish(Duration::from_millis(12), 0x20);
++        assert_eq!(slot.take(), Some((Duration::from_millis(1), 0x10)));
++        assert_eq!(slot.protected_buffers(), [0x10, 0x20, 0, 0]);
++        assert_eq!(slot.take(), Some((Duration::from_millis(12), 0x20)));
++        assert_eq!(slot.take(), None);
++        assert_eq!(slot.protected_buffers(), [0x20, 0, 0, 0]);
++        assert_eq!(slot.superseded(), 0);
++    }
++
++    #[test]
++    fn output_fifo_overflow_drops_only_oldest_and_protects_every_pending_buffer() {
++        for depth in [2, 3] {
++            let slot = FrameSlot::new(depth, Duration::from_secs(1));
++            slot.publish(Duration::ZERO, 0x10);
++            slot.take();
++            for index in 1..=depth {
++                slot.publish(Duration::from_millis(index as u64), 0x10 + index);
++            }
++            let protected = slot.protected_buffers();
++            assert_eq!(protected[0], 0x10);
++            for index in 1..=depth {
++                assert_eq!(protected[index], 0x10 + index);
++            }
++            slot.publish(Duration::from_millis(4), 0x20);
++            assert_eq!(slot.superseded(), 1);
++            assert_eq!(slot.protected_buffers()[0], 0x10);
++            for index in 2..=depth {
++                assert_eq!(slot.take(), Some((Duration::from_millis(index as u64), 0x10 + index)));
++            }
++            assert_eq!(slot.take(), Some((Duration::from_millis(4), 0x20)));
++            assert_eq!(slot.take(), None);
++        }
++    }
++
++    #[test]
++    fn output_fifo_catches_up_only_beyond_age_bound_and_counts_each_drop() {
++        let slot = FrameSlot::new(3, Duration::from_millis(22));
++        slot.publish(Duration::ZERO, 0x10);
++        slot.publish(Duration::from_millis(22), 0x20);
++        assert_eq!(slot.superseded(), 0); // Equality is still eligible.
++        slot.publish(Duration::from_micros(22_001), 0x30);
++        assert_eq!(slot.superseded(), 1);
++        assert_eq!(slot.take(), Some((Duration::from_millis(22), 0x20)));
++        slot.publish(Duration::from_millis(23), 0x40);
++        slot.publish(Duration::from_millis(50), 0x50);
++        assert_eq!(slot.superseded(), 3); // Two stale entries, not one event.
++        assert_eq!(slot.take(), Some((Duration::from_millis(50), 0x50)));
++        assert_eq!(slot.take(), None);
++    }
++
++    #[test]
++    fn output_fifo_preserves_source_keys_and_rejects_late_workers_after_take() {
++        let slot = FrameSlot::new(3, Duration::from_millis(22));
++        for (order, timestamp) in [(1, 30), (2, 30), (3, 1)] {
++            assert!(slot.publish_ordered(Duration::from_millis(timestamp), order as usize, order));
++        }
++        for (order, timestamp) in [(1, 30), (2, 30), (3, 1)] {
++            assert_eq!(slot.take(), Some((Duration::from_millis(timestamp), order)));
++        }
++        assert_eq!(slot.superseded(), 0);
++        assert!(!slot.publish_ordered(Duration::from_millis(31), 4, 2));
++        assert!(!slot.publish_ordered(Duration::from_millis(31), 4, 3));
++        assert_eq!(slot.superseded(), 2);
++        assert!(slot.take().is_none());
++    }
++
++    #[test]
++    fn output_queue_configuration_is_bounded_and_handoff_falls_back() {
++        for value in ["", "0", "1", "4", "-2", "invalid"] {
++            assert_eq!(pyrowave_output_depth(value, false), 1);
++        }
++        for (value, depth) in [("2\n", 2), ("3", 3)] {
++            assert_eq!(pyrowave_output_depth(value, false), depth);
++            assert_eq!(pyrowave_output_depth(value, true), 1);
++        }
++        for value in ["", "0", "-1", "1000001", "invalid"] {
++            assert_eq!(pyrowave_output_max_age(value), Duration::from_micros(22_223));
++        }
++        assert_eq!(pyrowave_output_max_age("33334"), Duration::from_micros(33_334));
++    }
++
+     #[test]
+     fn late_worker_completion_cannot_replace_a_newer_or_already_taken_frame() {
+         let slot = FrameSlot::default();
+@@ -577,7 +725,7 @@ mod tests {
+         assert!(!slot.publish_ordered(Duration::from_millis(1), 0x10, 1));
+         assert!(!slot.publish_ordered(Duration::from_millis(3), 0x31, 3));
+         assert!(slot.take().is_none());
+-        assert_eq!(slot.protected_buffers(), [0x30, 0]);
++        assert_eq!(slot.protected_buffers(), [0x30, 0, 0, 0]);
+         assert_eq!(slot.superseded(), 3);
+         assert!(slot.publish_ordered(Duration::from_millis(3), 0x40, 4));
+         assert_eq!(slot.take(), Some((Duration::from_millis(3), 0x40)));
+@@ -609,7 +757,7 @@ mod tests {
+         slot.notify_copy_submitted();
+         assert!(rx.recv_timeout(Duration::from_secs(1)).unwrap());
+         worker.join().unwrap();
+-        assert_eq!(slot.protected_buffers(), [0x10, 0]);
++        assert_eq!(slot.protected_buffers(), [0x10, 0, 0, 0]);
+     }
+ 
+     #[test]
+@@ -633,18 +781,18 @@ mod tests {
+     #[test]
+     fn producer_protects_a_held_frame_and_a_concurrently_dequeueable_frame() {
+         let slot = FrameSlot::default();
+-        assert_eq!(slot.protected_buffers(), [0, 0]);
++        assert_eq!(slot.protected_buffers(), [0, 0, 0, 0]);
+         slot.publish(Duration::from_millis(1), 0x10);
+-        assert_eq!(slot.protected_buffers(), [0, 0x10]);
++        assert_eq!(slot.protected_buffers(), [0, 0x10, 0, 0]);
+         slot.take();
+         slot.publish(Duration::from_millis(2), 0x20);
+-        assert_eq!(slot.protected_buffers(), [0x10, 0x20]);
++        assert_eq!(slot.protected_buffers(), [0x10, 0x20, 0, 0]);
+         // Publishing newer frames while the render loop is stalled must retain
+         // protection of its old lease, even after the pending frame is replaced.
+         slot.publish(Duration::from_millis(3), 0x30);
+         assert_eq!(slot.superseded(), 1);
+-        assert_eq!(slot.protected_buffers(), [0x10, 0x30]);
++        assert_eq!(slot.protected_buffers(), [0x10, 0x30, 0, 0]);
+         slot.take();
+-        assert_eq!(slot.protected_buffers(), [0x30, 0]);
++        assert_eq!(slot.protected_buffers(), [0x30, 0, 0, 0]);
+     }
+ }
+diff --git a/alvr/client_core/src/video_decoder/pyrowave.rs b/alvr/client_core/src/video_decoder/pyrowave.rs
+index f059a928555fdb98738225e54ea6cc0396687813..17aa861ac475865f9a6511dc2dccc61f42aad69d 100644
+--- a/alvr/client_core/src/video_decoder/pyrowave.rs
++++ b/alvr/client_core/src/video_decoder/pyrowave.rs
+@@ -49,12 +49,12 @@ extern "C" {
+     ) -> *mut PyroClient;
+     fn pyroclient_push_packet(c: *mut PyroClient, data: *const u8, size: usize) -> i32;
+     fn pyroclient_clear(c: *mut PyroClient);
+-    fn pyroclient_decode_guarded(
++    fn pyroclient_decode_guarded_many(
+         c: *mut PyroClient,
+         out: *mut *mut c_void,
+         info: *mut FrameInfo,
+-        protected_a: *mut c_void,
+-        protected_b: *mut c_void,
++        protected: *const *mut c_void,
++        protected_count: usize,
+     ) -> i32;
+     fn pyroclient_destroy(c: *mut PyroClient);
+ }
+@@ -125,7 +125,6 @@ pub fn video_decoder_split(
+         ready: Condvar::new(),
+         skipped: AtomicU64::new(0),
+     });
+-    let decoded = Arc::new(FrameSlot::default());
+     let running = Arc::new(AtomicBool::new(true));
+     let totals = Arc::new(Mutex::new((0u64, 0u64)));
+     let telemetry_started = Arc::new(Once::new());
+@@ -144,7 +143,36 @@ pub fn video_decoder_split(
+             c"debug.q3pw.decode_handoff".as_ptr(), property.as_mut_ptr().cast(),
+         )
+     };
+-    let handoff = workers == 1 && &property[..property_len.max(0) as usize] == b"1";
++    let handoff_requested = &property[..property_len.max(0) as usize] == b"1";
++    let handoff = workers == 1 && handoff_requested;
++    let property_len = unsafe {
++        libc::__system_property_get(
++            c"debug.q3pw.output_queue".as_ptr(), property.as_mut_ptr().cast(),
++        )
++    };
++    let requested = String::from_utf8_lossy(&property[..property_len.max(0) as usize]).into_owned();
++    let depth = super::pyrowave_output_depth(&requested, handoff_requested);
++    if handoff_requested && super::pyrowave_output_depth(&requested, false) > 1 {
++        super::logcat_info("PYROWAVE",
++            "[Q3PW_OUTPUT_QUEUE] depth=1 fallback: decode_handoff=1 is incompatible with depth>1");
++    }
++    let property_len = unsafe {
++        libc::__system_property_get(
++            c"debug.q3pw.output_queue_max_age_us".as_ptr(), property.as_mut_ptr().cast(),
++        )
++    };
++    let max_age = super::pyrowave_output_max_age(&String::from_utf8_lossy(
++        &property[..property_len.max(0) as usize],
++    ));
++    // All queued buffers + the render lease + one writable slot per worker.
++    let ring_size = (depth + 2) as u32;
++    if !requested.is_empty() {
++        super::logcat_info("PYROWAVE", &format!(
++            "[Q3PW_OUTPUT_QUEUE] depth={depth} max_age_us={} ring={ring_size} workers={workers} copy_handoff={handoff}",
++            max_age.as_micros(),
++        ));
++    }
++    let decoded = Arc::new(FrameSlot::new(depth, max_age));
+     if handoff { decoded.enable_copy_handoff(); }
+     alvr_common::info!("[Q3PW_WORKERS] TCP independent decoders={workers} copy_handoff={handoff}");
+     let report_frame_decoded = Arc::new(report_frame_decoded);
+@@ -165,7 +193,7 @@ pub fn video_decoder_split(
+                     cfg.height,
+                     cfg.chroma444 as i32,
+                     cfg.full_range as i32,
+-                    3,
++                    ring_size,
+                     cfg.wavelet as i32,
+                     cfg.decode_path as i32,
+                 )
+@@ -211,14 +239,14 @@ pub fn video_decoder_split(
+                 }
+                 let mut out: *mut c_void = std::ptr::null_mut();
+                 let mut info = FrameInfo::default();
+-                let protected = decoded.protected_buffers();
++                let protected = decoded.protected_buffers().map(|ptr| ptr as *mut c_void);
+                 let rc = unsafe {
+-                    pyroclient_decode_guarded(
++                    pyroclient_decode_guarded_many(
+                         client,
+                         &mut out,
+                         &mut info,
+-                        protected[0] as *mut c_void,
+-                        protected[1] as *mut c_void,
++                        protected.as_ptr(),
++                        protected.len(),
+                     )
+                 };
+                 if rc != 0 || out.is_null() || info.complete == 0 {
+diff --git a/alvr/client_openxr/src/stream.rs b/alvr/client_openxr/src/stream.rs
+index 221dd4fd6147703e944fbb7ae72ac0aef0a47740..38643dda26aaa256032d23c362d342e33cbcb412 100644
+--- a/alvr/client_openxr/src/stream.rs
++++ b/alvr/client_openxr/src/stream.rs
+@@ -441,7 +441,7 @@ impl StreamContext {
+     }
+ 
+     /// Opt-in nonblocking selection before xrWaitFrame. Holding this frame protects its
+-    /// existing source lease while the producer may replace the one pending slot. It can
++    /// existing source lease while the producer fills the bounded output queue. It can
+     /// also hold an older frame through the runtime wait, so latency needs live comparison.
+     /// Never enable the blocking producer handoff to emulate this selection policy.
+     pub fn poll_latest_before_wait(&mut self) {
+@@ -533,9 +533,10 @@ impl StreamContext {
+             self.pre_wait_stats = [0; 5];
+             self.pre_wait_last_log = Instant::now();
+         }
+-        // Quest PyroWave already has a bounded latest-frame queue on its GPU worker.
++        // Quest PyroWave has a bounded output queue on its GPU worker (depth one by default).
+         // Unless the opt-in pre-wait selection already holds a protected frame, take the
+-        // newest ready frame after xrWaitFrame without delaying that display slot.
++        // oldest queued output after xrWaitFrame without delaying that display slot.
++        // A successful take stops polling: consume exactly one output per rendered XR frame.
+         // When decode falls behind, repeat the last layer and let the runtime reproject it.
+         let latest_only = self.uses_latest_frame_polling();
+         let latest_wait_budget = self.frame_wait_budget.min(frame_interval / 8);
