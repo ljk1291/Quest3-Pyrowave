@@ -1,0 +1,807 @@
+diff --git a/alvr/client_openxr/src/stream.rs b/alvr/client_openxr/src/stream.rs
+index 906c8fdddbd9480d14fcab11f939f2d979900ca2..21a3084c3d552b14e9c1b7835a71263d16a01cae 100644
+--- a/alvr/client_openxr/src/stream.rs
++++ b/alvr/client_openxr/src/stream.rs
+@@ -231,6 +231,8 @@ impl StreamContext {
+             config.upscaling.clone(),
+         );
+ 
++        renderer.set_frame_dump(&crate::extra_extensions::perf_settings::system_property("debug.q3pw.frame_dump"));
++
+         core_ctx.send_active_interaction_profile(
+             *HAND_LEFT_ID,
+             interaction_ctx.read().hands_interaction[0].controllers_profile_id,
+@@ -564,6 +566,8 @@ impl StreamContext {
+             }
+         }
+ 
++        // Preserve the transported identity before the XR-only timestamp clamp below.
++        let dump_timestamp = frame_result.as_ref().map(|frame| frame.timestamp.as_nanos() as u64);
+         let (selection_id, timestamp, view_params, buffer_ptr) =
+             if let Some(frame) = frame_result {
+                 let timestamp = frame.timestamp;
+@@ -614,6 +618,9 @@ impl StreamContext {
+             let acquire_wait_ms = acquire_start.elapsed().as_secs_f32() * 1000.0;
+ 
+             unsafe {
++                if let Some(timestamp) = dump_timestamp {
++                    self.renderer.begin_frame_capture(buffer_ptr, timestamp);
++                }
+                 self.renderer.render(
+                     buffer_ptr,
+                     [
+@@ -632,6 +639,10 @@ impl StreamContext {
+                 )
+             };
+ 
++            if dump_timestamp.is_some() {
++                unsafe { self.renderer.finish_frame_capture([left_swapchain_idx, right_swapchain_idx]); }
++            }
++
+             if !buffer_ptr.is_null() {
+                 if let Some((_, source)) = &self.decoder {
+                     source.notify_frame_copy_submitted();
+diff --git a/alvr/graphics/resources/frame_dump_fragment.glsl b/alvr/graphics/resources/frame_dump_fragment.glsl
+new file mode 100644
+index 0000000000000000000000000000000000000000..d6673d46ec77214a16a31c438f7dd5b3c203a205
+--- /dev/null
++++ b/alvr/graphics/resources/frame_dump_fragment.glsl
+@@ -0,0 +1,8 @@
++#version 300 es
++#extension GL_OES_EGL_image_external_essl3 : require
++precision highp float;
++precision highp samplerExternalOES;
++in highp vec2 uv;
++uniform samplerExternalOES tex;
++layout(location=0) out vec4 color;
++void main() { color = texture(tex, uv); }
+diff --git a/alvr/graphics/resources/frame_dump_vertex.glsl b/alvr/graphics/resources/frame_dump_vertex.glsl
+new file mode 100644
+index 0000000000000000000000000000000000000000..86ce4bc7800db1146f4bf8d68789fc3836934b8a
+--- /dev/null
++++ b/alvr/graphics/resources/frame_dump_vertex.glsl
+@@ -0,0 +1,8 @@
++#version 300 es
++precision highp float;
++out highp vec2 uv;
++void main() {
++    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
++    uv = p;
++    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
++}
+diff --git a/alvr/graphics/src/frame_dump.rs b/alvr/graphics/src/frame_dump.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..99a29954ed12939e27e15b5d1811ac493000d75d
+--- /dev/null
++++ b/alvr/graphics/src/frame_dump.rs
+@@ -0,0 +1,330 @@
++//! Lossless SDR diagnostics. Never changes the decoder's AHB allocation/lease.
++//! glReadPixels stalls on selected frames; disk I/O uses a bounded worker queue.
++use super::{frame_dump_config::{self, Config}, GraphicsContext, GL_TEXTURE_EXTERNAL_OES};
++use alvr_common::glam::UVec2;
++use glow::{self as gl, HasContext};
++use std::{ffi::c_void, fs, num::NonZeroU32, path::PathBuf, rc::Rc,
++    sync::mpsc::{self, SyncSender}, thread::{self, JoinHandle}, time::{Instant, SystemTime, UNIX_EPOCH}};
++
++struct Image { stage: &'static str, size: UVec2, pixels: Vec<u8>, row_order: &'static str }
++struct Job { timestamp: u64, index: u64, images: Vec<Image> }
++
++pub(super) struct FrameDump {
++    config: Config,
++    seen: u64,
++    attempted: u32,
++    last_timestamp: Option<u64>,
++    pending: Option<Job>,
++    sender: Option<SyncSender<Job>>,
++    writer: Option<JoinHandle<()>>,
++}
++
++fn marker(text: String) { super::log_quest_experiment(format!("[Q3PW_FRAME_DUMP] {text}")); }
++
++impl FrameDump {
++    pub fn new(value: &str) -> Option<Self> {
++        let config = match frame_dump_config::parse(value) {
++            Ok(Some(config)) => config,
++            Ok(None) => return None,
++            Err(reason) => { marker(format!("disabled reason={reason}")); return None; }
++        };
++        // Fork package identity is pinned in fork.json. No private identifiers in file names.
++        let directory = PathBuf::from("/sdcard/Android/data/io.github.ljk1291.quest3pyrowave/files/q3pw-dumps")
++            .join(format!("client-{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos()));
++        if let Err(e) = fs::create_dir_all(&directory) {
++            marker(format!("disabled setup_failed={e}")); return None;
++        }
++        let (sender, receiver) = mpsc::sync_channel::<Job>(1);
++        let writer = match thread::Builder::new().name("q3pw-dump".into()).spawn(move || {
++            while let Ok(job) = receiver.recv() {
++                for image in job.images {
++                    let base = directory.join(format!("{}-{}", job.timestamp, image.stage));
++                    let result = (|| -> std::io::Result<()> {
++                        fs::write(base.with_extension("raw"), &image.pixels)?;
++                        // Only a complete sidecar admits this frame to the scorer.
++                        fs::write(base.with_extension("json"), format!(
++                            "{{\"schema\":1,\"timestamp_ns\":{},\"frame_index\":{},\"stage\":\"{}\",\"width\":{},\"height\":{},\"format\":\"rgba8\",\"range\":\"full\",\"matrix\":\"bt709\",\"row_order\":\"{}\",\"bytes\":{},\"complete\":true}}\n",
++                            job.timestamp, job.index, image.stage, image.size.x, image.size.y,
++                            image.row_order, image.pixels.len()))?;
++                        Ok(())
++                    })();
++                    marker(format!("timestamp_ns={} stage={} write={result:?}", job.timestamp, image.stage));
++                }
++            }
++        }) {
++            Ok(writer) => writer,
++            Err(e) => { marker(format!("disabled worker_failed={e}")); return None; }
++        };
++        marker(format!("enabled count={} interval={} synchronous_gpu_readback=1 async_disk=1",
++            config.count, config.interval));
++        Some(Self { config, seen: 0, attempted: 0, last_timestamp: None, pending: None,
++            sender: Some(sender), writer: Some(writer) })
++    }
++
++    pub unsafe fn begin(&mut self, context: &Rc<GraphicsContext>, source: *mut c_void,
++        timestamp: u64, packed: UVec2) {
++        self.pending = None;
++        if source.is_null() || self.last_timestamp == Some(timestamp) { return; }
++        self.last_timestamp = Some(timestamp);
++        let index = self.seen;
++        self.seen += 1;
++        if self.attempted >= self.config.count || index % u64::from(self.config.interval) != 0 { return; }
++        self.attempted += 1;
++        context.make_current();
++        let start = Instant::now();
++        // Preserve/sample the decoder output BEFORE the production renderer imports
++        // it (the legacy EGL import need not preserve contents).
++        let result = read_decoded(context, source, packed, None);
++        let mut images = vec![];
++        match result {
++            Ok(image) => images.push(image),
++            Err(reason) => marker(format!("timestamp_ns={timestamp} readback_failed={reason}")),
++        }
++        self.pending = Some(Job { timestamp, index, images });
++        marker(format!("timestamp_ns={timestamp} phase=decode client_stall_ms={:.3}", start.elapsed().as_secs_f64() * 1000.0));
++    }
++
++    pub unsafe fn finish(&mut self, context: &Rc<GraphicsContext>, presented: UVec2, textures: [u32; 2]) {
++        let Some(mut job) = self.pending.take() else { return; };
++        context.make_current();
++        let start = Instant::now();
++        match read_presented(context, presented, textures) {
++            Ok(images) => job.images.extend(images),
++            Err(reason) => marker(format!("timestamp_ns={} presented_readback_failed={reason}", job.timestamp)),
++        }
++        marker(format!("timestamp_ns={} phase=presented client_stall_ms={:.3}", job.timestamp, start.elapsed().as_secs_f64() * 1000.0));
++        if let Some(sender) = &self.sender {
++            let timestamp = job.timestamp;
++            if sender.try_send(job).is_err() {
++                marker(format!("timestamp_ns={timestamp} dropped=writer_busy"));
++            }
++        }
++    }
++}
++
++impl Drop for FrameDump {
++    fn drop(&mut self) {
++        self.sender.take();
++        if let Some(writer) = self.writer.take() { let _ = writer.join(); }
++    }
++}
++
++// Raw GLES shares WGPU's context. Restore every state changed here, including unit-0
++// bindings and pixel-pack state; merely binding FBO 0 would corrupt WGPU's cached state.
++struct State<'a> {
++    gl: &'a gl::Context, program: i32, vao: i32, draw: i32, read: i32,
++    active: i32, external: i32, texture: i32, sampler: i32, pack_buffer: i32,
++    viewport: [i32; 4], mask: [i32; 4], pack: [i32; 4], caps: Vec<(u32, bool)>,
++}
++fn name(n: i32) -> Option<NonZeroU32> { NonZeroU32::new(n as u32) }
++impl<'a> State<'a> {
++    unsafe fn save(gl: &'a gl::Context) -> Self {
++        let active = gl.get_parameter_i32(gl::ACTIVE_TEXTURE);
++        gl.active_texture(gl::TEXTURE0);
++        let mut viewport = [0; 4]; gl.get_parameter_i32_slice(gl::VIEWPORT, &mut viewport);
++        let mut mask = [0; 4]; gl.get_parameter_i32_slice(gl::COLOR_WRITEMASK, &mut mask);
++        let mut caps: Vec<_> = [gl::BLEND, gl::DEPTH_TEST, gl::STENCIL_TEST, gl::SCISSOR_TEST,
++            gl::CULL_FACE, gl::DITHER, gl::RASTERIZER_DISCARD, gl::SAMPLE_ALPHA_TO_COVERAGE,
++            gl::SAMPLE_COVERAGE].iter().map(|&cap| (cap, gl.is_enabled(cap))).collect();
++        if gl.supported_extensions().contains("GL_EXT_sRGB_write_control") { caps.push((0x8DB9, gl.is_enabled(0x8DB9))); }
++        let state = Self { gl, active, caps, viewport, mask,
++            program: gl.get_parameter_i32(gl::CURRENT_PROGRAM), vao: gl.get_parameter_i32(gl::VERTEX_ARRAY_BINDING),
++            draw: gl.get_parameter_i32(gl::DRAW_FRAMEBUFFER_BINDING), read: gl.get_parameter_i32(gl::READ_FRAMEBUFFER_BINDING),
++            external: gl.get_parameter_i32(0x8D67), texture: gl.get_parameter_i32(gl::TEXTURE_BINDING_2D),
++            sampler: gl.get_parameter_i32(gl::SAMPLER_BINDING), pack_buffer: gl.get_parameter_i32(gl::PIXEL_PACK_BUFFER_BINDING),
++            pack: [gl::PACK_ALIGNMENT, gl::PACK_ROW_LENGTH, gl::PACK_SKIP_ROWS, gl::PACK_SKIP_PIXELS].map(|p| gl.get_parameter_i32(p)) };
++        gl.active_texture(active as u32);
++        state
++    }
++}
++impl Drop for State<'_> {
++    fn drop(&mut self) { unsafe {
++        let gl = self.gl;
++        gl.use_program(name(self.program).map(gl::NativeProgram));
++        gl.bind_vertex_array(name(self.vao).map(gl::NativeVertexArray));
++        gl.bind_framebuffer(gl::DRAW_FRAMEBUFFER, name(self.draw).map(gl::NativeFramebuffer));
++        gl.bind_framebuffer(gl::READ_FRAMEBUFFER, name(self.read).map(gl::NativeFramebuffer));
++        gl.active_texture(gl::TEXTURE0);
++        gl.bind_texture(GL_TEXTURE_EXTERNAL_OES, name(self.external).map(gl::NativeTexture));
++        gl.bind_texture(gl::TEXTURE_2D, name(self.texture).map(gl::NativeTexture));
++        gl.bind_sampler(0, name(self.sampler).map(gl::NativeSampler));
++        gl.active_texture(self.active as u32);
++        gl.bind_buffer(gl::PIXEL_PACK_BUFFER, name(self.pack_buffer).map(gl::NativeBuffer));
++        for (p, v) in [gl::PACK_ALIGNMENT, gl::PACK_ROW_LENGTH, gl::PACK_SKIP_ROWS, gl::PACK_SKIP_PIXELS].into_iter().zip(self.pack) { gl.pixel_store_i32(p, v); }
++        gl.viewport(self.viewport[0], self.viewport[1], self.viewport[2], self.viewport[3]);
++        gl.color_mask(self.mask[0] != 0, self.mask[1] != 0, self.mask[2] != 0, self.mask[3] != 0);
++        for &(cap, enabled) in &self.caps { if enabled { gl.enable(cap); } else { gl.disable(cap); } }
++    } }
++}
++
++struct Objects<'a> {
++    context: &'a GraphicsContext, textures: Vec<gl::Texture>, shaders: Vec<gl::Shader>,
++    program: Option<gl::Program>, vao: Option<gl::VertexArray>, fbo: Option<gl::Framebuffer>,
++    image: super::egl::EGLImage, owns_image: bool,
++}
++impl Drop for Objects<'_> {
++    fn drop(&mut self) { unsafe {
++        let gl = &self.context.gl_context;
++        // Complete all sampling before deleting the EGL sibling or releasing the AHB lease.
++        gl.finish();
++        for &texture in &self.textures { gl.delete_texture(texture); }
++        for &shader in &self.shaders { gl.delete_shader(shader); }
++        if let Some(program) = self.program { gl.delete_program(program); }
++        if let Some(vao) = self.vao { gl.delete_vertex_array(vao); }
++        if let Some(fbo) = self.fbo { gl.delete_framebuffer(fbo); }
++        if self.owns_image && !self.image.is_null() { (self.context.destroy_image)(self.context.egl_display.as_ptr(), self.image); }
++        // A diagnostic GL allocation/import error must not poison the renderer's
++        // next ck! call. Bound the drain even if the context has been lost.
++        for _ in 0..8 {
++            let error = gl.get_error();
++            if error == gl::NO_ERROR { break; }
++            marker(format!("readback_cleanup_gl_error={error:#x}"));
++        }
++    } }
++}
++
++unsafe fn read_pixels(gl: &gl::Context, size: UVec2) -> Result<Vec<u8>, String> {
++    if size.x == 0 || size.y == 0 || u64::from(size.x) * u64::from(size.y) * 4 > 256 * 1024 * 1024 { return Err("invalid extent".into()); }
++    if gl.check_framebuffer_status(gl::FRAMEBUFFER) != gl::FRAMEBUFFER_COMPLETE { return Err("incomplete framebuffer".into()); }
++    gl.bind_buffer(gl::PIXEL_PACK_BUFFER, None);
++    for (p, value) in [(gl::PACK_ALIGNMENT, 1), (gl::PACK_ROW_LENGTH, 0), (gl::PACK_SKIP_ROWS, 0), (gl::PACK_SKIP_PIXELS, 0)] { gl.pixel_store_i32(p, value); }
++    let length = size.x as usize * size.y as usize * 4;
++    let mut pixels = Vec::new();
++    pixels.try_reserve_exact(length).map_err(|_| "readback allocation failed".to_owned())?;
++    pixels.resize(length, 0);
++    gl.read_pixels(0, 0, size.x as i32, size.y as i32, gl::RGBA, gl::UNSIGNED_BYTE, gl::PixelPackData::Slice(Some(&mut pixels)));
++    let error = gl.get_error();
++    if error != gl::NO_ERROR { return Err(format!("GLES readback error {error:#x}")); }
++    Ok(pixels)
++}
++
++unsafe fn read_decoded(context: &GraphicsContext, source: *mut c_void,
++    packed: UVec2, test_image: Option<super::egl::EGLImage>) -> Result<Image, String> {
++    let gl = &context.gl_context;
++    if !gl.supported_extensions().contains("GL_OES_EGL_image_external_essl3") { return Err("missing external-image ESSL3".into()); }
++    let _state = State::save(gl);
++    gl.active_texture(gl::TEXTURE0);
++    let mut objects = Objects { context, textures: vec![], shaders: vec![], program: None,
++        vao: None, fbo: None, image: std::ptr::null_mut(), owns_image: test_image.is_none() };
++    let program = gl.create_program()?; objects.program = Some(program);
++    for (kind, code) in [(gl::VERTEX_SHADER, include_str!("../resources/frame_dump_vertex.glsl")),
++        (gl::FRAGMENT_SHADER, include_str!("../resources/frame_dump_fragment.glsl"))] {
++        let shader = gl.create_shader(kind)?; objects.shaders.push(shader);
++        gl.shader_source(shader, code); gl.compile_shader(shader);
++        if !gl.get_shader_compile_status(shader) { return Err(gl.get_shader_info_log(shader)); }
++        gl.attach_shader(program, shader);
++    }
++    gl.link_program(program);
++    if !gl.get_program_link_status(program) { return Err(gl.get_program_info_log(program)); }
++    let vao = gl.create_vertex_array()?; objects.vao = Some(vao); gl.bind_vertex_array(Some(vao));
++    let fbo = gl.create_framebuffer()?; objects.fbo = Some(fbo); gl.bind_framebuffer(gl::FRAMEBUFFER, Some(fbo));
++    let size = UVec2::new(packed.x * 2, packed.y);
++    if u64::from(size.x) * u64::from(size.y) * 4 > 256 * 1024 * 1024 { return Err("decoded extent too large".into()); }
++    let target = gl.create_texture()?; objects.textures.push(target);
++    gl.bind_texture(gl::TEXTURE_2D, Some(target));
++    gl.tex_storage_2d(gl::TEXTURE_2D, 1, gl::RGBA8, size.x as i32, size.y as i32);
++    gl.framebuffer_texture_2d(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, Some(target), 0);
++    let external = gl.create_texture()?; objects.textures.push(external);
++    objects.image = if let Some(image) = test_image { image } else {
++        let native = (context.get_native_client_buffer)(source);
++        if native.is_null() { return Err("missing native client buffer".into()); }
++        let attributes = [0x30D2, 1, super::egl::NONE]; // EGL_IMAGE_PRESERVED_KHR
++        (context.create_image)(context.egl_display.as_ptr(), super::egl::NO_CONTEXT,
++            0x3140, native, attributes.as_ptr())
++    };
++    if objects.image.is_null() { return Err("preserved EGL import failed".into()); }
++    gl.bind_texture(GL_TEXTURE_EXTERNAL_OES, Some(external));
++    (context.image_target_texture_2d)(GL_TEXTURE_EXTERNAL_OES, objects.image);
++    gl.bind_sampler(0, None);
++    for (p, v) in [(gl::TEXTURE_MIN_FILTER, gl::NEAREST), (gl::TEXTURE_MAG_FILTER, gl::NEAREST),
++        (gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE), (gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE)] { gl.tex_parameter_i32(GL_TEXTURE_EXTERNAL_OES, p, v as i32); }
++    for &(cap, _) in &_state.caps { gl.disable(cap); }
++    gl.color_mask(true, true, true, true);
++    gl.viewport(0, 0, size.x as i32, size.y as i32);
++    gl.use_program(Some(program));
++    gl.uniform_1_i32(gl.get_uniform_location(program, "tex").as_ref(), 0);
++    gl.draw_arrays(gl::TRIANGLES, 0, 3);
++    Ok(Image { stage: "post_decode", size, pixels: read_pixels(gl, size)?, row_order: "top_down" })
++}
++
++unsafe fn read_presented(context: &GraphicsContext, size: UVec2, textures: [u32; 2]) -> Result<Vec<Image>, String> {
++    let gl = &context.gl_context;
++    let _state = State::save(gl);
++    let mut objects = Objects { context, textures: vec![], shaders: vec![], program: None,
++        vao: None, fbo: None, image: std::ptr::null_mut(), owns_image: false };
++    let fbo = gl.create_framebuffer()?; objects.fbo = Some(fbo);
++    gl.bind_framebuffer(gl::FRAMEBUFFER, Some(fbo));
++    let mut images = vec![];
++    // Raw swapchain rows are bottom-up. Scorer flips these into presented top-down coordinates.
++    for (stage, texture) in ["presented_left", "presented_right"].into_iter().zip(textures) {
++        let texture = name(texture as i32).ok_or("missing swapchain texture")?;
++        gl.framebuffer_texture_2d(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, Some(gl::NativeTexture(texture)), 0);
++        images.push(Image { stage, size, pixels: read_pixels(gl, size)?, row_order: "bottom_up" });
++    }
++    Ok(images)
++}
++
++#[cfg(all(test, target_os = "linux"))]
++mod frame_dump_gles_tests {
++    use super::*;
++
++    #[test]
++    fn external_decode_and_eye_readback_are_exact_and_restore_gl_state() {
++        assert_eq!(std::env::var("LIBGL_ALWAYS_SOFTWARE").as_deref(), Ok("1"));
++        let context = GraphicsContext::new_gl();
++        assert_eq!(context.adapter.get_info().device_type, wgpu::DeviceType::Cpu);
++        context.make_current();
++        let gl = &context.gl_context;
++        unsafe {
++            let width = 64;
++            let height = 32;
++            let pixels: Vec<u8> = (0..width*height).flat_map(|i|
++                [((i % width)*3) as u8, ((i/width)*7) as u8, 80, 255]).collect();
++            let texture = gl.create_texture().unwrap();
++            gl.bind_texture(gl::TEXTURE_2D, Some(texture));
++            gl.tex_storage_2d(gl::TEXTURE_2D, 1, gl::RGBA8, width, height);
++            gl.tex_sub_image_2d(gl::TEXTURE_2D, 0, 0, 0, width, height, gl::RGBA,
++                gl::UNSIGNED_BYTE, gl::PixelUnpackData::Slice(Some(&pixels)));
++            let attrs = [0x30D2, 1, super::super::egl::NONE];
++            let image = (context.create_image)(context.egl_display.as_ptr(), context.egl_context.as_ptr(),
++                0x30B1, texture.0.get() as usize as *mut c_void, attrs.as_ptr());
++            assert!(!image.is_null());
++            let fbo = gl.create_framebuffer().unwrap();
++            gl.bind_framebuffer(gl::FRAMEBUFFER, Some(fbo));
++            gl.framebuffer_texture_2d(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, Some(texture), 0);
++            let vao = gl.create_vertex_array().unwrap();
++            gl.bind_vertex_array(Some(vao));
++            gl.viewport(2, 3, 13, 17);
++            gl.color_mask(false, true, false, true);
++            gl.enable(gl::SCISSOR_TEST);
++            gl.enable(gl::BLEND);
++            gl.pixel_store_i32(gl::PACK_ALIGNMENT, 8);
++            gl.pixel_store_i32(gl::PACK_ROW_LENGTH, 100);
++            gl.pixel_store_i32(gl::PACK_SKIP_ROWS, 2);
++            gl.pixel_store_i32(gl::PACK_SKIP_PIXELS, 3);
++            gl.active_texture(gl::TEXTURE3);
++            let before = State::save(gl);
++            let decoded = read_decoded(&context, std::ptr::null_mut(), UVec2::new(32, 32), Some(image)).unwrap();
++            let mut images = read_presented(&context, UVec2::new(64, 32), [texture.0.get(); 2]).unwrap();
++            images.push(decoded);
++            assert_eq!(images.len(), 3);
++            assert_eq!(images[2].stage, "post_decode");
++            assert_eq!(images[2].pixels, pixels);
++            assert_eq!(images[0].pixels, pixels);
++            let after = State::save(gl);
++            assert_eq!(after.viewport, before.viewport);
++            assert_eq!(after.mask, before.mask);
++            assert_eq!(after.pack, before.pack);
++            assert_eq!(after.caps, before.caps);
++            assert_eq!((after.active, after.vao, after.draw, after.read, after.program,
++                after.texture, after.external, after.sampler, after.pack_buffer),
++                (before.active, before.vao, before.draw, before.read, before.program,
++                before.texture, before.external, before.sampler, before.pack_buffer));
++            drop(after); drop(before);
++            (context.destroy_image)(context.egl_display.as_ptr(), image);
++            gl.bind_framebuffer(gl::FRAMEBUFFER, None);
++            gl.bind_vertex_array(None);
++            gl.delete_framebuffer(fbo); gl.delete_vertex_array(vao); gl.delete_texture(texture);
++        }
++    }
++}
+diff --git a/alvr/graphics/src/frame_dump_config.rs b/alvr/graphics/src/frame_dump_config.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..4d1d9355df416275e828f904fefd2eecc9f43243
+--- /dev/null
++++ b/alvr/graphics/src/frame_dump_config.rs
+@@ -0,0 +1,29 @@
++//! Standalone CPU policy tests: rustc --test frame_dump_config.rs.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub struct Config { pub count: u32, pub interval: u32 }
++
++pub fn parse(value: &str) -> Result<Option<Config>, &'static str> {
++    if value.is_empty() || value == "0" { return Ok(None); }
++    let (count, interval) = value.split_once(':').ok_or("expected count:interval")?;
++    fn number(text: &str, max: u32) -> Result<u32, &'static str> {
++        if text.is_empty() || !text.bytes().all(|c| c.is_ascii_digit()) { return Err("invalid number"); }
++        let n = text.parse::<u32>().map_err(|_| "number overflow")?;
++        if n == 0 || n > max { return Err("number outside capture limit"); }
++        Ok(n)
++    }
++    Ok(Some(Config { count: number(count, 128)?, interval: number(interval, 9000)? }))
++}
++
++#[cfg(test)]
++mod tests {
++    #[test]
++    fn default_off_and_limits() {
++        assert_eq!(super::parse(""), Ok(None));
++        assert_eq!(super::parse("0"), Ok(None));
++        assert_eq!(super::parse("128:9000"), Ok(Some(super::Config {count: 128, interval: 9000})));
++        for text in ["1", "1:0", "0:1", "129:1", "1:9001", "-1:1", "+1:1", "1:1:1",
++                     " 1:1", "1:1 ", "999999999999999999999:1", ":1"] {
++            assert!(super::parse(text).is_err(), "{text}");
++        }
++    }
++}
+diff --git a/alvr/graphics/src/lib.rs b/alvr/graphics/src/lib.rs
+index 4588b89cee3dd44a3a0d54cc4e80fada8a39294a..bcd49bdbe1bc79476fa05744935cfbd5e1d9129a 100644
+--- a/alvr/graphics/src/lib.rs
++++ b/alvr/graphics/src/lib.rs
+@@ -1,4 +1,6 @@
+ mod direct_eye;
++mod frame_dump;
++mod frame_dump_config;
+ mod lobby;
+ mod performance;
+ mod staging;
+diff --git a/alvr/graphics/src/stream.rs b/alvr/graphics/src/stream.rs
+index 9efed56cbf0802762c095b29644464ca48877e7d..5015670f73d75b16702c89febb3c89ae278b769b 100644
+--- a/alvr/graphics/src/stream.rs
++++ b/alvr/graphics/src/stream.rs
+@@ -5,7 +5,7 @@ use alvr_common::{
+ };
+ use alvr_session::{FoveationProfile, FoveatedEncodingConfig, PassthroughMode, UpscalingConfig};
+ use glow::HasContext;
+-use std::{cell::Cell, collections::HashMap, ffi::c_void, iter, mem, ptr, rc::Rc};
++use std::{cell::{Cell, RefCell}, collections::HashMap, ffi::c_void, iter, mem, ptr, rc::Rc};
+ use wgpu::{
+     hal::{api, gles},
+     include_wgsl, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
+@@ -14,7 +14,7 @@ use wgpu::{
+     FragmentState, LoadOp, PipelineCompilationOptions, PipelineLayoutDescriptor, PrimitiveState,
+     PrimitiveTopology, PushConstantRange, RenderPass, RenderPassColorAttachment,
+     RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor, SamplerBindingType,
+-    SamplerDescriptor, ShaderStages, StoreOp, TextureSampleType, TextureView,
++    SamplerDescriptor, ShaderStages, StoreOp, TextureFormat, TextureSampleType, TextureView,
+     TextureViewDescriptor, TextureViewDimension, VertexState,
+ };
+ 
+@@ -66,6 +66,10 @@ struct ViewObjects {
+ }
+ 
+ pub struct StreamRenderer {
++    frame_dump: RefCell<Option<super::frame_dump::FrameDump>>,
++    dump_swapchains: [Vec<u32>; 2],
++    dump_view_resolution: UVec2,
++    dump_sdr: bool,
+     context: Rc<GraphicsContext>,
+     staging_renderer: StagingRenderer,
+     pipeline: RenderPipeline,
+@@ -325,6 +329,10 @@ impl StreamRenderer {
+         );
+ 
+         Self {
++            frame_dump: RefCell::new(None),
++            dump_swapchains: swapchain_textures,
++            dump_view_resolution: target_view_resolution,
++            dump_sdr: matches!(target_format, TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb),
+             context,
+             staging_renderer,
+             pipeline,
+@@ -452,6 +460,33 @@ impl StreamRenderer {
+ 
+     pub fn last_copy_was_direct(&self) -> bool { self.last_copy_direct.get() }
+ 
++    pub fn set_frame_dump(&self, value: &str) {
++        if !self.dump_sdr && !value.is_empty() && value != "0" {
++            crate::log_quest_experiment("[Q3PW_FRAME_DUMP] disabled reason=HDR_unsupported".into());
++            return;
++        }
++        *self.frame_dump.borrow_mut() = super::frame_dump::FrameDump::new(value);
++    }
++
++    /// Read the selected decoder output before the presentation import.
++    /// # Safety
++    /// `source` is a completed, leased AHardwareBuffer.
++    pub unsafe fn begin_frame_capture(&self, source: *mut c_void, timestamp: u64) {
++        if let Some(dump) = self.frame_dump.borrow_mut().as_mut() {
++            dump.begin(&self.context, source, timestamp, self.presentation_geometry.0);
++        }
++    }
++
++    /// Read rendered eye images before OpenXR release.
++    /// # Safety
++    /// Indices are acquired/waited XR images; the selected source lease is held.
++    pub unsafe fn finish_frame_capture(&self, indices: [u32; 2]) {
++        if let Some(dump) = self.frame_dump.borrow_mut().as_mut() {
++            dump.finish(&self.context, self.dump_view_resolution, [self.dump_swapchains[0][indices[0] as usize],
++                    self.dump_swapchains[1][indices[1] as usize]]);
++        }
++    }
++
+     pub fn poll_import_copy(&self) -> (bool, Option<f32>) {
+         self.direct_eye_renderer.as_ref().map_or((true, None), |r| r.poll_copy())
+     }
+diff --git a/alvr/server_openvr/cpp/platform/win32/CEncoder.cpp b/alvr/server_openvr/cpp/platform/win32/CEncoder.cpp
+index e55d914e30748c021eda7a460bf33f901d323868..72bf8734d5ba405742f90e5296bf126b365d95a9 100644
+--- a/alvr/server_openvr/cpp/platform/win32/CEncoder.cpp
++++ b/alvr/server_openvr/cpp/platform/win32/CEncoder.cpp
+@@ -61,6 +61,7 @@ void CEncoder::Initialize(std::shared_ptr<CD3DRender> d3dRender) {
+     m_FrameRender->Startup();
+     uint32_t encoderWidth, encoderHeight;
+     m_FrameRender->GetEncodingResolution(&encoderWidth, &encoderHeight);
++    m_frameDump = q3pw::FrameDump::FromEnvironment(d3dRender);
+ 
+     Exception vceException;
+     Exception nvencException;
+@@ -178,6 +179,12 @@ void CEncoder::Run() {
+             break;
+ 
+         if (m_FrameRender->GetTexture()) {
++            if (m_frameDump) {
++                ID3D11Texture2D* planes[3] = {};
++                if (FrameRender::PyroWaveEnabled()) m_FrameRender->GetPlanarTextures(planes);
++                m_frameDump->Capture(m_FrameRender->GetTexture().Get(),
++                    FrameRender::PyroWaveEnabled() ? planes : nullptr, m_targetTimestampNs);
++            }
+             m_videoEncoder->Transmit(
+                 m_FrameRender->GetTexture().Get(),
+                 m_presentationTime,
+diff --git a/alvr/server_openvr/cpp/platform/win32/CEncoder.h b/alvr/server_openvr/cpp/platform/win32/CEncoder.h
+index 2bb63017cb162e291065d9b156fe0826f9fc53af..93d61541f955cddf0775d3eb8bcf8930e2faa80e 100644
+--- a/alvr/server_openvr/cpp/platform/win32/CEncoder.h
++++ b/alvr/server_openvr/cpp/platform/win32/CEncoder.h
+@@ -4,6 +4,7 @@
+ #include "shared/threadtools.h"
+ 
+ #include "FrameRender.h"
++#include "Q3PWFrameDump.h"
+ #include "VideoEncoder.h"
+ #include "VideoEncoderAMF.h"
+ #include "VideoEncoderNVENC.h"
+@@ -91,6 +92,7 @@ private:
+     uint64_t m_targetTimestampNs;
+ 
+     std::shared_ptr<FrameRender> m_FrameRender;
++    std::unique_ptr<q3pw::FrameDump> m_frameDump;
+ 
+     IDRScheduler m_scheduler;
+ };
+diff --git a/alvr/server_openvr/cpp/platform/win32/Q3PWFrameDump.h b/alvr/server_openvr/cpp/platform/win32/Q3PWFrameDump.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..5490787d07a97dbfdd59c840a910a31243209d7a
+--- /dev/null
++++ b/alvr/server_openvr/cpp/platform/win32/Q3PWFrameDump.h
+@@ -0,0 +1,182 @@
++#pragma once
++#include "Q3PWFrameDumpConfig.h"
++#include "alvr_server/Logger.h"
++#include "alvr_server/Settings.h"
++#include "shared/d3drender.h"
++#include <wrl.h>
++#include <chrono>
++#include <condition_variable>
++#include <cstdlib>
++#include <cstring>
++#include <deque>
++#include <filesystem>
++#include <fstream>
++#include <memory>
++#include <mutex>
++#include <stdexcept>
++#include <thread>
++#include <vector>
++
++namespace q3pw {
++// Diagnostic only: synchronous GPU readback, bounded asynchronous disk writer.
++// The immediate context is touched only by CEncoder::Run, while its input is stable.
++class FrameDump {
++    struct Job {
++        uint64_t timestamp, index;
++        uint32_t width, height;
++        std::string format, range;
++        std::vector<uint8_t> pixels;
++    };
++    FrameDumpConfig config;
++    std::shared_ptr<CD3DRender> render;
++    std::filesystem::path directory;
++    uint64_t seen = 0;
++    uint32_t attempted = 0;
++    std::mutex mutex;
++    std::condition_variable wake;
++    std::deque<Job> queue;
++    bool stopping = false;
++    std::thread writer;
++
++    static void ReadPlane(CD3DRender& render, ID3D11Texture2D* source,
++                          unsigned bytesPerPixel, std::vector<uint8_t>& pixels) {
++        if (!source) throw std::runtime_error("missing encoder input plane");
++        D3D11_TEXTURE2D_DESC desc;
++        source->GetDesc(&desc);
++        if (desc.SampleDesc.Count != 1 || desc.ArraySize != 1 || desc.MipLevels != 1
++            || uint64_t(desc.Width) * desc.Height * bytesPerPixel > 256ull * 1024 * 1024)
++            throw std::runtime_error("unsupported input extent");
++        desc.Usage = D3D11_USAGE_STAGING;
++        desc.BindFlags = desc.MiscFlags = 0;
++        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
++        Microsoft::WRL::ComPtr<ID3D11Texture2D> staging;
++        if (FAILED(render.GetDevice()->CreateTexture2D(&desc, nullptr, &staging)))
++            throw std::runtime_error("CreateTexture2D failed");
++        auto* context = render.GetContext();
++        context->CopyResource(staging.Get(), source);
++        D3D11_MAPPED_SUBRESOURCE mapped;
++        if (FAILED(context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped)))
++            throw std::runtime_error("Map failed");
++        const auto stride = size_t(desc.Width) * bytesPerPixel;
++        // Always unmap if vector growth fails.
++        try {
++            const auto offset = pixels.size();
++            pixels.resize(offset + stride * desc.Height);
++            for (unsigned row = 0; row < desc.Height; ++row)
++                memcpy(pixels.data() + offset + row * stride,
++                       static_cast<const uint8_t*>(mapped.pData) + row * mapped.RowPitch, stride);
++        } catch (...) { context->Unmap(staging.Get(), 0); throw; }
++        context->Unmap(staging.Get(), 0);
++    }
++
++    void Write() {
++        for (;;) {
++            Job job;
++            {
++                std::unique_lock<std::mutex> lock(mutex);
++                wake.wait(lock, [this] { return stopping || !queue.empty(); });
++                if (queue.empty()) return;
++                job = std::move(queue.front());
++                queue.pop_front();
++            }
++            try {
++                const auto base = directory / (std::to_string(job.timestamp) + "-encoder_input");
++                auto raw = base; raw += ".raw";
++                auto meta = base; meta += ".json";
++                std::ofstream bytes(raw, std::ios::binary);
++                bytes.exceptions(std::ios::badbit | std::ios::failbit);
++                bytes.write(reinterpret_cast<const char*>(job.pixels.data()), job.pixels.size());
++                bytes.close();
++                // Sidecar is the completion record. A partial raw file is never paired.
++                std::ofstream json(meta);
++                json.exceptions(std::ios::badbit | std::ios::failbit);
++                json << "{\"schema\":1,\"timestamp_ns\":" << job.timestamp
++                     << ",\"frame_index\":" << job.index << ",\"stage\":\"encoder_input\""
++                     << ",\"width\":" << job.width << ",\"height\":" << job.height
++                     << ",\"format\":\"" << job.format << "\",\"range\":\"" << job.range
++                     << "\",\"matrix\":\"bt709\",\"row_order\":\"top_down\",\"bytes\":"
++                     << job.pixels.size() << ",\"complete\":true}\n";
++                json.close();
++                Warn("[Q3PW_FRAME_DUMP] stage=encoder_input timestamp_ns=%llu written=1\n",
++                     (unsigned long long)job.timestamp);
++            } catch (const std::exception& e) {
++                Warn("[Q3PW_FRAME_DUMP] write_failed=%s\n", e.what());
++            }
++        }
++    }
++
++    FrameDump(FrameDumpConfig c, std::shared_ptr<CD3DRender> r)
++        : config(std::move(c)), render(std::move(r)) {
++        directory = std::filesystem::path(config.directory) / ("server-" + std::to_string(
++            std::chrono::system_clock::now().time_since_epoch().count()));
++        std::filesystem::create_directories(directory);
++        writer = std::thread([this] { Write(); });
++        Warn("[Q3PW_FRAME_DUMP] enabled count=%u interval=%u synchronous_gpu_readback=1 async_disk=1\n",
++             config.count, config.interval);
++    }
++
++public:
++    static std::unique_ptr<FrameDump> FromEnvironment(std::shared_ptr<CD3DRender> render) {
++        // Read once at encoder initialization. Off: no allocation, thread, GPU work or per-frame env reads.
++        const char* value = std::getenv("ALVR_Q3PW_FRAME_DUMP");
++        if (!value || !*value) return nullptr;
++        FrameDumpConfig config;
++        if (!ParseFrameDump(value, config)) {
++            Warn("[Q3PW_FRAME_DUMP] invalid ALVR_Q3PW_FRAME_DUMP; disabled\n");
++            return nullptr;
++        }
++        try { return std::unique_ptr<FrameDump>(new FrameDump(config, std::move(render))); }
++        catch (const std::exception& e) {
++            Warn("[Q3PW_FRAME_DUMP] setup_failed=%s; disabled\n", e.what());
++            return nullptr;
++        }
++    }
++
++    ~FrameDump() {
++        { std::lock_guard<std::mutex> lock(mutex); stopping = true; }
++        wake.notify_one();
++        if (writer.joinable()) writer.join();
++    }
++
++    void Capture(ID3D11Texture2D* texture, ID3D11Texture2D* const* planes, uint64_t timestamp) {
++        const auto index = seen++;
++        if (attempted >= config.count || index % config.interval) return;
++        ++attempted;
++        {
++            std::lock_guard<std::mutex> lock(mutex);
++            if (queue.size() >= 1) {
++                Warn("[Q3PW_FRAME_DUMP] timestamp_ns=%llu dropped=writer_busy\n", (unsigned long long)timestamp);
++                return;
++            }
++        }
++        const auto start = std::chrono::steady_clock::now();
++        try {
++            D3D11_TEXTURE2D_DESC desc;
++            (planes ? planes[0] : texture)->GetDesc(&desc);
++            Job job {timestamp, index, desc.Width, desc.Height, "", "full", {}};
++            if (planes) {
++                D3D11_TEXTURE2D_DESC chroma;
++                planes[1]->GetDesc(&chroma);
++                job.format = chroma.Width == desc.Width ? "yuv444p" : "yuv420p";
++                job.range = Settings::Instance().m_useFullRangeEncoding ? "full" : "limited";
++                for (int i = 0; i < 3; ++i) ReadPlane(*render, planes[i], 1, job.pixels);
++            } else {
++                switch (desc.Format) {
++                case DXGI_FORMAT_R8G8B8A8_UNORM:
++                case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB: job.format = "rgba8"; break;
++                case DXGI_FORMAT_B8G8R8A8_UNORM:
++                case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: job.format = "bgra8"; break;
++                default: throw std::runtime_error("only SDR RGBA8/BGRA8 or PyroWave planes supported");
++                }
++                ReadPlane(*render, texture, 4, job.pixels);
++            }
++            { std::lock_guard<std::mutex> lock(mutex); queue.push_back(std::move(job)); }
++            wake.notify_one();
++        } catch (const std::exception& e) {
++            Warn("[Q3PW_FRAME_DUMP] timestamp_ns=%llu readback_failed=%s\n", (unsigned long long)timestamp, e.what());
++        }
++        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
++        Warn("[Q3PW_FRAME_DUMP] timestamp_ns=%llu encoder_stall_ms=%.3f\n", (unsigned long long)timestamp, ms);
++    }
++};
++} // namespace q3pw
+diff --git a/alvr/server_openvr/cpp/platform/win32/Q3PWFrameDumpConfig.h b/alvr/server_openvr/cpp/platform/win32/Q3PWFrameDumpConfig.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..c5eae5845e0c25264ea1cb65d334277887319730
+--- /dev/null
++++ b/alvr/server_openvr/cpp/platform/win32/Q3PWFrameDumpConfig.h
+@@ -0,0 +1,37 @@
++#pragma once
++#include <cstdint>
++#include <string>
++
++namespace q3pw {
++struct FrameDumpConfig {
++    std::string directory;
++    uint32_t count = 0, interval = 0;
++};
++
++inline bool DumpNumber(const std::string& text, uint32_t maximum, uint32_t& value) {
++    if (text.empty()) return false;
++    uint64_t n = 0;
++    for (char c : text) {
++        if (c < '0' || c > '9') return false;
++        n = n * 10 + unsigned(c - '0');
++        if (n > maximum) return false;
++    }
++    if (!n) return false;
++    value = uint32_t(n);
++    return true;
++}
++
++// Split from the RIGHT: a Windows drive letter and directory colons are not delimiters.
++inline bool ParseFrameDump(const std::string& text, FrameDumpConfig& out) {
++    const auto last = text.rfind(':');
++    if (last == std::string::npos || last == 0) return false;
++    const auto previous = text.rfind(':', last - 1);
++    if (previous == std::string::npos || previous == 0) return false;
++    FrameDumpConfig parsed;
++    parsed.directory = text.substr(0, previous);
++    if (!DumpNumber(text.substr(previous + 1, last - previous - 1), 128, parsed.count)
++        || !DumpNumber(text.substr(last + 1), 9000, parsed.interval)) return false;
++    out = parsed;
++    return true;
++}
++} // namespace q3pw

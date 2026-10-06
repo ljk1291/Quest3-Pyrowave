@@ -11,6 +11,31 @@ from pathlib import Path
 
 NEUTRAL_RGB_CODES = (0, 16, 32, 64, 128, 192, 235, 255)
 REFERENCE_CANVAS_EYE = (2080, 2208)
+QUALITY_ORIGIN = (-650, -760)
+QUALITY_LINE_BOX = (740, 55, 411, 361)
+QUALITY_STRIPE_BOX = (40, 490, 1200, 117)
+
+
+def quality_regions(width, height, projection, normalized=True):
+    """Eye-local pixel boxes from the same geometry as the quality chart.
+
+    Caller must supply the projection of the captured coordinate domain. Packed
+    foveation is nonlinear: these rectangles cannot simply be scaled into it.
+    """
+    import math
+    left, right, top, bottom = projection
+    if not all(math.isfinite(v) for v in projection) or not (left < 0 < right and top < 0 < bottom):
+        raise ValueError('chart projection must straddle the optical axis')
+    rw, rh = REFERENCE_CANVAS_EYE if normalized else (width, height)
+    cx, cy = int(rw * -left / (right-left)), int(rh * -top / (bottom-top))
+    x0, y0 = cx + QUALITY_ORIGIN[0], cy + QUALITY_ORIGIN[1]
+    result = {}
+    for name, (x, y, w, h) in [('chart_lines', QUALITY_LINE_BOX), ('chart_stripes', QUALITY_STRIPE_BOX)]:
+        a, b, c, d = round((x0+x)*width/rw), round((y0+y)*height/rh), round((x0+x+w)*width/rw), round((y0+y+h)*height/rh)
+        if not (0 <= a < c <= width and 0 <= b < d <= height):
+            raise ValueError(f'{name} falls outside captured eye; provide mapped crops')
+        result[name] = (a, b, c-a, d-b)
+    return result
 
 
 def render_modules():
@@ -38,7 +63,7 @@ def eye_pattern(width, height, label, color, projection, quality=False, neutral_
     cv2.arrowedLine(image, (cx + 600, cy), (cx + 850, cy), (0, 255, 255), 12)
     if quality:
         # Head-locked high-chroma diagnostics above the separate client overlay.
-        x0,y0=cx-650,cy-760
+        x0,y0=cx+QUALITY_ORIGIN[0],cy+QUALITY_ORIGIN[1]
         cv2.rectangle(image,(x0,y0),(cx+650,cy-100),(28,28,28),-1)
         colors=[(0,220,255),(255,255,0),(255,0,255),(0,255,80)]
         for i,c in enumerate(colors):
@@ -103,7 +128,7 @@ def normalized_eye_pattern(width, height, label, color, projection, quality=Fals
     cv2.arrowedLine(image, point(cx - 600, cy), point(cx - 850, cy), (0, 255, 255), thickness(12))
     cv2.arrowedLine(image, point(cx + 600, cy), point(cx + 850, cy), (0, 255, 255), thickness(12))
     if quality:
-        x0, y0 = cx - 650, cy - 760
+        x0, y0 = cx + QUALITY_ORIGIN[0], cy + QUALITY_ORIGIN[1]
         cv2.rectangle(image, point(x0, y0), point(cx + 650, cy - 100), (28, 28, 28), -1)
         colors = [(0, 220, 255), (255, 255, 0), (255, 0, 255), (0, 255, 80)]
         for i, color_value in enumerate(colors):

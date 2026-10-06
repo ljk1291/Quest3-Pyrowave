@@ -48,6 +48,12 @@ jobs:
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
           rustup run "$RUST_TOOLCHAIN" rustc --edition=2021 --test "$XRWIRED_INPUTS/research/ALVR-20.13.0/alvr/client_openxr/src/layer_filter.rs" -o /tmp/layer-filter-policy
           /tmp/layer-filter-policy
+      - name: Frame dump path and sampling configuration (CPU only)
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror tools/frame_dump_config_test.cpp -I "$XRWIRED_INPUTS/research/ALVR-20.13.0/alvr/server_openvr/cpp/platform/win32" -o /tmp/frame-dump-config
+          /tmp/frame-dump-config
+          rustup run "$RUST_TOOLCHAIN" rustc --edition=2021 --test "$XRWIRED_INPUTS/research/ALVR-20.13.0/alvr/graphics/src/frame_dump_config.rs" -o /tmp/frame-dump-client-config
+          /tmp/frame-dump-client-config
       - run: python3 -m unittest tools.tests.test_dualstream_h264_design -v
       - run: g++ -std=c++17 -Wall -Werror tools/pyroclient/decode_path_test.cpp -o /tmp/decode-path && /tmp/decode-path
       - name: Opt-in decoder queue priority parsing and fallback (CPU only)
@@ -121,6 +127,7 @@ jobs:
           cargo +"$RUST_TOOLCHAIN" test -p alvr_graphics --lib image_import_policy_tests
           cargo +"$RUST_TOOLCHAIN" test -p alvr_graphics --lib direct_eye_foveation_policy_tests
           LD_LIBRARY_PATH="/tmp/q3pw-gles-only${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" xvfb-run -a cargo +"$RUST_TOOLCHAIN" test -p alvr_graphics --lib staging_correctness_tests -- --nocapture --test-threads=1
+          LD_LIBRARY_PATH="/tmp/q3pw-gles-only${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" xvfb-run -a cargo +"$RUST_TOOLCHAIN" test -p alvr_graphics --lib frame_dump_gles_tests -- --nocapture --test-threads=1
       - name: Compositor filter policy checks (no OpenXR runtime)
         run: |
           rustup run "$RUST_TOOLCHAIN" rustc --edition=2021 --test "$XRWIRED_INPUTS/research/ALVR-20.13.0/alvr/client_openxr/src/layer_filter.rs" -o /tmp/layer-filter-policy

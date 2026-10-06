@@ -1,5 +1,16 @@
 # Patches
 
+## `frame-dump.patch`: lossless live quality diagnostics
+
+Additive overlay last, after `direct-eye-foveation.patch`, on the complete locked
+ALVR stack. SHA-256 is pinned in `sources.lock.json` and checked before application.
+Default-off server `ALVR_Q3PW_FRAME_DUMP=directory:count:interval` and Android
+`debug.q3pw.frame_dump=count:interval` capture the actual encoder input, decoded
+external RGB and final acquired eye textures with transported timestamp identity.
+Selected GPU readbacks stall and log their cost; disk writes are asynchronous and
+bounded. See [FRAME-DUMP](../docs/FRAME-DUMP.md) for formats, scorer commands,
+packed/chart coordinate limits and native/device verification still required.
+
 ## `presentation-filters.patch`: T2 compositor tokens and PC session downsample
 
 Additive overlay after `foveated-staging-correctness.patch`, on the complete locked
