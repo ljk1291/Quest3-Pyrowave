@@ -11,3 +11,5 @@ captures/** -text
 tools/tests/fixtures/pyrowave-d2997ac-psnr.cpp text eol=lf
 tools/tests/fixtures/pyrowave-d2997ac-psnr_hvs_m.comp text eol=lf
 tools/xrbench/native/* text eol=lf
+# Byte-compared with the HLSL embedded via patches/presentation-filters.patch (LF).
+tools/downsample/*.hlsl text eol=lf
