@@ -25,6 +25,8 @@ class StagingCorrectnessContract(unittest.TestCase):
                      '"debug.q3pw.staging_isolation") == "1"',
                      '.filter(|c| !c.blur_only).map(|c| c.resolved_geometry())'):
             self.assertIn(text,patch)
+        self.assertIn('precision highp float;',patch)
+        self.assertIn('precision highp samplerExternalOES;',patch)
         workflow=(ROOT/'.github/workflows/ci.yml').read_text(encoding='utf-8')
         self.assertIn('cargo +"$RUST_TOOLCHAIN" test -p alvr_graphics --lib staging_correctness_tests',workflow)
         self.assertIn("LIBGL_ALWAYS_SOFTWARE: '1'",workflow)

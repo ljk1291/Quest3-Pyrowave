@@ -23,6 +23,20 @@ index 91c7fbbaefbb52b77040538da1ec58da28c83d8a..0f9b7f530b069c4f838edfaa734ae575
              self.renderer.set_direct_eye_copy(
                  codec == CodecType::PyroWave && alvr_system_info::platform() == Platform::Quest3
                      && crate::extra_extensions::perf_settings::system_property("debug.q3pw.direct_eye_copy") == "1",
+diff --git a/alvr/graphics/resources/staging_fragment.glsl b/alvr/graphics/resources/staging_fragment.glsl
+index 7bfba12ca0479598b4060b84664695a82c96411d..5fd8190ec28161d8953a8355bb0c9a9457973727 100644
+--- a/alvr/graphics/resources/staging_fragment.glsl
++++ b/alvr/graphics/resources/staging_fragment.glsl
+@@ -1,6 +1,9 @@
+ #version 300 es
+ #extension GL_OES_EGL_image_external_essl3 : enable
+ 
++precision highp float;
++precision highp samplerExternalOES;
++
+ uniform samplerExternalOES tex;
+ 
+ // Convert from limited colors to full
 diff --git a/alvr/graphics/src/staging.rs b/alvr/graphics/src/staging.rs
 index 779de33ca83d78d9b52c92193b54f60b00056503..d51c2750e698a61f047cb54e6f18135bfe1a93a4 100644
 --- a/alvr/graphics/src/staging.rs
@@ -162,7 +176,7 @@ index 779de33ca83d78d9b52c92193b54f60b00056503..d51c2750e698a61f047cb54e6f18135b
              ck!(gl.delete_texture(self.surface_texture));
              for framebuffer in &self.framebuffers {
 diff --git a/alvr/graphics/src/stream.rs b/alvr/graphics/src/stream.rs
-index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..0805d4e41b93f3fae3a49461e6dbc815d03b670b 100644
+index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..77c39bbed7931431112722af7fd07ad849665512 100644
 --- a/alvr/graphics/src/stream.rs
 +++ b/alvr/graphics/src/stream.rs
 @@ -182,6 +182,12 @@ impl StreamRenderer {
@@ -208,7 +222,7 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..0805d4e41b93f3fae3a49461e6dbc815
      pub fn last_copy_was_direct(&self) -> bool { self.last_copy_direct.get() }
  
      pub fn poll_import_copy(&self) -> (bool, Option<f32>) {
-@@ -720,3 +735,121 @@ pub fn compute_target_view_resolution(
+@@ -720,3 +735,125 @@ pub fn compute_target_view_resolution(
      }
      target_resolution.as_uvec2()
  }
@@ -249,8 +263,12 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..0805d4e41b93f3fae3a49461e6dbc815
 +            "run this gate only in the explicitly software-rendered CI environment");
 +        struct Diagnostics;
 +        impl log::Log for Diagnostics {
-+            fn enabled(&self, _: &log::Metadata) -> bool { true }
-+            fn log(&self, record: &log::Record) { eprintln!("{} {}",record.target(),record.args()); }
++            fn enabled(&self, metadata: &log::Metadata) -> bool {
++                metadata.level() <= log::Level::Info || metadata.target() == "wgpu_hal::gles::egl"
++            }
++            fn log(&self, record: &log::Record) {
++                if self.enabled(record.metadata()) { eprintln!("{} {}",record.target(),record.args()); }
++            }
 +            fn flush(&self) {}
 +        }
 +        static DIAGNOSTICS: Diagnostics=Diagnostics;

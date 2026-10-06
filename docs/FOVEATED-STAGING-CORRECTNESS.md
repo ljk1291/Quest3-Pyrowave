@@ -20,6 +20,9 @@ signing identity and baseline defaults. No install is performed.
   inverse mapping call it. Persisted raw Custom fields stay unchanged.
 - `alvr/client_openxr/src/stream.rs`: blur-only filtering does not run an inverse
   squeeze on a full-size bitstream. Blur-only remains excluded from our test plan.
+- `alvr/graphics/resources/staging_fragment.glsl`: declare float/external-sampler
+  precision explicitly. Strict GLSL ES compilation rejected the inherited shader
+  before any pixel check. This is a portability fix, not proof of the Quest cause.
 - Matching-build provenance pins this exact ALVR-only overlay. Historical HVS
   compatibility names its restricted role; scorer and PyroWave source remain unchanged.
 
@@ -36,12 +39,14 @@ claim is unsupported by the source review.
 
 ## Regression and morning gate
 
-The Linux software GLES test uses the actual Rust staging draw, actual WGSL
+The Linux software test uses wgpu's GLES backend with a CPU Mesa OpenGL adapter,
+the actual Rust staging draw, actual WGSL
 inverse mapping and actual projection transform. An owned GL texture becomes
 an EGLImage source. It checks every output pixel for both eyes for all three
 fixed profiles, with isolation off and on; the on case injects hostile blend,
 cull and color-mask state. It does not exercise Android AHB import, Qualcomm's
-driver or OpenXR presentation. Native Rust tests also preserve Custom geometry
+driver or OpenXR presentation. Its adapter/API identity is logged and a CPU
+renderer is mandatory; it is not a Qualcomm GLES performance result. Native Rust tests also preserve Custom geometry
 and reproduce the stale raw fields from the failed session.
 
 Before Metro or timing: independently verify a matching pair, obtain installation
