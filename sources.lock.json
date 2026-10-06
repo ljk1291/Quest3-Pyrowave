@@ -51,6 +51,10 @@
     "foveated_staging_correctness": {
       "path": "patches/foveated-staging-correctness.patch",
       "sha256": "5669391d973c8b399f053d93335bd796ab2107a6476b6d8674b18187bb9c75ee"
+    },
+    "presentation_filters": {
+      "path": "patches/presentation-filters.patch",
+      "sha256": "3316be0e1fb9ec453d1c40a4e7584baa8a621be901c77080b7a55061d166c044"
     }
   },
   "rust": "1.97.1",

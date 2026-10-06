@@ -1,0 +1,924 @@
+diff --git a/alvr/client_openxr/src/layer_filter.rs b/alvr/client_openxr/src/layer_filter.rs
+index dd8ac37722ae4b7010d7dcbeb773b1762fd5fcd6..6c496b4a184d22a9a4574483c8cdb592c099b2ff 100644
+--- a/alvr/client_openxr/src/layer_filter.rs
++++ b/alvr/client_openxr/src/layer_filter.rs
+@@ -8,6 +8,8 @@ pub const PROPERTY: &str = "debug.q3pw.layer_filter";
+ 
+ const NORMAL_SUPER_SAMPLING: u64 = 1 << 0;
+ const QUALITY_SUPER_SAMPLING: u64 = 1 << 1;
++const NORMAL_SHARPENING: u64 = 1 << 2;
++const QUALITY_SHARPENING: u64 = 1 << 3;
+ const AUTO_LAYER_FILTER: u64 = 1 << 5;
+ 
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+@@ -16,6 +18,7 @@ pub enum Requested {
+     Normal,
+     Quality,
+     Auto,
++    Tokens(u64),
+     Invalid,
+ }
+ 
+@@ -43,47 +46,46 @@ impl Decision {
+     }
+ }
+ 
++// Token vocabulary adapted from JMS1717/Quest3-Pyrowave
++// 2de8ad13973ed9c3a8e72f4c85a79e1e7e5d085a. Unknown/empty tokens reject
++// the complete request. FB permits normal+quality (normal takes precedence).
+ pub fn requested_from_property(value: &str) -> Requested {
+     match value.trim() {
+-        "" | "0" => Requested::Off,
+-        "1" => Requested::Normal,
+-        "2" => Requested::Quality,
+-        "3" => Requested::Auto,
+-        _ => Requested::Invalid,
++        "" | "0" => return Requested::Off,
++        "1" => return Requested::Normal,
++        "2" => return Requested::Quality,
++        "3" => return Requested::Auto,
++        _ => {},
+     }
++    let mut flags = 0;
++    for token in value.split('+').map(str::trim) {
++        flags |= match token {
++            "supersample" => NORMAL_SUPER_SAMPLING,
++            "supersample_hq" => QUALITY_SUPER_SAMPLING,
++            "sharpen" => NORMAL_SHARPENING,
++            "sharpen_hq" => QUALITY_SHARPENING,
++            "auto" => AUTO_LAYER_FILTER,
++            _ => return Requested::Invalid,
++        };
++    }
++    if flags == AUTO_LAYER_FILTER { Requested::Invalid } else { Requested::Tokens(flags) }
+ }
+ 
+ pub fn resolve(value: &str, has_fb_settings: bool, has_meta_auto: bool) -> Decision {
+     let requested = requested_from_property(value);
+-    match requested {
+-        Requested::Off | Requested::Invalid => Decision::Disabled { requested },
+-        Requested::Normal | Requested::Quality if !has_fb_settings => Decision::Unsupported {
+-            requested,
+-            missing_fb: true,
+-            missing_meta: false,
+-        },
+-        Requested::Normal => Decision::Active {
+-            requested,
+-            flags: NORMAL_SUPER_SAMPLING,
+-            enable_meta: false,
+-        },
+-        Requested::Quality => Decision::Active {
+-            requested,
+-            flags: QUALITY_SUPER_SAMPLING,
+-            enable_meta: false,
+-        },
+-        Requested::Auto if !has_fb_settings || !has_meta_auto => Decision::Unsupported {
+-            requested,
+-            missing_fb: !has_fb_settings,
+-            missing_meta: !has_meta_auto,
+-        },
+-        // XR_META_automatic_layer_filter requires a non-auto flag too. Normal is
+-        // deliberate: auto is an opt-in low-cost candidate, not an implicit quality mode.
+-        Requested::Auto => Decision::Active {
+-            requested,
+-            flags: NORMAL_SUPER_SAMPLING | AUTO_LAYER_FILTER,
+-            enable_meta: true,
+-        },
++    let flags = match requested {
++        Requested::Off | Requested::Invalid => return Decision::Disabled { requested },
++        Requested::Normal => NORMAL_SUPER_SAMPLING,
++        Requested::Quality => QUALITY_SUPER_SAMPLING,
++        Requested::Auto => NORMAL_SUPER_SAMPLING | AUTO_LAYER_FILTER,
++        Requested::Tokens(flags) => flags,
++    };
++    let enable_meta = flags & AUTO_LAYER_FILTER != 0;
++    if !has_fb_settings || (enable_meta && !has_meta_auto) {
++        Decision::Unsupported { requested, missing_fb: !has_fb_settings,
++            missing_meta: enable_meta && !has_meta_auto }
++    } else {
++        Decision::Active { requested, flags, enable_meta }
+     }
+ }
+ 
+@@ -122,4 +124,34 @@ mod tests {
+         assert!(active.enables_fb());
+         assert!(active.enables_meta());
+     }
++    #[test]
++    fn tokens_map_to_the_spec_bits() {
++        for (text, flags) in [("sharpen", 4), ("sharpen_hq", 8),
++            ("supersample", 1), ("supersample_hq", 2),
++            (" sharpen_hq + supersample_hq ", 0xa), ("sharpen+auto", 0x24),
++            ("supersample+supersample_hq+sharpen+sharpen_hq", 0xf),
++            ("sharpen+sharpen", 4)] {
++            assert_eq!(resolve(text, true, true).flags(), Some(flags), "{text}");
++        }
++    }
++
++    #[test]
++    fn invalid_requests_are_atomic() {
++        for text in ["auto", "auto+auto", "sharpen+", "+sharpen", "sharpen++auto",
++            "sharpen+typo", "SHARPEN", "1+sharpen", "off+sharpen"] {
++            assert_eq!(requested_from_property(text), Requested::Invalid, "{text}");
++            assert!(!resolve(text, true, true).enables_fb());
++        }
++    }
++
++    #[test]
++    fn every_token_request_requires_all_its_extensions() {
++        for text in ["sharpen", "sharpen_hq+supersample_hq", "sharpen+auto"] {
++            assert_eq!(resolve(text, false, true).flags(), None);
++        }
++        assert_eq!(resolve("sharpen+auto", true, false).flags(), None);
++        assert_eq!(resolve("sharpen_hq", true, false).flags(), Some(8));
++        assert!(!resolve("sharpen_hq", true, false).enables_meta());
++    }
++
+ }
+diff --git a/alvr/client_openxr/src/lib.rs b/alvr/client_openxr/src/lib.rs
+index 29c8ba88dbc0cbe27bb033be5c2f1597319217a2..ee0f78c5009df21674d7e7feec369bbf093b6181 100644
+--- a/alvr/client_openxr/src/lib.rs
++++ b/alvr/client_openxr/src/lib.rs
+@@ -173,9 +173,12 @@ pub fn entry_point() {
+ 
+     let available_extensions = xr_entry.enumerate_extensions().unwrap();
+     alvr_common::info!("OpenXR available extensions: {available_extensions:#?}");
++    let layer_filter_request = if platform == Platform::Quest3 {
++        extra_extensions::perf_settings::system_property(layer_filter::PROPERTY)
++    } else { "0".to_owned() };
+     let layer_filter = if platform == Platform::Quest3 {
+         layer_filter::resolve(
+-            &extra_extensions::perf_settings::system_property(layer_filter::PROPERTY),
++            &layer_filter_request,
+             available_extensions.fb_composition_layer_settings,
+             available_extensions.meta_automatic_layer_filter,
+         )
+@@ -184,14 +187,14 @@ pub fn entry_point() {
+     };
+     match layer_filter {
+         layer_filter::Decision::Active { requested, flags, .. } => error!(
+-            "[Q3PW_LAYER_FILTER] requested={requested:?} active_flags=0x{flags:x} fb_settings=true meta_auto={}",
++            "[Q3PW_LAYER_FILTER] request={layer_filter_request:?} requested={requested:?} active_flags=0x{flags:x} fb_settings=true meta_auto={}",
+             layer_filter.enables_meta(),
+         ),
+         layer_filter::Decision::Unsupported { requested, missing_fb, missing_meta } => error!(
+-            "[Q3PW_LAYER_FILTER] requested={requested:?} active_flags=none missing_fb={missing_fb} missing_meta={missing_meta}"
++            "[Q3PW_LAYER_FILTER] request={layer_filter_request:?} requested={requested:?} active_flags=none missing_fb={missing_fb} missing_meta={missing_meta}"
+         ),
+         layer_filter::Decision::Disabled { requested } => error!(
+-            "[Q3PW_LAYER_FILTER] requested={requested:?} active_flags=none"
++            "[Q3PW_LAYER_FILTER] request={layer_filter_request:?} requested={requested:?} active_flags=none"
+         ),
+     }
+     // Kept as its own Vec because `available_extensions` is consumed further down, and the
+diff --git a/alvr/dashboard/src/dashboard/components/settings_controls/presets/builtin_schema.rs b/alvr/dashboard/src/dashboard/components/settings_controls/presets/builtin_schema.rs
+index 93cd6baee3242b80126299b874d0c0b4a6ac887b..2c22792ef84fbef2259493caf025c534c16f0ca3 100644
+--- a/alvr/dashboard/src/dashboard/components/settings_controls/presets/builtin_schema.rs
++++ b/alvr/dashboard/src/dashboard/components/settings_controls/presets/builtin_schema.rs
+@@ -354,10 +354,10 @@ afterwards leaves no profile selected; pick the profile again to return to it."
+ /// Render size as a share of the Quest 3 panel (not lens-corrected recommendation).
+ pub fn render_scale_schema() -> PresetSchemaNode {
+     PresetSchemaNode::HigherOrderChoice(HigherOrderChoiceSchema {
+-        name: "render_scale".into(),
++        name: "Render and stream size preset (sets both)".into(),
+         strings: [(
+             "help".into(),
+-            "Per-eye render size as a share of the Quest 3 2064x2208 panel. The starting preset uses 100 percent, with uniform full-frame rendering."
++            "Sets both sizes as a share of the panel. For independent sizes use Video: Game render resolution per eye and Stream resolution per eye."
+                 .into(),
+         )]
+         .into_iter()
+diff --git a/alvr/server_core/src/connection.rs b/alvr/server_core/src/connection.rs
+index 003726ed1c1f1d8150bcdc29d5a009c54ead52f7..6e3ac1e428421039cba76137a7f1433b322d67bf 100644
+--- a/alvr/server_core/src/connection.rs
++++ b/alvr/server_core/src/connection.rs
+@@ -269,6 +269,7 @@ fn openvr_config_with_env(
+         pyrowave_wavelet_haar: pyrowave.wavelet_haar,
+         pyrowave_decode_path: pyrowave.decode_path as u32,
+         pyrowave_chroma_444: settings.video.pyrowave.chroma_444,
++        render_downsample_filter: settings.video.pyrowave.render_downsample_filter as u32,
+         pyrowave_rdo_pixels_per_degree: pyrowave.rdo_pixels_per_degree.unwrap_or(0.0),
+         _controller_profile,
+         _server_impl_debug: settings.extra.logging.debug_groups.server_impl,
+@@ -1666,4 +1667,19 @@ mod beta_tests {
+         assert!(!config.pyrowave_udp);
+         assert!(config.pyrowave_wavelet_53);
+     }
++    #[test]
++    fn downsample_setting_reaches_native_config_for_every_codec() {
++        use alvr_session::settings::{CodecType, RenderDownsampleFilter};
++        for codec in [CodecType::H264, CodecType::Hevc, CodecType::AV1, CodecType::PyroWave] {
++            for filter in [RenderDownsampleFilter::Bilinear, RenderDownsampleFilter::Adaptive, RenderDownsampleFilter::Area] {
++                let mut saved = serde_json::to_value(SessionConfig::default()).unwrap();
++                saved["session_settings"]["video"]["preferred_codec"]["variant"] = serde_json::to_value(codec).unwrap();
++                saved["session_settings"]["video"]["pyrowave"]["render_downsample_filter"]["variant"] = serde_json::to_value(filter).unwrap();
++                let mut session = SessionConfig::default();
++                session.merge_from_json(&saved).unwrap();
++                assert_eq!(openvr_config_with_env(&session, &|_| None).render_downsample_filter, filter as u32);
++            }
++        }
++    }
++
+ }
+diff --git a/alvr/server_openvr/cpp/alvr_server/Settings.cpp b/alvr/server_openvr/cpp/alvr_server/Settings.cpp
+index b4987b59d2c3355c30356febaeeeaa721299082c..2cbdf8c8f4cd1cfa17db791a254866ca0e0c19c3 100644
+--- a/alvr/server_openvr/cpp/alvr_server/Settings.cpp
++++ b/alvr/server_openvr/cpp/alvr_server/Settings.cpp
+@@ -68,6 +68,10 @@ void Settings::Load() {
+         m_pyrowaveUdp = config.get("pyrowave_udp").get<bool>();
+         m_pyrowaveWavelet53 = config.get("pyrowave_wavelet_53").get<bool>();
+         m_pyrowaveWaveletHaar = config.get("pyrowave_wavelet_haar").get<bool>();
++        m_renderDownsampleFilter = 0;
++        if (config.get("render_downsample_filter").is<int64_t>()) {
++            m_renderDownsampleFilter = (int)config.get("render_downsample_filter").get<int64_t>();
++        }
+         m_pyrowaveChroma444 = config.get("pyrowave_chroma_444").get<bool>();
+         m_pyrowaveDecodePath = (int32_t)config.get("pyrowave_decode_path").get<int64_t>();
+         m_pyrowaveRdoPixelsPerDegree = (float)config.get("pyrowave_rdo_pixels_per_degree").get<double>();
+diff --git a/alvr/server_openvr/cpp/alvr_server/Settings.h b/alvr/server_openvr/cpp/alvr_server/Settings.h
+index 1ad686a1b949e5177919cbb681519bd793bf59e2..582ff5a2c43ea8a01531261ed63817d5d63fe181 100644
+--- a/alvr/server_openvr/cpp/alvr_server/Settings.h
++++ b/alvr/server_openvr/cpp/alvr_server/Settings.h
+@@ -47,6 +47,7 @@ public:
+     bool m_pyrowaveUdp = false;
+     bool m_pyrowaveWavelet53 = false;
+     bool m_pyrowaveWaveletHaar = false;
++    int m_renderDownsampleFilter = 0; // Missing legacy setting = Bilinear.
+     bool m_pyrowaveChroma444 = false;
+     int m_pyrowaveDecodePath = 0; // 0 auto, 1 fragment, 2 compute
+     float m_pyrowaveRdoPixelsPerDegree = 0.0f; // zero: legacy/environment RDO selection
+diff --git a/alvr/server_openvr/cpp/alvr_server/alvr_server.cpp b/alvr/server_openvr/cpp/alvr_server/alvr_server.cpp
+index 37a853654ce6978edb8e81ab67b7788362ec604c..8f6726058093a83291e2065f1355363e1e117b72 100644
+--- a/alvr/server_openvr/cpp/alvr_server/alvr_server.cpp
++++ b/alvr/server_openvr/cpp/alvr_server/alvr_server.cpp
+@@ -500,3 +500,6 @@ void CaptureFrame() {
+     }
+ #endif
+ }
++
++const unsigned char* FRAME_RENDER_PS_ADAPTIVE_CSO_PTR;
++unsigned int FRAME_RENDER_PS_ADAPTIVE_CSO_LEN;
+diff --git a/alvr/server_openvr/cpp/alvr_server/bindings.h b/alvr/server_openvr/cpp/alvr_server/bindings.h
+index 7e72d91449ceb66987f808f284ce1fc7eeb9e417..368c52cd0bd686f1e641d243bffc57c4553cec1b 100644
+--- a/alvr/server_openvr/cpp/alvr_server/bindings.h
++++ b/alvr/server_openvr/cpp/alvr_server/bindings.h
+@@ -200,3 +200,6 @@ void ParseFrameNals(
+ 
+ // CrashHandler.cpp
+ void HookCrashHandler();
++
++extern "C" const unsigned char* FRAME_RENDER_PS_ADAPTIVE_CSO_PTR;
++extern "C" unsigned int FRAME_RENDER_PS_ADAPTIVE_CSO_LEN;
+diff --git a/alvr/server_openvr/cpp/alvr_server/shader/FrameRenderPSAdaptive.hlsl b/alvr/server_openvr/cpp/alvr_server/shader/FrameRenderPSAdaptive.hlsl
+new file mode 100644
+index 0000000000000000000000000000000000000000..426469f39524ccc97b97457ed91a28d95c624e9d
+--- /dev/null
++++ b/alvr/server_openvr/cpp/alvr_server/shader/FrameRenderPSAdaptive.hlsl
+@@ -0,0 +1,198 @@
++// Adapted from JMS1717/Quest3-Pyrowave 2de8ad13973ed9c3a8e72f4c85a79e1e7e5d085a.
++// Quest3-Pyrowave PC composition filter (pixel shader, ps_5_0).
++//
++// Replaces the composition pass's single bilinear tap when the game renders above the stream
++// resolution. Each output pixel measures its footprint in source texels from the UV derivatives
++// and applies a Catmull-Rom kernel widened to that footprint, so a 3072x3216 eye is averaged
++// into a 2080x2208 stream pixel instead of point-sampled. At equal render and stream size the
++// kernel collapses to the identity on texel centers.
++//
++// Separable weights let each pair of adjacent same-sign texels share one bilinear fetch (exact
++// for a separable kernel). Pairs that straddle a kernel zero crossing, or are merged by edge
++// clamping, use point fetches instead. Taps are clamped to the layer's submitted bounds so a
++// side-by-side game texture never bleeds the other eye into the edge.
++//
++// Signature matches FrameRender.fx's VS output and PS; the post-filter colour handling below is
++// copied from that PS so both paths produce identical colour on identical filtered input.
++// tools/downsample/reference.py models the same weights for CPU regression tests.
++
++cbuffer FrameRenderParams : register(b0) {
++    float encodingGamma;
++    float _padding0;
++    float _padding1;
++    float _padding2;
++
++    float4 boundsLeft;  // uMin, vMin, uMax, vMax of the submitted eye region
++    float4 boundsRight;
++};
++
++Texture2D txLeft : register(t0);
++Texture2D txRight : register(t1);
++SamplerState samClampLinear : register(s0);
++
++struct PS_INPUT {
++    float4 Pos : SV_POSITION;
++    float2 Tex : TEXCOORD;
++    uint View : VIEW;
++};
++
++// Footprints above this are filtered as if they were this wide (under-filtered, never skipped).
++// 3.0 keeps the loop at <= 7x7 bilinear pairs and covers render scales up to 3x per axis.
++#define MAX_SCALE 3.0
++#define MAX_PAIRS 7
++
++float CatmullRom(float x) {
++    x = abs(x);
++    if (x < 1.0) return (1.5 * x - 2.5) * x * x + 1.0;
++    if (x < 2.0) return ((-0.5 * x + 2.5) * x - 4.0) * x + 2.0;
++    return 0.0;
++}
++
++struct AxisPair {
++    float p0; // texel-space positions (texel i spans [i, i + 1])
++    float w0;
++    float p1;
++    float w1;
++};
++
++// Pair k covers texels first + 2k and first + 2k + 1. lo/hi are the clamped texel indices.
++AxisPair MakePair(float first, int k, float center, float invScale, float lo, float hi) {
++    float ia = first + 2.0 * k;
++    float ib = ia + 1.0;
++    float wa = CatmullRom((ia + 0.5 - center) * invScale);
++    float wb = CatmullRom((ib + 0.5 - center) * invScale);
++    float ja = clamp(ia, lo, hi);
++    float jb = clamp(ib, lo, hi);
++    AxisPair r;
++    r.p1 = 0.0;
++    r.w1 = 0.0;
++    if (ja == jb) {
++        r.p0 = ja + 0.5;
++        r.w0 = wa + wb;
++    } else if (wa * wb > 0.0) {
++        r.w0 = wa + wb;
++        r.p0 = ja + 0.5 + wb / r.w0;
++    } else {
++        r.p0 = ja + 0.5;
++        r.w0 = wa;
++        r.p1 = jb + 0.5;
++        r.w1 = wb;
++    }
++    return r;
++}
++
++float4 FilterEye(Texture2D tex, float4 bounds, float2 uv, float2 scale) {
++    float width, height;
++    tex.GetDimensions(width, height);
++    float2 size = float2(width, height);
++    float2 t = uv * size;
++    // Texels whose centers lie inside the submitted bounds (bounds may be flipped).
++    float2 bMin = min(bounds.xy, bounds.zw) * size;
++    float2 bMax = max(bounds.xy, bounds.zw) * size;
++    float2 lo = ceil(bMin - 0.5);
++    float2 hi = max(lo, floor(bMax - 0.5));
++    float2 invScale = 1.0 / scale;
++    float2 first = floor(t - 0.5 - 2.0 * scale);
++    float2 last = floor(t - 0.5 + 2.0 * scale);
++    int2 pairs = min(int2((last - first + 2.0) * 0.5), MAX_PAIRS);
++    float2 invSize = 1.0 / size;
++
++    float4 sum = 0.0;
++    float weight = 0.0;
++    [loop] for (int ky = 0; ky < pairs.y; ky++) {
++        AxisPair py = MakePair(first.y, ky, t.y, invScale.y, lo.y, hi.y);
++        [loop] for (int kx = 0; kx < pairs.x; kx++) {
++            AxisPair px = MakePair(first.x, kx, t.x, invScale.x, lo.x, hi.x);
++            [unroll] for (int sy = 0; sy < 2; sy++) {
++                float wy = sy == 0 ? py.w0 : py.w1;
++                float y = sy == 0 ? py.p0 : py.p1;
++                [unroll] for (int sx = 0; sx < 2; sx++) {
++                    float w = wy * (sx == 0 ? px.w0 : px.w1);
++                    if (w != 0.0) {
++                        float x = sx == 0 ? px.p0 : px.p1;
++                        sum += w * tex.SampleLevel(samClampLinear, float2(x, y) * invSize, 0.0);
++                        weight += w;
++                    }
++                }
++            }
++        }
++    }
++    return weight != 0.0 ? sum / weight : tex.SampleLevel(samClampLinear, uv, 0.0);
++}
++
++#define SRGB_GAMMA_TO_NONLINEAR (1.0 / 2.4)
++#define SRGB_GAMMA_TO_LINEAR (2.4)
++
++float4 EncodingLinearToNonlinearRGB(float4 color, float gamma) {
++    float4 c;
++    c.r = (color.r <= 0.0) ? color.r : pow(color.r, gamma);
++    c.g = (color.g <= 0.0) ? color.g : pow(color.g, gamma);
++    c.b = (color.b <= 0.0) ? color.b : pow(color.b, gamma);
++    c.a = (color.a <= 0.0) ? color.a : pow(color.a, gamma);
++    return c;
++}
++
++float4 LinearToNonlinearRGB(float4 color, float gamma) {
++    float4 c;
++    c.r = (color.r <= 0.0031308) ? (color.r * 12.92) : (1.055 * pow(color.r, gamma) - 0.055);
++    c.g = (color.g <= 0.0031308) ? (color.g * 12.92) : (1.055 * pow(color.g, gamma) - 0.055);
++    c.b = (color.b <= 0.0031308) ? (color.b * 12.92) : (1.055 * pow(color.b, gamma) - 0.055);
++    c.a = (color.a <= 0.0031308) ? (color.a * 12.92) : (1.055 * pow(color.a, gamma) - 0.055);
++    return c;
++}
++
++float4 NonlinearToLinearRGB(float4 color, float gamma) {
++    float4 c;
++    c.r = (color.r <= 0.04045) ? (color.r / 12.92) : pow((color.r + 0.055) / 1.055, gamma);
++    c.g = (color.g <= 0.04045) ? (color.g / 12.92) : pow((color.g + 0.055) / 1.055, gamma);
++    c.b = (color.b <= 0.04045) ? (color.b / 12.92) : pow((color.b + 0.055) / 1.055, gamma);
++    c.a = (color.a <= 0.04045) ? (color.a / 12.92) : pow((color.a + 0.055) / 1.055, gamma);
++    return c;
++}
++
++float4 main(PS_INPUT input) : SV_Target {
++    uint correctionType = (input.View >> 1) & 0xF;
++    uint shouldClamp = (input.View >> 5);
++
++    // Footprint of one output pixel along each source axis, in source texels. Derivatives are
++    // taken before the per-eye branch; View is constant across each triangle.
++    bool right = (input.View & 1) == 1;
++    float width, height;
++    if (right) {
++        txRight.GetDimensions(width, height);
++    } else {
++        txLeft.GetDimensions(width, height);
++    }
++    float2 t = input.Tex * float2(width, height);
++    float2 dx = ddx(t);
++    float2 dy = ddy(t);
++    float2 scale = clamp(float2(length(float2(dx.x, dy.x)), length(float2(dx.y, dy.y))),
++        1.0, MAX_SCALE);
++
++    // if/else rather than ?: because HLSL evaluates both ternary operands.
++    float4 color;
++    if (right) {
++        color = FilterEye(txRight, boundsRight, input.Tex, scale);
++    } else {
++        color = FilterEye(txLeft, boundsLeft, input.Tex, scale);
++    }
++    // Catmull-Rom lobes can undershoot; negative light is never valid input below.
++    color = max(color, 0.0);
++
++    if (shouldClamp == (uint)1) {
++        color = clamp(color, 0.0, 1.0);
++    }
++
++    color = EncodingLinearToNonlinearRGB(color, encodingGamma);
++
++    if (correctionType == (uint)1) {
++        color = LinearToNonlinearRGB(color, SRGB_GAMMA_TO_NONLINEAR);
++    } else if (correctionType == (uint)2) {
++        color = NonlinearToLinearRGB(color, SRGB_GAMMA_TO_LINEAR);
++    }
++    if (shouldClamp == (uint)2) {
++        color = clamp(color, 0.0, 1.0);
++    }
++
++    return color;
++}
+diff --git a/alvr/server_openvr/cpp/platform/win32/FrameRender.cpp b/alvr/server_openvr/cpp/platform/win32/FrameRender.cpp
+index b6362b24bcdb69aba5e685f76ef0302039f6e908..9ad4390567ed1bb644cfea9ab82ee4c7173746ab 100644
+--- a/alvr/server_openvr/cpp/platform/win32/FrameRender.cpp
++++ b/alvr/server_openvr/cpp/platform/win32/FrameRender.cpp
+@@ -226,7 +226,12 @@ bool FrameRender::Startup() {
+ 
+     const char* filter = std::getenv("ALVR_Q3PW_DOWNSCALE");
+     const char* dither = std::getenv("ALVR_Q3PW_DITHER");
+-    if (filter && *filter && std::strcmp(filter, "off") && std::strcmp(filter, "area")) {
++    const int requestedFilter = Settings::Instance().m_renderDownsampleFilter;
++    if (requestedFilter < 0 || requestedFilter > 2) {
++        Error("[Q3PW_DOWNSAMPLE] invalid session filter=%d\n", requestedFilter);
++        return false;
++    }
++    if (requestedFilter == 0 && filter && *filter && std::strcmp(filter, "off") && std::strcmp(filter, "area")) {
+         Error("[Q3PW_QUALITY] unsupported ALVR_Q3PW_DOWNSCALE; use off or area\n");
+         return false;
+     }
+@@ -234,9 +239,11 @@ bool FrameRender::Startup() {
+         Error("[Q3PW_QUALITY] unsupported ALVR_Q3PW_DITHER; use 0 or 1\n");
+         return false;
+     }
+-    m_areaDownscale = filter && !std::strcmp(filter, "area");
++    m_legacyArea = requestedFilter == 0 && filter && !std::strcmp(filter, "area");
++    m_areaDownscale = requestedFilter == 2 || m_legacyArea;
++    m_adaptiveDownscale = requestedFilter == 1;
+     m_orderedDither = dither && !std::strcmp(dither, "1");
+-    if ((m_areaDownscale || m_orderedDither)
++    if ((m_legacyArea || m_orderedDither)
+         && (!PyroWaveEnabled() || Settings::Instance().m_enableHdr || Settings::Instance().m_enableFoveatedEncoding)) {
+         Error("[Q3PW_QUALITY] experiments require unfoveated SDR PyroWave\n");
+         return false;
+@@ -245,8 +252,10 @@ bool FrameRender::Startup() {
+         Warn("[Q3PW_QUALITY] downscale=%s dither=%s; experimental, default-off\n",
+             m_areaDownscale ? "area_box_max4" : "off", m_orderedDither ? "ordered4" : "off");
+     }
+-    const auto* ps = m_areaDownscale ? FRAME_RENDER_PS_AREA_CSO_PTR : FRAME_RENDER_PS_CSO_PTR;
+-    const auto psLen = m_areaDownscale ? FRAME_RENDER_PS_AREA_CSO_LEN : FRAME_RENDER_PS_CSO_LEN;
++    const auto* ps = m_adaptiveDownscale ? FRAME_RENDER_PS_ADAPTIVE_CSO_PTR
++        : m_areaDownscale ? FRAME_RENDER_PS_AREA_CSO_PTR : FRAME_RENDER_PS_CSO_PTR;
++    const auto psLen = m_adaptiveDownscale ? FRAME_RENDER_PS_ADAPTIVE_CSO_LEN
++        : m_areaDownscale ? FRAME_RENDER_PS_AREA_CSO_LEN : FRAME_RENDER_PS_CSO_LEN;
+     std::vector<uint8_t> pshader(ps, ps + psLen);
+     hr = m_pD3DRender->GetDevice()->CreatePixelShader(
+         (const DWORD*)&pshader[0], pshader.size(), NULL, &m_pPixelShader
+@@ -291,7 +300,7 @@ bool FrameRender::Startup() {
+     };
+     FrameRenderBuffer frameRenderStruct
+         = { (float)(1.0 / Settings::Instance().m_encodingGamma), 0.0f, 0.0f, 0.0f };
+-    if (m_areaDownscale) {
++    if (m_areaDownscale || m_adaptiveDownscale) {
+         const QualityFrameParams params = {frameRenderStruct.encodingGamma, {0,0,0}, {0,0,1,1}, {0,0,1,1}};
+         m_pFrameRenderCBuffer = CreateBuffer(m_pD3DRender->GetDevice(), params, D3D11_USAGE_DEFAULT);
+     } else {
+@@ -372,6 +381,16 @@ bool FrameRender::Startup() {
+         return false;
+     }
+ 
++    if (m_adaptiveDownscale) {
++        sampDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
++        sampDesc.AddressU = sampDesc.AddressV = sampDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
++        sampDesc.MaxAnisotropy = 1;
++        hr = m_pD3DRender->GetDevice()->CreateSamplerState(&sampDesc, &m_pAdaptiveSampler);
++        if (FAILED(hr)) {
++            Error("[Q3PW_DOWNSAMPLE] Adaptive sampler creation failed\n");
++            return false;
++        }
++    }
+     //
+     // Create alpha blend state
+     // We need alpha blending to support layer.
+@@ -711,6 +730,16 @@ bool FrameRender::Startup() {
+ 
+     Debug("Staging Texture created\n");
+ 
++    Warn("[Q3PW_DOWNSAMPLE] requested=%s effective=%s source=%s codec=%s composition_ready=true\n",
++        requestedFilter == 1 ? "Adaptive" : requestedFilter == 2 ? "Area" : "Bilinear",
++        m_adaptiveDownscale ? "Adaptive" : m_areaDownscale ? "Area" : "Bilinear",
++        m_legacyArea ? "legacy_environment" : "session", PyroWaveEnabled() ? "PyroWave" : "stock");
++    Warn("[FrameRender] game render %dx%d per eye recommendation -> stream %dx%d per eye %s downsample\n",
++        Settings::Instance().m_recommendedTargetWidth / 2, Settings::Instance().m_recommendedTargetHeight,
++        Settings::Instance().m_renderWidth / 2, Settings::Instance().m_renderHeight,
++        m_adaptiveDownscale ? "Adaptive" : m_areaDownscale ? "Area" : "Bilinear");
++
++
+     return true;
+ }
+ 
+@@ -1017,8 +1046,15 @@ bool FrameRender::RenderFrame(
+ 
+         m_pD3DRender->GetContext()->PSSetSamplers(0, 1, m_pSamplerLinear.GetAddressOf());
+ 
+-        if (m_areaDownscale) {
++        if (m_adaptiveDownscale) {
++            m_pD3DRender->GetContext()->PSSetSamplers(0, 1, m_pAdaptiveSampler.GetAddressOf());
++        }
++        if (m_areaDownscale || m_adaptiveDownscale) {
+             QualityFrameParams params = {};
++            if (m_submittedFilterGeometry.size() <= static_cast<size_t>(i)) {
++                m_submittedFilterGeometry.resize(static_cast<size_t>(i) + 1);
++            }
++            auto& previous = m_submittedFilterGeometry[static_cast<size_t>(i)];
+             params.encodingGamma = (float)(1.0 / Settings::Instance().m_encodingGamma);
+             for (int eye = 0; eye < 2; ++eye) {
+                 D3D11_TEXTURE2D_DESC desc;
+@@ -1029,11 +1065,23 @@ bool FrameRender::RenderFrame(
+                 const float v1 = (std::max)(bound[eye].vMin, bound[eye].vMax);
+                 if (!std::isfinite(u0) || !std::isfinite(u1) || !std::isfinite(v0) || !std::isfinite(v1)
+                     || u0 < 0 || u1 > 1 || v0 < 0 || v1 > 1 || u0 >= u1 || v0 >= v1
+-                    || desc.Width * (u1-u0) > m_viewportL.Width * 4.0f
+-                    || desc.Height * (v1-v0) > m_viewportL.Height * 4.0f) {
+-                    Error("[Q3PW_QUALITY] area filter requires valid eye crop and at most 4x minification\n");
++                    || (m_areaDownscale && (desc.Width * (u1-u0) > m_viewportL.Width * 4.0f
++                        || desc.Height * (v1-v0) > m_viewportL.Height * 4.0f))
++                    || std::ceil(u0 * desc.Width - .5f) > std::floor(u1 * desc.Width - .5f)
++                    || std::ceil(v0 * desc.Height - .5f) > std::floor(v1 * desc.Height - .5f)) {
++                    Error("[Q3PW_QUALITY] filter requires valid eye crop with texel centres (Area max 4x minification)\n");
+                     return false;
+                 }
++                const float geometryBounds[] = {u0, v0, u1, v1};
++                if (previous.width[eye] != desc.Width || previous.height[eye] != desc.Height
++                    || std::memcmp(previous.bounds + 4*eye, geometryBounds, sizeof(geometryBounds)) != 0) {
++                    Warn("[Q3PW_DOWNSAMPLE] layer=%d eye=%d submitted_texture=%ux%u crop=[%.6f,%.6f,%.6f,%.6f] source_extent=%.2fx%.2f stream=%.0fx%.0f footprint=%.4fx%.4f adaptive_max=3 area_max=4\n",
++                        i, eye, desc.Width, desc.Height, u0,v0,u1,v1,desc.Width*(u1-u0),desc.Height*(v1-v0),
++                        m_viewportL.Width,m_viewportL.Height,desc.Width*(u1-u0)/m_viewportL.Width,
++                        desc.Height*(v1-v0)/m_viewportL.Height);
++                }
++                previous.width[eye] = desc.Width; previous.height[eye] = desc.Height;
++                std::memcpy(previous.bounds + 4*eye, geometryBounds, sizeof(geometryBounds));
+                 float* dst = eye ? params.boundsRight : params.boundsLeft;
+                 dst[0] = u0; dst[1] = v0; dst[2] = u1; dst[3] = v1;
+             }
+diff --git a/alvr/server_openvr/cpp/platform/win32/FrameRender.h b/alvr/server_openvr/cpp/platform/win32/FrameRender.h
+index 7500aa0b7b8f8778acc360101e0923a443bab00b..d93d4b88cbdf106a62ac4eee1dac2b4b9d83153e 100644
+--- a/alvr/server_openvr/cpp/platform/win32/FrameRender.h
++++ b/alvr/server_openvr/cpp/platform/win32/FrameRender.h
+@@ -3,6 +3,7 @@
+ #include <memory>
+ #include <stdint.h>
+ #include <string>
++#include <vector>
+ 
+ #include <d3d11.h>
+ #include <d3dcompiler.h>
+@@ -89,6 +90,15 @@ private:
+     ComPtr<ID3D11Buffer> m_pIndexBuffer;
+     ComPtr<ID3D11Buffer> m_pFrameRenderCBuffer;
+     bool m_areaDownscale = false;
++    bool m_adaptiveDownscale = false;
++    bool m_legacyArea = false;
++    struct SubmittedFilterGeometry {
++        uint32_t width[2] = {}, height[2] = {};
++        float bounds[8] = {};
++    };
++    std::vector<SubmittedFilterGeometry> m_submittedFilterGeometry;
++    ComPtr<ID3D11SamplerState> m_pAdaptiveSampler;
++
+     bool m_orderedDither = false;
+     struct QualityFrameParams {
+         float encodingGamma;
+@@ -97,6 +107,8 @@ private:
+         float boundsRight[4];
+     };
+ 
++    static_assert(sizeof(QualityFrameParams) == 48, "quality cbuffer ABI");
++
+     ComPtr<ID3D11SamplerState> m_pSamplerLinear;
+ 
+     ComPtr<ID3D11RenderTargetView> m_pRenderTargetView;
+diff --git a/alvr/server_openvr/cpp/platform/win32/FrameRenderPSAdaptive.cso b/alvr/server_openvr/cpp/platform/win32/FrameRenderPSAdaptive.cso
+new file mode 100644
+index 0000000000000000000000000000000000000000..f5204a301f73cac86c7737f53242856a6e203ecd
+GIT binary patch
+literal 10724
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/alvr/server_openvr/src/graphics.rs b/alvr/server_openvr/src/graphics.rs
+index 8d333f64fbadb8622a4278c740972327e0125d2c..015126fa6116bf2fd7287e89bd90fae543a03d92 100644
+--- a/alvr/server_openvr/src/graphics.rs
++++ b/alvr/server_openvr/src/graphics.rs
+@@ -1,4 +1,5 @@
+ static FRAME_RENDER_VS_CSO: &[u8] = include_bytes!("../cpp/platform/win32/FrameRenderVS.cso");
++static FRAME_RENDER_PS_ADAPTIVE_CSO: &[u8] = include_bytes!("../cpp/platform/win32/FrameRenderPSAdaptive.cso");
+ static FRAME_RENDER_PS_AREA_CSO: &[u8] = include_bytes!("../cpp/platform/win32/FrameRenderPSArea.cso");
+ static RGBTOYUVPLANAR_DITHER_CSO: &[u8] = include_bytes!("../cpp/platform/win32/rgbtoyuvplanardither.cso");
+ static FRAME_RENDER_PS_CSO: &[u8] = include_bytes!("../cpp/platform/win32/FrameRenderPS.cso");
+@@ -22,6 +23,8 @@ pub fn initialize_shaders() {
+         crate::FRAME_RENDER_VS_CSO_LEN = FRAME_RENDER_VS_CSO.len() as _;
+         crate::FRAME_RENDER_PS_CSO_PTR = FRAME_RENDER_PS_CSO.as_ptr();
+         crate::FRAME_RENDER_PS_CSO_LEN = FRAME_RENDER_PS_CSO.len() as _;
++        crate::FRAME_RENDER_PS_ADAPTIVE_CSO_PTR = FRAME_RENDER_PS_ADAPTIVE_CSO.as_ptr();
++        crate::FRAME_RENDER_PS_ADAPTIVE_CSO_LEN = FRAME_RENDER_PS_ADAPTIVE_CSO.len() as _;
+         crate::FRAME_RENDER_PS_AREA_CSO_PTR = FRAME_RENDER_PS_AREA_CSO.as_ptr();
+         crate::FRAME_RENDER_PS_AREA_CSO_LEN = FRAME_RENDER_PS_AREA_CSO.len() as _;
+         crate::RGBTOYUVPLANAR_DITHER_CSO_PTR = RGBTOYUVPLANAR_DITHER_CSO.as_ptr();
+diff --git a/alvr/session/src/beta_tests.rs b/alvr/session/src/beta_tests.rs
+index 123e0fa9fa63a99e8958158d10f75ef248f77ba4..a738aba24eee7ff51f9295aa4a27e5a41f9a2173 100644
+--- a/alvr/session/src/beta_tests.rs
++++ b/alvr/session/src/beta_tests.rs
+@@ -31,7 +31,7 @@ fn video_shows_only_codec_experiment_controls() {
+     let entries = visible_children(&schema(), &["video"]).unwrap();
+     assert_eq!(
+         names(entries.clone(), Visibility::Experiment),
+-        sorted(&["passthrough", "bitrate", "preferred_codec", "pyrowave", "fov_crop"])
++        sorted(&["passthrough", "bitrate", "preferred_codec", "pyrowave", "fov_crop", "transcoding_view_resolution", "emulated_headset_view_resolution"])
+     );
+     assert_eq!(
+         names(entries, Visibility::Advanced),
+@@ -64,6 +64,7 @@ fn pyrowave_section_exposes_chroma_transport_wavelet_and_decode_path() {
+             "wavelet",
+             "decode_path",
+             "rdo_pixels_per_degree",
++            "render_downsample_filter",
+         ])
+     );
+     assert_eq!(
+@@ -425,3 +426,28 @@ fn haar_is_explicit_and_environment_does_not_select_both_transforms() {
+     assert!(e.wavelet_haar);
+     assert!(!e.wavelet_53);
+ }
++
++#[test]
++fn presentation_filter_defaults_and_legacy_migration() {
++    assert_eq!(default_settings().video.pyrowave.render_downsample_filter, RenderDownsampleFilter::Bilinear);
++    assert_eq!(visible_variants(&schema(), &["video", "pyrowave", "render_downsample_filter"]).unwrap(),
++        sorted(&["Bilinear", "Adaptive", "Area"]));
++    let mut old = json::to_value(SessionConfig::default()).unwrap();
++    old["session_settings"]["video"]["pyrowave"].as_object_mut().unwrap().remove("render_downsample_filter");
++    old["openvr_config"].as_object_mut().unwrap().remove("render_downsample_filter");
++    old["session_settings"]["video"]["pyrowave"]["wavelet"]["variant"] = "Haar".into();
++    let mut session = SessionConfig::default();
++    session.merge_from_json(&old).unwrap();
++    assert_eq!(session.to_settings().video.pyrowave.wavelet, PyroWaveWavelet::Haar);
++    assert_eq!(session.to_settings().video.pyrowave.render_downsample_filter, RenderDownsampleFilter::Bilinear);
++    for codec in [CodecType::H264, CodecType::Hevc, CodecType::AV1, CodecType::PyroWave] {
++        for filter in [RenderDownsampleFilter::Bilinear, RenderDownsampleFilter::Adaptive, RenderDownsampleFilter::Area] {
++            let mut selected = json::to_value(SessionConfig::default()).unwrap();
++            selected["session_settings"]["video"]["preferred_codec"]["variant"] = json::to_value(codec).unwrap();
++            selected["session_settings"]["video"]["pyrowave"]["render_downsample_filter"]["variant"] = json::to_value(filter).unwrap();
++            session.merge_from_json(&selected).unwrap();
++            assert_eq!(session.to_settings().video.pyrowave.render_downsample_filter, filter);
++            assert_eq!(session.to_settings().video.preferred_codec, codec);
++        }
++    }
++}
+diff --git a/alvr/session/src/lib.rs b/alvr/session/src/lib.rs
+index ae8ee1a223762be64f1967f193427708279a3770..ffa0759fa8d248523d7087c977f3d6f61135ad31 100644
+--- a/alvr/session/src/lib.rs
++++ b/alvr/session/src/lib.rs
+@@ -129,6 +129,8 @@ pub struct OpenvrConfig {
+     #[serde(default)]
+     pub pyrowave_chroma_444: bool,
+     #[serde(default)]
++    pub render_downsample_filter: u32,
++    #[serde(default)]
+     pub pyrowave_rdo_pixels_per_degree: f32,
+ 
+     // these settings are not used on the C++ side, but we need them to correctly trigger a SteamVR
+diff --git a/alvr/session/src/settings.rs b/alvr/session/src/settings.rs
+index c90595116aad8bf654f24c7df1ff625da4acc523..c6156a9fed32cb150a26862d7bcaa16dd56da848 100644
+--- a/alvr/session/src/settings.rs
++++ b/alvr/session/src/settings.rs
+@@ -498,7 +498,7 @@ pub struct ClientsideFoveationConfig {
+     pub mode: ClientsideFoveationMode,
+ 
+     #[schema(strings(display_name = "Foveation offset"))]
+-    #[schema(gui(slider(min = -45.0, max = 45.0, step = 0.1)), suffix = "°")]
++    #[schema(gui(slider(min = -45.0, max = 45.0, step = 0.1)), suffix = "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°")]
+     pub vertical_offset_deg: f32,
+ }
+ 
+@@ -703,8 +703,24 @@ pub enum PyroWaveDecodePath {
+     Fragment = 1,
+ }
+ 
++// Selector adapted from JMS1717/Quest3-Pyrowave 2de8ad13973ed9c3a8e72f4c85a79e1e7e5d085a.
++#[repr(u32)]
++#[derive(SettingsSchema, Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, Default)]
++pub enum RenderDownsampleFilter {
++    #[default]
++    Bilinear = 0,
++    Adaptive = 1,
++    Area = 2,
++}
++
+ #[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq, Debug)]
+ pub struct PyroWaveConfig {
++    #[serde(default)]
++    #[schema(strings(display_name = "Game render downsample filter (all codecs)",
++        help = "Bilinear preserves the legacy composition. Adaptive widens Catmull-Rom to the source footprint (up to 3x per axis); Area averages a box (up to 4x). Both clamp to each submitted eye. Applies to PyroWave, H.264, HEVC and AV1. Experimental: may soften detail or cost PC time. Restart SteamVR."))]
++    #[schema(flag = "steamvr-restart")]
++    pub render_downsample_filter: RenderDownsampleFilter,
++
+     #[serde(default)]
+     #[schema(strings(display_name = "Full chroma (4:4:4)", help = "Off: 4:2:0, half-width and half-height chroma with full-resolution luma. On: 4:4:4. Restart SteamVR after changing this."))]
+     #[schema(flag = "steamvr-restart")]
+@@ -804,22 +820,22 @@ pub struct RgbChromaKeyConfig {
+ 
+ #[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq, Debug)]
+ pub struct HsvChromaKeyConfig {
+-    #[schema(strings(display_name = "Hue start max"), suffix = "°")]
++    #[schema(strings(display_name = "Hue start max"), suffix = "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°")]
+     #[schema(flag = "real-time")]
+     #[schema(gui(slider(min = -179.0, max = 539.0, step = 1.0)))]
+     pub hue_start_max_deg: f32,
+ 
+-    #[schema(strings(display_name = "Hue start min"), suffix = "°")]
++    #[schema(strings(display_name = "Hue start min"), suffix = "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°")]
+     #[schema(flag = "real-time")]
+     #[schema(gui(slider(min = -179.0, max = 539.0, step = 1.0)))]
+     pub hue_start_min_deg: f32,
+ 
+-    #[schema(strings(display_name = "Hue end min"), suffix = "°")]
++    #[schema(strings(display_name = "Hue end min"), suffix = "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°")]
+     #[schema(flag = "real-time")]
+     #[schema(gui(slider(min = -179.0, max = 539.0, step = 1.0)))]
+     pub hue_end_min_deg: f32,
+ 
+-    #[schema(strings(display_name = "Hue end max"), suffix = "°")]
++    #[schema(strings(display_name = "Hue end max"), suffix = "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°")]
+     #[schema(flag = "real-time")]
+     #[schema(gui(slider(min = -179.0, max = 539.0, step = 1.0)))]
+     pub hue_end_max_deg: f32,
+@@ -975,17 +991,17 @@ pub struct VideoConfig {
+     pub mediacodec_extra_options: Vec<(String, MediacodecProperty)>,
+ 
+     #[schema(strings(
+-        help = "Resolution used for encoding and decoding. Relative to a single eye view."
++        display_name = "Stream resolution per eye",
++        help = "Encoding/decoding size, independent of game render resolution. Restart SteamVR."
+     ))]
+     #[schema(flag = "steamvr-restart")]
+-    #[schema(flag = "hidden")]
+     pub transcoding_view_resolution: FrameSize,
+ 
+     #[schema(strings(
+-        help = "This is the resolution that SteamVR will use as default for the game rendering. Relative to a single eye view."
++        display_name = "Game render resolution per eye",
++        help = "SteamVR recommendation, independent of stream size. Larger render costs PC GPU time. Keep SteamVR custom 100% to use this recommendation; games may cache their targets. Restart SteamVR."
+     ))]
+     #[schema(flag = "steamvr-restart")]
+-    #[schema(flag = "hidden")]
+     pub emulated_headset_view_resolution: FrameSize,
+ 
+     #[schema(strings(display_name = "Preferred FPS"))]
+@@ -1421,7 +1437,7 @@ Currently this cannot be reliably estimated automatically. The correct value sho
+ 
+     #[schema(flag = "real-time")]
+     // note: logarithmic scale seems to be glitchy for this control
+-    #[schema(gui(slider(min = 0.0, max = 100.0, step = 1.0)), suffix = "°/s")]
++    #[schema(gui(slider(min = 0.0, max = 100.0, step = 1.0)), suffix = "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°/s")]
+     pub angular_velocity_cutoff: f32,
+ 
+     #[schema(flag = "real-time")]
+@@ -1430,7 +1446,7 @@ Currently this cannot be reliably estimated automatically. The correct value sho
+     pub left_controller_position_offset: [f32; 3],
+ 
+     #[schema(flag = "real-time")]
+-    #[schema(gui(slider(min = -180.0, max = 180.0, step = 1.0)), suffix = "°")]
++    #[schema(gui(slider(min = -180.0, max = 180.0, step = 1.0)), suffix = "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°")]
+     pub left_controller_rotation_offset: [f32; 3],
+ 
+     #[schema(flag = "real-time")]
+@@ -1439,7 +1455,7 @@ Currently this cannot be reliably estimated automatically. The correct value sho
+     pub left_hand_tracking_position_offset: [f32; 3],
+ 
+     #[schema(flag = "real-time")]
+-    #[schema(gui(slider(min = -180.0, max = 180.0, step = 1.0)), suffix = "°")]
++    #[schema(gui(slider(min = -180.0, max = 180.0, step = 1.0)), suffix = "ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°")]
+     pub left_hand_tracking_rotation_offset: [f32; 3],
+ 
+     #[schema(strings(help = "List of OpenXR-syle paths"))]
+@@ -1913,6 +1929,9 @@ pub fn session_settings_default() -> SettingsDefault {
+                 variant: CodecTypeDefaultVariant::PyroWave,
+             },
+             pyrowave: PyroWaveConfigDefault {
++                render_downsample_filter: RenderDownsampleFilterDefault {
++                    variant: RenderDownsampleFilterDefaultVariant::Bilinear,
++                },
+                 chroma_444: false,
+                 transport: PyroWaveTransportDefault {
+                     variant: PyroWaveTransportDefaultVariant::Tcp,

@@ -69,3 +69,14 @@ patch. The corrected reconstruction includes its constructor, stored flags and
 projection-layer chain. All other WO-5 files remain byte-identical, the clean
 apply/reverse and fork-identity checks pass, and the shader manifest is unchanged.
 This correction requires a new full CI result before merge.
+
+## T2 token vocabulary, 2026-10-06
+
+The additive presentation overlay extends this numeric policy with `sharpen`,
+`sharpen_hq`, `supersample`, `supersample_hq` and companion `auto` tokens, keeping
+0–3 behavior. See [T2 configuration, exact flags, attribution and pending gates](T2-PRESENTATION-FILTERS.md).
+Unknown/empty tokens and auto-only requests reject the complete request. Missing
+advertised extensions produce no chain. Normal and HQ together are valid and normal
+takes precedence under the FB spec. Active native logs now retain the raw request
+alongside flags. Six pure Rust tests cover vocabulary, atomic rejection and support
+mapping; Actions execution and this fork's headset acceptance remain pending.
