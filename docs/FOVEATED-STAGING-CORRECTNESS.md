@@ -39,19 +39,25 @@ claim is unsupported by the source review.
 
 ## Regression and morning gate
 
-The Linux software test uses wgpu's GLES backend with a CPU Mesa OpenGL adapter,
-the actual Rust staging draw, actual WGSL
+The Linux software test uses real Mesa GLES with a CPU adapter, the actual
+Rust staging draw, actual WGSL
 inverse mapping and actual projection transform. An owned GL texture becomes
 an EGLImage source. It checks every output pixel for both eyes for all three
 fixed profiles, with isolation off and on; the on case injects hostile blend,
 cull and color-mask state. It does not exercise Android AHB import, Qualcomm's
-driver or OpenXR presentation. Its adapter/API identity is logged and a CPU
-renderer is mandatory; it is not a Qualcomm GLES performance result. Native Rust tests also preserve Custom geometry
+driver or OpenXR presentation. Its adapter/API identity is logged; a CPU renderer
+and an actual OpenGL ES version string are mandatory. wgpu24 prefers desktop GL
+if EGL advertises both APIs, so a CI-only EGL wrapper advertises just Mesa's
+supported GLES API. All other entry points, errors and pixels remain real Mesa;
+the wrapper is neither linked into nor shipped with either installable build.
+It is not a Qualcomm GLES performance result. Native Rust
+tests also preserve Custom geometry
 and reproduce the stale raw fields from the failed session.
 
 Before Metro or timing: independently verify a matching pair, obtain installation
-authorization, then run a finite supervised chart at a previously qualified
-transport rate. Compare isolation off/on with a native marker and decoded/staging
+authorization, then run a finite supervised chart at a conservative diagnostic
+rate (500 Mbps or lower). The stationary Q4 continuation does not qualify nominal
+1000 Mbps. Compare isolation off/on with a native marker and decoded/staging
 dimensions; ask the owner about labels, orientation, colours, moving content
 and corruption. Stop immediately on black/flashing. No optimization is promoted
 until this gate passes, followed by controlled timing and quality checks.

@@ -176,7 +176,7 @@ index 779de33ca83d78d9b52c92193b54f60b00056503..d51c2750e698a61f047cb54e6f18135b
              ck!(gl.delete_texture(self.surface_texture));
              for framebuffer in &self.framebuffers {
 diff --git a/alvr/graphics/src/stream.rs b/alvr/graphics/src/stream.rs
-index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..77c39bbed7931431112722af7fd07ad849665512 100644
+index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..b38426ef83f116b6912e85ac53cd2e9485b76043 100644
 --- a/alvr/graphics/src/stream.rs
 +++ b/alvr/graphics/src/stream.rs
 @@ -182,6 +182,12 @@ impl StreamRenderer {
@@ -222,7 +222,7 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..77c39bbed7931431112722af7fd07ad8
      pub fn last_copy_was_direct(&self) -> bool { self.last_copy_direct.get() }
  
      pub fn poll_import_copy(&self) -> (bool, Option<f32>) {
-@@ -720,3 +735,125 @@ pub fn compute_target_view_resolution(
+@@ -720,3 +735,128 @@ pub fn compute_target_view_resolution(
      }
      target_resolution.as_uvec2()
  }
@@ -279,6 +279,9 @@ index 97c8c694eec4acf135e2241a2bd99a8c69e34aec..77c39bbed7931431112722af7fd07ad8
 +        assert_eq!(adapter.device_type,wgpu::DeviceType::Cpu,"this gate must use a CPU renderer");
 +        eprintln!("software adapter: {adapter:?}");
 +        let gl=&context.gl_context;
++        let version=unsafe { gl.get_parameter_string(glow::VERSION) };
++        assert!(version.starts_with("OpenGL ES"),"external-image regression requires real GLES, got {version}");
++        eprintln!("software GL API: {version}");
 +        for profile in [FoveationProfile::Light,FoveationProfile::Medium,FoveationProfile::H264Fit] {
 +          for format in [glow::RGBA8,glow::SRGB8_ALPHA8] {
 +            for isolated in [false,true] {

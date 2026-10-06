@@ -32,5 +32,8 @@ class StagingCorrectnessContract(unittest.TestCase):
         self.assertIn("LIBGL_ALWAYS_SOFTWARE: '1'",workflow)
         production=workflow.split('name: Production foveated staging software GLES regression',1)[1].split('      - name:',1)[0]
         self.assertIn('libegl-dev libgles-dev',production)
+        self.assertIn('tools/ci/gles_only_egl.c',production)
+        self.assertIn('external-image regression requires real GLES',patch)
+        self.assertNotIn('MESA_NO_ERROR',production)
 
 if __name__=='__main__':unittest.main()

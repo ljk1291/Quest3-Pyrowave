@@ -101,8 +101,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends libegl-dev libgles-dev libegl-mesa0 libgl1-mesa-dri libgles2 libudev-dev xvfb xauth
+          mkdir -p /tmp/q3pw-gles-only
+          cc -std=c11 -Wall -Wextra -Werror -shared -fPIC tools/ci/gles_only_egl.c -Wl,--no-as-needed -lEGL -ldl -o /tmp/q3pw-gles-only/libEGL.so
           cd "$XRWIRED_INPUTS/research/ALVR-20.13.0"
-          xvfb-run -a cargo +"$RUST_TOOLCHAIN" test -p alvr_graphics --lib staging_correctness_tests -- --nocapture --test-threads=1
+          LD_LIBRARY_PATH="/tmp/q3pw-gles-only${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" xvfb-run -a cargo +"$RUST_TOOLCHAIN" test -p alvr_graphics --lib staging_correctness_tests -- --nocapture --test-threads=1
       - name: Compositor filter policy checks (no OpenXR runtime)
         run: |
           rustup run "$RUST_TOOLCHAIN" rustc --edition=2021 --test "$XRWIRED_INPUTS/research/ALVR-20.13.0/alvr/client_openxr/src/layer_filter.rs" -o /tmp/layer-filter-policy
