@@ -34,7 +34,39 @@ so they aren't retried by accident.
   partial-decode + critical-packet UDP transport if UDP loss is the problem; (3) fast 5/3 decode;
   (4) owner's worn check of the winners.
 
-## Candidates for the owner's worn check (2026-10-07, 160 MHz) — NEWEST
+## Pre-hands-on tuning (2026-10-07 17:13–17:35, unworn, candidate pair 7f85e87, sweep `abrtune2`)
+Fast ABR parameters are runtime settings, so they were tuned without a new build. Cells `-fabr[gsm]`:
+default ×0.6/+0.05/1.0-frame threshold; g ×0.8/+0.02/1.0; s ×0.85/+0.02/1.5; m ×0.7/+0.03/0.75.
+Round 1 complete; round 2 stopped by the health rule (battery temperature reached 50 °C during the
+`hq-haar1750-fabrs` capture after ~40 min of continuous high-rate streaming on the charger; restore exit 0).
+
+| Cell | Fresh/s (r1, r2) | Delivered Mbps | Net p50/p95/p99 ms | Multiplier mean (min) | Backlog p95 |
+|---|---|---|---|---|---|
+| 2000, default | 84.6 | 1453 | 23 / 39 / 45 | 0.72 (0.35) | 2.25 |
+| 2000, g | 86.2, 87.2 | 1491–1588 | 18–19 / 30–33 / 35–37 | 0.73–0.77 (0.35) | 2.25 |
+| 2000, s | 85.0, 86.5 | 1453–1624 | 23–29 / 38–49 / 47–57 | 0.71–0.78 (0.35) | 2.5–2.75 (9–14 drops) |
+| **2000, m** | **87.3, 87.5** | 1413–1456 | **14 / 24–26 / 27–30** | 0.71–0.72 (0.35) | **1.5** |
+| 1750, default | 87.1, 87.3 | 1576–1631 | 16 / 25 / 29–30 | 0.83–0.86 (0.35) | 1.75–2.75 |
+| 1750, s | 87.4 | 1600 | 20 / 33 / 36 | 0.88 (0.35) | 2.25 |
+| 1000 (q3 / q2) | 90.0 / 89.0 | 1005–1009 | 10 / 12–15 / 15–20 | 0.99 / 0.97 | – |
+| 1250 (q3 / q2) | 89.6 / 88.4 | 1259–1260 | 12 / 14–15 / 18 | 0.99 / 1.00 | – |
+
+- **m (×0.7, +0.03, 0.75-frame threshold) is the best v1 tuning**: reacting earlier keeps the backlog and
+  latency lowest at overload (87.4 fresh/s, p99 ~28 ms vs default 84.6 / 45). It is free at normal rates.
+- Every v1 setting still hits the 0.35 floor under overload: the controller cuts on every frame while
+  already-queued data drains. Structural fix (one cut per episode, cut to the measured capacity, recover
+  with memory): fast ABR v2, Astra, in progress.
+- **Queue depth 2 vs 3**: about −7 ms latency estimate (1000: 76.5 vs 83.8; 1250: 70.4 vs 78.0) for about −1
+  fresh/s. The owner's feel decides; both variants are ready as cells.
+- New hands-on cells: `hq-haar1000-fabrm-metro`, `hq-haar1250-fabrm-metro` and `-q2` versions.
+- Unworn procedure: the headset had slept; waking it showed the Guardian boundary dialog, which blocks
+  the client. The sweep script now uses the documented recovery (docs/OVERNIGHT.md): `guardian_pause=1`
+  for the stationary run plus a bounded proximity override and the wake key, restored afterwards. The first
+  restore of `guardian_pause` failed silently (PowerShell stripped the `""`), and it was fixed by hand
+  within minutes and verified (`[debug.oculus.guardian_pause]: []`). The script now sets it from Python
+  with a readback check.
+
+## Candidates for the owner's worn check (2026-10-07, 160 MHz)
 Installed pair: **q160 candidate** `codex/q160-candidate` 7f85e87 (CI 37589333446; APK
 20.13.0-ljk1291.2+7f85e87fd554, same cert) = output-queue f33c0cc + fast ABR + fast CDF 5/3, both opt-in.
 Files out/q160-candidate-37589333446; server ws/server-q160-candidate-37589333446. Rollback APK:
