@@ -5,6 +5,104 @@ Configurations that passed automatic screening and are worth the owner's in-head
 evidence that put it here, and what to look at. Rejected options are listed at the end
 so they aren't retried by accident.
 
+## Research: how others solve compression and motion (planner, 2026-10-07 ~08:50)
+- **Virtual Desktop**: H.264+ up to 500 Mbps on Quest 3; recent releases add NVENC adaptive quantization,
+  2-pass and 10-bit fixed foveation. No special motion mechanism: VD's own guidance is that H.264+ at
+  400–500 needs "pristine network conditions" and otherwise "introduces hiccups". Its inter-coded H.264
+  normally sends far less than the cap (our NVENC H.264 at a 500/750 setting sent ~270 Mbps), while
+  intra-only PyroWave fills its whole byte budget every frame, so PyroWave uses much more airtime per
+  "Mbps setting". WiVRn (open source) splits into per-eye encoders, UDP by default; nothing motion-specific.
+- **ALVR itself**: the adaptive bitrate (2023 algorithm; `bitrate.mode = Adaptive` with
+  `max_network_latency_ms`, encoder/decoder limiters) updates about once per second, too slow for a head
+  turn but useful for sustained drops. The fork already feeds PyroWave's per-frame byte cap from it
+  (docs/BITRATE.md). NeSt-VR (UPF, ALVR v20.6 fork, arXiv 2407.15614) is a steadier step-wise ABR; never
+  merged upstream. Upstream ALVR's recent work (eye-tracked foveation) doesn't apply to Quest 3.
+- **Upstream PyroWave (Themaister)**: designed for exactly this case. Intra-only 32x32 blocks decode
+  independently; a missing block becomes a slight local blur. Since 2026-09-02 (already inside our pin
+  d2997ac) the API has `pyrowave_encoder_compute_num_critical_packets` (protect only the low-frequency
+  "critical" packets with FEC), `*_packetize_with_padding`, and `pyrowave_decoder_decode_is_ready_with_sideband`
+  (decode a partial frame once the critical bands are pristine). **Our fork uses none of it**: TCP by default
+  (head-of-line blocking and congestion backoff during Wi-Fi dips), and PWU2 UDP byte-fragments the frame
+  and drops the whole frame if any fragment is missing (`pyroclient_decode` requires a complete frame).
+- **CDF 5/3** (already supported end to end): offline it needs ~1.7x fewer bytes than Haar on natural
+  content (Haar +103 %, 5/3 +17.9 % vs 9/7) and degrades to blur instead of square blocks; full-size
+  Haar/1000 trails 5/3/500. It is blocked only by the slow shared-memory inverse on the Quest. The fast
+  pair-local kernel (WO-6) had only a CPU proof; implementation started 2026-10-07 (Astra, `codex/fast53`).
+- Not viable: neural/ML post-filters (no GPU budget left beside a 6–7 ms decode at 90 Hz); HEVC/AV1
+  (Quest decode cap ~200 Mbps).
+- Plan: (1) re-measure at 160 MHz (network probe + live ladder); (2) TCP vs PWU2 UDP live, then a
+  partial-decode + critical-packet UDP transport if UDP loss is the problem; (3) fast 5/3 decode;
+  (4) owner's worn check of the winners.
+
+## Why worn motion turns into 100–300 ms lag (source reading, 2026-10-07 ~09:10)
+PyroWave over TCP is sent through ALVR's stream socket: encoder → `send_video_nal` (2-frame
+`sync_channel`, `max_queued_server_video_frames = 2`, `try_send`) → video send thread → socket.
+1. `connection.server_send_buffer_bytes` defaults to **Maximum = `set_send_buffer_size(u32::MAX)`**
+   (`alvr/sockets/src/lib.rs`). Windows honours huge SO_SNDBUF values, so when a head turn makes the Wi-Fi
+   capacity dip below the stream rate, the backlog piles up in the PC's TCP socket with no bound. The 2-frame
+   channel never fills, so nothing drops and the encoder keeps producing full-size frames. That matches
+   this morning's worn 750 Mbps cell (network p50 321 ms ≈ 30 MB queued) and the 46/89 ms p95/p99 at 500.
+2. If the channel does fill, ALVR marks the stream corrupted and, with `avoid_video_glitching = true`
+   (default), drops every frame until one is flagged IDR. PyroWave flags IDR only on request
+   (`VideoEncoderPyroWave.cpp`: `VideoSend(..., insertIDR, ...)`) and `minimum_idr_interval_ms` is 100,
+   so one overflow freezes the picture for up to ~9 frames, though every PyroWave frame is intra-only.
+3. ALVR's adaptive bitrate reacts ~1 Hz; a head turn is over before it acts.
+Settings-only mitigation (cells `*-cap`): `server_send_buffer_bytes = Custom(1 MiB)` (bounds the queue to
+~8–11 ms at 750–1000 Mbps; still above the ~0.5 MB bandwidth-delay product) and `avoid_video_glitching =
+false` (an overflow drops only that frame). Code follow-up (planned, Astra): shrink the next PyroWave frames
+when the send queue backs up, so a dip costs a little sharpness instead of frames.
+
+## Network capacity at 160 MHz (2026-10-07 08:55, unworn, `tools/quest3/network.py --transport tcp`)
+Frame-paced TCP probe (one capped frame per 90 Hz slot, receiver ACK after the full frame; no codec).
+Link 2401/2401 Mbps, 5180 MHz, RSSI −8 before and after every rate.
+
+| Target Mbps | ACK payload Mbps | ACK p50 / p99 / p99.9 ms | Late % (ACK > 1 period) | Skipped slots |
+|---:|---:|---:|---:|---:|
+| 500 | 499.9 | 5.9 / 12.9 / 17.9 | 2.1 | 0 |
+| 750 | 749.9 | 8.0 / 17.6 / 24.8 | 5.1 | 0 |
+| 1000 | 994.1 | 10.7 / 28.4 / 49.3 | 51.7 | 5 |
+| 1250 | 1144.5 | 23.0 / 34.4 / 42.7 | 100 | 74 |
+| 1500 | 1129.1 | 28.4 / 38.4 / 41.8 | 100 | 221 |
+| 2000 | 1167.2 | 37.0 / 50.8 / 52.1 | 100 | 373 |
+
+- **The usable TCP ceiling is ~1.15 Gbps** (80 MHz: ~750). 500 and 750 now have wide margins; 1000 is at
+  the edge even unworn; 1250+ exceed TCP capacity. The sender kept pace up to 750 (schedule-lag p99 1.1 ms),
+  so beyond that the limit is the link/receiver, not the Python sender. UDP may go higher (not probed:
+  the native UDP sender isn't built on this PC); the live PWU2 cells test that.
+
+## 160 MHz live ladder (2026-10-07 09:00–, unworn, swaying chart, FOV crop, queue depth 3, installed f33c0cc)
+Sweep `ladder160` (ws/hq_profiles.py cells, 20 s captures, interleaved; table by ws/sweep_table.py).
+Link 2401/2401 Mbps, RSSI −7/−8 before and after every cell. Round 1:
+
+| Cell | Fresh/s | Mbps p50 | Network p50/p95/p99 ms | Frame gap p95/p99/max ms | GPU decode p50 | Decode-to-fence p50 | Latency p50 |
+|---|---|---|---|---|---|---|---|
+| hq-haar500 (TCP) | 90.1 | 504 | 5.5 / 7.4 / 8.2 | 14.8 / 18.5 / 22.2 | 7.5 | 9.3 | 84 |
+| hq-haar750 (TCP) | 89.3 | 756 | 7.6 / 9.6 / 10.8 | 14.9 / 18.5 / 25.9 | 5.9 | 8.6 | 69 |
+| **hq-haar1000 (TCP)** | **89.8** | **1007** | 9.5 / 12.4 / 14.9 | 18.5 / 22.2 / 51.9 | 6.5 | 8.9 | 81 |
+| hq-haar750-udp (PWU2) | 60.3 | 754 | n/a (UDP estimate 0) | 22.4 / 25.9 / 36.8 | 9.6 | 11.4 | 82 |
+| hq-haar1000-udp (PWU2) | 53.0 | 1009 | n/a | 26.0 / 33.3 / 40.7 | 9.7 | 11.8 | 88 |
+| hq-haar1250-udp (PWU2) | (counters missing) | 1262 | n/a | 29.7 / 40.9 / **3192** | 9.8 | 12.1 | 84 |
+| hq-cdf53-750 (5/3, apron kernel) | 62.2 | 756 | 7.2 / 9.3 / 10.3 | 26.0 / 26.1 / 37.1 | **13.0** | 15.5 | 78 |
+| hq-haar444-750 (4:4:4) | 63.8 | 756 | 7.4 / 9.1 / 10.0 | 25.9 / 29.6 / 37.0 | **12.1** | 15.1 | 77 |
+
+Round 2 (rotated order) repeated it: Haar 500 89.9 (net p99 7.9), Haar 750 88.5 (10.4), **Haar 1000 88.3
+(net p50/p95/p99 10.2 / 13.1 / 36.4: one tail burst)**, PWU2 60.0 / 53.2 / 47.5, 5/3 61.9 (decode 13.0), 4:4:4 63.5
+(12.2). Restore: everything OK except VD StreamerSettings.json, rewritten by VD's own service at 08:59:48, 27 s
+after the snapshot as SteamVR started (same pattern as 08:10 this morning). The new read-only snapshot copy
+shows what VD changed: its DPAPI-encrypted `Accounts.OculusQuest` token was re-encrypted (new random salt, so
+new bytes) and `ServerRotation: 5` was removed. No streaming setting changed; the harness never writes VD files.
+
+- **Haar 1000 over TCP holds ~89–90 fresh/s unworn** at 1007 Mbps (network p99 15–36 ms); decode does not grow
+  with bitrate (5.9–7.5 ms at 500–1000). 160 MHz makes 1000 Mbps feasible, but with little margin (TCP
+  ceiling ~1.15 Gbps), so worn motion will need the latency cap below.
+- **PWU2 UDP is rejected** at every rate: 53–60 fresh/s. Not the radio: the receiver assembled ~4000 complete
+  frames per run and dropped 1–5, but the UDP client path decodes serially (GPU decode 9.6–9.8 ms, submit→fence
+  11.3–12.3 ms vs 5.9/8.6 on TCP) and has no output queue (docs/OUTPUT-QUEUE.md: "TCP PyroWave only"), so it
+  skipped a third of the complete frames. Any UDP transport must reuse the TCP path's decode worker and FIFO.
+- **4:4:4 chroma doubles decode (12.1 ms)**: not affordable at 90 Hz. Rejected.
+- **CDF 5/3 on the current apron kernel: 13.0 ms decode, 62 fresh/s** (Haar 5.9 ms). The fast pair-local 5/3
+  kernel (Astra, `codex/fast53`) must cut the inverse transform from ~8.5 ms to ~3.5 ms to reach 90 fresh/s.
+
 ## Owner hands-on, 2026-10-07 ~08:10–08:25 (worn, SteamVR home + head motion; Metro launch cut short)
 | Cell | Fresh/s | Mbps | Network p50/p95/p99 (ms) | Latency p50 | Decode p50 | Owner (verbatim) |
 |---|---|---|---|---|---|---|
