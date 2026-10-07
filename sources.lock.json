@@ -78,7 +78,7 @@
     },
     "fast_abr": {
       "path": "patches/fast-abr.patch",
-      "sha256": "2cc81b2e50fbf79e585840599bf4a717e949b5914bb5331fdbf701308f71b3ad"
+      "sha256": "a81287ff2a0c57fdaa60630e0ac735df157ccfe2b9177ffcae6f6e18d7263302"
     }
   },
   "rust": "1.97.1",

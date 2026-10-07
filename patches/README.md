@@ -7,6 +7,11 @@ Additive overlay last, after `client-output-queue.patch`, SHA-256 pinned in
 for effective PyroWave/TCP, atomic queue/send feedback controls each frame's byte
 budget below ALVR's bitrate ceiling, enforces a verified bounded stream send buffer,
 and marks independent frames for immediate recovery after channel overflow.
+The `mode` selector defaults to the original Aimd controller; Capacity adds busy-send
+throughput estimation, congestion-episode holds and remembered-capacity recovery.
+New configurations default to a 0.75-frame threshold and automatic send buffer
+(zero); existing explicit v1 settings are preserved. Both modes and the deterministic
+TCP simulation compile through the existing standalone Rust CPU gate.
 Stock codecs and disabled behavior are preserved. See [FAST-ABR](../docs/FAST-ABR.md)
 for settings, marker/counter definitions, CI coverage, planner cells and risks.
 Upstream credits remain unchanged.
