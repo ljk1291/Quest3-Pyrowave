@@ -86,7 +86,7 @@
     },
     "pyrowave_decoder_v2": {
       "path": "patches/pyrowave-decoder-v2.patch",
-      "sha256": "10a4de8de103fe28c7a8164736f04d33cee1cd134d1fe82d0cf0693d8d47ce84"
+      "sha256": "47598d4dab52011a68456aa565d813dc1fdf22fede5ba1caabfe206175f16367"
     },
     "alvr_decoder_v2": {
       "path": "patches/alvr-decoder-v2.patch",
