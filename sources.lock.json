@@ -75,6 +75,10 @@
     "client_output_queue": {
       "path": "patches/client-output-queue.patch",
       "sha256": "7117623a8d8e1eb20dd1c89947831d57b69b1f2b4c56c319466674af22a7ef8f"
+    },
+    "pyrowave_fast53": {
+      "path": "patches/pyrowave-fast53.patch",
+      "sha256": "ae269cbaac6c4b8c001bdf9121e40b1bea7eeaab677de58a3259a66e8d15d618"
     }
   },
   "rust": "1.97.1",

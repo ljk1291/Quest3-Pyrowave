@@ -15,11 +15,17 @@ jobs:
           cmake -S "$p/Granite" -B /tmp/shader-tools -G Ninja -DCMAKE_BUILD_TYPE=Release -DGRANITE_TOOLS=ON -DGRANITE_RENDERER=OFF -DGRANITE_PLATFORM=null -DGRANITE_VULKAN_FOSSILIZE=OFF -DGRANITE_VULKAN_SPIRV_CROSS=ON -DGRANITE_VULKAN_SHADER_MANAGER_RUNTIME_COMPILER=ON -DGRANITE_VULKAN_SYSTEM_HANDLES=OFF
           cmake --build /tmp/shader-tools --target slangmosh -j 4
           compiler=$(find /tmp/shader-tools -type f -name slangmosh | head -n 1)
+          # Recover the pinned pre-fast53 header even after the new header
+          # has been folded into the additive patch (safe on repeat regeneration).
+          git -C "$p" apply -R "$GITHUB_WORKSPACE/patches/pyrowave-fast53.patch"
+          cp "$p/shaders/slangmosh.hpp" /tmp/pre-fast53.hpp
+          git -C "$p" apply "$GITHUB_WORKSPACE/patches/pyrowave-fast53.patch"
           "$compiler" "$p/shaders/slangmosh.json" --namespace PyroWave --output "$p/shaders/slangmosh.hpp" -O --strip
+          python3 tools/ci/check_fast53_shaders.py /tmp/pre-fast53.hpp "$p/shaders/slangmosh.hpp"
           python3 tools/ci/check_shader_manifest.py "$p" --write
           mkdir out
           cp "$p/shaders/slangmosh.hpp" "$p/shaders/quest3-manifest.json" out/
-          sha256sum "$p/shaders/wavelet_dequant.comp" "$p/shaders/idwt.comp" "$p/shaders/idwt_haar_fused.comp" > out/SOURCE-SHA256.txt
+          sha256sum "$p/shaders/wavelet_dequant.comp" "$p/shaders/idwt.comp" "$p/shaders/idwt_haar_fused.comp" "$p/shaders/dwt_common.h" "$p/shaders/slangmosh.json" > out/SOURCE-SHA256.txt
       - uses: actions/upload-artifact@v4
         with:
           name: PyroWave-generated-shaders

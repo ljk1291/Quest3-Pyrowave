@@ -60,6 +60,11 @@ jobs:
           /tmp/frame-dump-client-config
       - run: python3 -m unittest tools.tests.test_dualstream_h264_design -v
       - run: g++ -std=c++17 -Wall -Werror tools/pyroclient/decode_path_test.cpp -o /tmp/decode-path && /tmp/decode-path
+      - name: Pair-local CDF 5/3 CPU parity and selection
+        run: |
+          python3 -m unittest tools.tests.test_fast53 -v
+          g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/fast53_test.cpp -o /tmp/fast53-policy
+          /tmp/fast53-policy
       - name: Opt-in decoder queue priority parsing and fallback (CPU only)
         run: g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/decode_priority_test.cpp -o /tmp/decode-priority && /tmp/decode-priority
       - run: g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/pass_profile_test.cpp -o /tmp/pass-profile && /tmp/pass-profile

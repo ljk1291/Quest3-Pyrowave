@@ -2,6 +2,7 @@
 // the Adreno 740; the harness stays as the record and the scoring tool.
 #include "pyroclient.h"
 #include "decode_path.h"
+#include "fast53.h"
 #include "decode_priority.h"
 #include "gpu_failure_policy.h"
 #include "pass_profile.h"
@@ -434,6 +435,12 @@ bool pyroclient::create_planes() {
     di.fragment_path = fragment_path;
     di.wavelet = haar ? PYROWAVE_WAVELET_HAAR : legall53 ? PYROWAVE_WAVELET_CDF53 : PYROWAVE_WAVELET_CDF97;
     PW_TRY(pyrowave_decoder_create(&di, &decoder));
+    char fast53_prop[PROP_VALUE_MAX] = {};
+    __system_property_get("debug.q3pw.fast53", fast53_prop);
+    const auto fast53 = choose_fast53(fast53_prop, legall53, fragment_path);
+    if (fast53.active)
+        PW_TRY(pyrowave_decoder_set_fast53_enabled(decoder, 1));
+    LOGI("[Q3PW_FAST53] requested=%d active=%d reason=%s", fast53.requested, fast53.active, fast53.reason);
     return true;
 }
 

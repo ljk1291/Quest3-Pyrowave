@@ -1,0 +1,262 @@
+diff --git a/pyrowave-shared.def b/pyrowave-shared.def
+index 6a686a94f4dc9c602d8dc0c55416261fc549bcae..3e42d17e3064aa6ef94ebee12a7b90b42d50e63d 100644
+--- a/pyrowave-shared.def
++++ b/pyrowave-shared.def
+@@ -43,5 +43,6 @@ EXPORTS
+ 	pyrowave_decoder_decode_cpu_buffer_synchronous
+ 	pyrowave_decoder_destroy
+ 
++	pyrowave_decoder_set_fast53_enabled
+ 	pyrowave_decoder_set_idwt_enabled
+ 	pyrowave_decoder_get_wavelet_view
+diff --git a/pyrowave.h b/pyrowave.h
+index 277efe909a420bed7190a991f8c760a96a49509c..4688dd44d7bd754bc83c212d5cfcf32c3eedaa23 100644
+--- a/pyrowave.h
++++ b/pyrowave.h
+@@ -534,6 +534,9 @@ pyrowave_encoder_destroy(pyrowave_encoder encoder);
+ //////
+ 
+ // Decoder
++// Pair-local CDF 5/3 inverse, default disabled. Enabling requires CDF53 + compute.
++// Change only while no decode is in flight; does not change bitstream semantics.
++PYROWAVE_PUBLIC_API pyrowave_result pyrowave_decoder_set_fast53_enabled(pyrowave_decoder decoder, int enabled);
+ /* XRW Experiment 3: run only the dequant pass and let the caller reconstruct from the
+  * wavelet image (compute path only). The views are 2D-array views (layers LL, LH, HL, HH) of
+  * mip `level` (0 = finest) for `component`, valid while the decoder lives, in GENERAL layout. */
+diff --git a/pyrowave_c.cpp b/pyrowave_c.cpp
+index 73114e29e207387bb1a63b18f9bd96f752e61bce..578c79524fbfcf5b812b68c93ce01b8c93220255 100644
+--- a/pyrowave_c.cpp
++++ b/pyrowave_c.cpp
+@@ -1399,6 +1399,13 @@ bool pyrowave_decoder_decode_is_ready_with_sideband(pyrowave_decoder decoder, bo
+ 	                                        active_block_mask, word_count);
+ }
+ 
++pyrowave_result pyrowave_decoder_set_fast53_enabled(pyrowave_decoder decoder, int enabled)
++{
++	if (!decoder || !decoder->decoder.set_fast53_enabled(enabled != 0))
++		return PYROWAVE_ERROR_INVALID_ARGUMENT;
++	return PYROWAVE_SUCCESS;
++}
++
+ pyrowave_result pyrowave_decoder_set_idwt_enabled(pyrowave_decoder decoder, int enabled)
+ {
+ 	if (!decoder)
+diff --git a/pyrowave_decoder.cpp b/pyrowave_decoder.cpp
+index f2fa70d513eab2293a8b968d75af7fc2f3cf5714..2abefd9d861d56d4afb97672b3e64a2b215bba3c 100644
+--- a/pyrowave_decoder.cpp
++++ b/pyrowave_decoder.cpp
+@@ -28,6 +28,7 @@ struct Decoder::Impl final : public WaveletBuffers
+ {
+ 	bool fused_haar = getenv("PYROWAVE_FUSED_HAAR") && strcmp(getenv("PYROWAVE_FUSED_HAAR"), "1") == 0;
+ 	bool batch_dequant = getenv("PYROWAVE_BATCH_DEQUANT") && strcmp(getenv("PYROWAVE_BATCH_DEQUANT"), "1") == 0;
++	bool fast53 = false;        // Opt-in per decoder; never inferred from the wavelet.
+ 	bool idwt_enabled = true;   // XRW Experiment 3
+ 
+ 	BufferHandle dequant_offset_buffer, payload_data;
+@@ -758,7 +759,7 @@ bool Decoder::Impl::idwt(CommandBuffer &cmd, const ViewBuffers &views)
+         return true;
+     }
+ 
+-	cmd.set_program(shaders.idwt[Configuration::get().get_precision()]);
++	cmd.set_program(shaders.idwt[Configuration::get().get_precision()][fast53 ? 1 : 0]);
+ 	cmd.enable_subgroup_size_control(false);
+ 
+ 	auto start_idwt = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+@@ -1116,6 +1117,14 @@ bool Decoder::init(Vulkan::Device *device, int width, int height, ChromaSubsampl
+ 	return true;
+ }
+ 
++bool Decoder::set_fast53_enabled(bool enabled)
++{
++	if (enabled && (!impl->legall53 || impl->fragment_path))
++		return false;
++	impl->fast53 = enabled;
++	return true;
++}
++
+ void Decoder::set_idwt_enabled(bool enabled)
+ {
+ 	impl->idwt_enabled = enabled;
+diff --git a/pyrowave_decoder.hpp b/pyrowave_decoder.hpp
+index 5f6da998e8c0a60a181bb9e4e8c4495e4c0c5dff..fbb0ae03bbe72a443d0d4abdd7cd110e1d2ba428 100644
+--- a/pyrowave_decoder.hpp
++++ b/pyrowave_decoder.hpp
+@@ -41,6 +41,9 @@ public:
+ 
+ 	bool decode_is_ready(bool allow_partial_frame) const;
+ 
++	// Default-off CDF53 compute inverse; false if enabling on another wavelet/path.
++	bool set_fast53_enabled(bool enabled);
++
+ 	// XRW Experiment 3: record dequant only (no iDWT) so an external reconstruction kernel can
+ 	// read the wavelet image; and expose that image's per-component, per-level array views.
+ 	void set_idwt_enabled(bool enabled);
+@@ -60,4 +63,4 @@ private:
+ 	struct Impl;
+ 	std::unique_ptr<Impl> impl;
+ };
+-}
+\ No newline at end of file
++}
+diff --git a/shaders/dwt_common.h b/shaders/dwt_common.h
+index 06b773eef91d323ac27044bbf0960797ca18614d..1b38679bf62746a785439dffe7dce48fc8553294 100644
+--- a/shaders/dwt_common.h
++++ b/shaders/dwt_common.h
+@@ -41,6 +41,7 @@ const FLOAT DELTA = FLOAT(0.443506852043971);
+ const FLOAT K = FLOAT(1.230174104914001);
+ const FLOAT inv_K = FLOAT(1.0 / 1.230174104914001);
+ 
++#if !FAST53
+ shared SHARED_VEC2 shared_block[(BLOCK_SIZE + 2 * APRON) / 2][(BLOCK_SIZE + 2 * APRON) + 1];
+ #if !FP16 && PRECISION == 1
+ VEC2 load_shared(uint y, uint x) { return unpackHalf2x16(shared_block[y][x]); }
+@@ -49,6 +50,7 @@ void store_shared(uint y, uint x, VEC2 v) { shared_block[y][x] = packHalf2x16(v)
+ VEC2 load_shared(uint y, uint x) { return VEC2(shared_block[y][x]); }
+ void store_shared(uint y, uint x, VEC2 v) { shared_block[y][x] = SHARED_VEC2(v); }
+ #endif
++#endif
+ 
+ bvec2 band(bvec2 a, bvec2 b)
+ {
+diff --git a/shaders/idwt.comp b/shaders/idwt.comp
+index 18803c226c9d976ce639c2efc9e58dcfacd70783..33420c64ea407a3851275b4e9cc492febc41c89f 100644
+--- a/shaders/idwt.comp
++++ b/shaders/idwt.comp
+@@ -26,6 +26,7 @@ layout(push_constant) uniform Registers
+     vec2 inv_resolution;
+ };
+ 
++#if !FAST53
+ vec2 generate_mirror_uv(ivec2 coord, bool even_x, bool even_y)
+ {
+     coord -= ivec2(band(bvec2(even_x, even_y), lessThan(coord, ivec2(0))));
+@@ -278,8 +279,107 @@ void inverse_haar_pairs()
+     }
+ }
+ 
++#else
++// Same shared-store rounding as haar_intermediate, including the initial
++// gather store (coarse levels can have R32 source images at precision 1).
++FLOAT fast53_store(FLOAT v)
++{
++#if PRECISION == 2
++    return v;
++#elif FP16
++    return FLOAT(float16_t(v));
++#else
++    return FLOAT(unpackHalf2x16(packHalf2x16(vec2(float(v), 0.0))).x);
++#endif
++}
++
++VEC4 fast53_store4(VEC4 v)
++{
++    return VEC4(fast53_store(v.x), fast53_store(v.y), fast53_store(v.z), fast53_store(v.w));
++}
++
++int fast53_mirror(int coord, int size, bool low)
++{
++    if (coord >= 0 && coord < size)
++        return coord;
++    // Reproduce generate_mirror_uv at the EVEN gather origin, then select
++    // the requested gather lane. A per-coefficient clamp/mirror is different.
++    int origin = coord & ~1;
++    int texel = coord - int(low && origin < 0) + int(!low && origin + 1 >= size);
++    int period = 2 * size;
++    texel = ((texel % period) + period) % period;
++    return min(texel, period - 1 - texel);
++}
++
++FLOAT fast53_fetch(ivec2 coord, int layer)
++{
++    coord = ivec2(fast53_mirror(coord.x, resolution.x, layer < 2),
++                  fast53_mirror(coord.y, resolution.y, (layer & 1) == 0));
++    return fast53_store(FLOAT(texelFetch(uTexture, ivec3(coord.yx, layer), 0).x));
++}
++
++// Four vertical pixels for one horizontal coefficient, using seven fetches.
++// Layer 2 is high in the transposed x axis (image y); layer 1 in image x.
++VEC4 fast53_column(ivec2 coord, int band)
++{
++    FLOAT l0 = fast53_fetch(coord, band);
++    FLOAT l1 = fast53_fetch(coord + ivec2(1, 0), band);
++    FLOAT l2 = fast53_fetch(coord + ivec2(2, 0), band);
++    FLOAT hm = fast53_fetch(coord - ivec2(1, 0), band + 2);
++    FLOAT h0 = fast53_fetch(coord, band + 2);
++    FLOAT h1 = fast53_fetch(coord + ivec2(1, 0), band + 2);
++    FLOAT h2 = fast53_fetch(coord + ivec2(2, 0), band + 2);
++    FLOAT e0 = l0 - FLOAT(0.25) * (hm + h0);
++    FLOAT e1 = l1 - FLOAT(0.25) * (h0 + h1);
++    FLOAT e2 = l2 - FLOAT(0.25) * (h1 + h2);
++    FLOAT o0 = h0 + FLOAT(0.5) * (e0 + e1);
++    FLOAT o1 = h1 + FLOAT(0.5) * (e1 + e2);
++    return fast53_store4(VEC4(e0, o0, e1, o1));
++}
++
++void fast53_write(ivec2 pixel, VEC4 column)
++{
++    column = fast53_store4(column);
++    if (DCShift)
++        column += FLOAT(0.5);
++    ivec2 extent = imageSize(uOutput);
++    for (int y = 0; y < 4; y++)
++        if (pixel.x < extent.x && pixel.y + y < extent.y)
++            imageStore(uOutput, pixel + ivec2(0, y), VEC4(column[y]));
++}
++
++void inverse_53_pairs()
++{
++    // 2x2 coefficient pairs per invocation: 49 fetches / 16 output pixels.
++    // Same 16x16-pair workgroup footprint as inverse_haar_pairs.
++    ivec2 coord = ivec2(gl_WorkGroupID.xy) * 16 + 2 * unswizzle8x8(gl_LocalInvocationIndex);
++    if (any(greaterThanEqual(coord, resolution)))
++        return;
++    VEC4 l0 = fast53_column(coord, 0);
++    VEC4 l1 = fast53_column(coord + ivec2(0, 1), 0);
++    VEC4 l2 = fast53_column(coord + ivec2(0, 2), 0);
++    VEC4 hm = fast53_column(coord - ivec2(0, 1), 1);
++    VEC4 h0 = fast53_column(coord, 1);
++    VEC4 h1 = fast53_column(coord + ivec2(0, 1), 1);
++    VEC4 h2 = fast53_column(coord + ivec2(0, 2), 1);
++    VEC4 e0 = l0 - FLOAT(0.25) * (hm + h0);
++    VEC4 e1 = l1 - FLOAT(0.25) * (h0 + h1);
++    VEC4 e2 = l2 - FLOAT(0.25) * (h1 + h2);
++    VEC4 o0 = h0 + FLOAT(0.5) * (e0 + e1);
++    VEC4 o1 = h1 + FLOAT(0.5) * (e1 + e2);
++    ivec2 pixel = 2 * coord.yx;
++    fast53_write(pixel, e0);
++    fast53_write(pixel + ivec2(1, 0), o0);
++    fast53_write(pixel + ivec2(2, 0), e1);
++    fast53_write(pixel + ivec2(3, 0), o1);
++}
++#endif
++
+ void main()
+ {
++#if FAST53
++    inverse_53_pairs();
++#else
+     if (HAAR)
+     {
+         inverse_haar_pairs();
+@@ -315,4 +415,5 @@ void main()
+             imageStore(uOutput, ivec2(2 * y + 1, x) + BLOCK_SIZE * ivec2(gl_WorkGroupID.yx), v.yyyy);
+         }
+     }
++#endif
+ }
+diff --git a/shaders/slangmosh.json b/shaders/slangmosh.json
+index b7bbaf3ee477268207142d595b0b1199829c143e..e5991a09dcda46ba5a0413fc6194d9061511f424 100644
+--- a/shaders/slangmosh.json
++++ b/shaders/slangmosh.json
+@@ -32,6 +32,11 @@
+           "count": 3,
+           "resolve": false
+         },
++        {
++          "define": "FAST53",
++          "count": 2,
++          "resolve": false
++        },
+         {
+           "define": "FP16",
+           "count": 2,
