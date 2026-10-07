@@ -439,8 +439,9 @@ bool pyroclient::create_planes() {
     __system_property_get("debug.q3pw.fast53", fast53_prop);
     const auto fast53 = choose_fast53(fast53_prop, legall53, fragment_path);
     if (fast53.active)
-        PW_TRY(pyrowave_decoder_set_fast53_enabled(decoder, 1));
-    LOGI("[Q3PW_FAST53] requested=%d active=%d reason=%s", fast53.requested, fast53.active, fast53.reason);
+        PW_TRY(pyrowave_decoder_set_fast53_variant(decoder, fast53.variant));
+    LOGI("[Q3PW_FAST53] requested=%d active=%d variant=%d reason=%s",
+         fast53.requested, fast53.active, fast53.variant, fast53.reason);
     return true;
 }
 

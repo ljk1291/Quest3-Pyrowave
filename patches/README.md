@@ -14,8 +14,8 @@ Upstream credits remain unchanged.
 ## `pyrowave-fast53.patch`: WO-6 pair-local CDF 5/3 candidate
 
 Additive PyroWave overlay after `pyrowave-rdo-session-setting.patch`, SHA-256
-pinned in `sources.lock.json`. `debug.q3pw.fast53=1` enables the barrier-free
-inverse only for CDF53 + Compute. The original shader variant remains default;
+pinned in `sources.lock.json`. `debug.q3pw.fast53=1|2|3` selects the v1, blocked
+or gather inverse only for CDF53 + Compute. The original shader remains default;
 upstream credits are preserved. See [FAST53](../docs/FAST53.md) for arithmetic,
 CPU evidence, shader/header fold-in commands and standalone readback/timing gates.
 Generated shader artifacts must be folded in before the full native build.
