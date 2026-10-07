@@ -34,6 +34,36 @@ so they aren't retried by accident.
   partial-decode + critical-packet UDP transport if UDP loss is the problem; (3) fast 5/3 decode;
   (4) owner's worn check of the winners.
 
+## Upstream JMS1717 `.62` (checked 2026-10-07 ~18:55) — likely answer to our decode limit
+Upstream main (adeb86b; code = b8e905c, later commits docs-only) added, all today:
+- **Decoder V2**: "Haar in about 2.6 ms and CDF 5/3 in about 3–4 ms per 2080 × 2208 stereo frame at 690 MHz"
+  (≈4 ms / 5–6 ms scaled to our 5248x2752; our fast53 v1 is 10.1 ms). "CDF 5/3 removes Haar's block edges."
+- Haar mode 5 with packed coefficients/luma, packed YCbCr output, **raw sRGB eye copy on by default**,
+  a "maximum GPU clock" (690 MHz) option, 144–240 Hz, parallel wired connections, a 0.25 bpp quality floor.
+- Their CI build of b8e905c (run 37643381349) was downloaded with the owner's OK to
+  out/upstream-jms1717-37643381349 (checksums OK; APK signed CN=JMS1717, package
+  io.github.jms1717.quest3pyrowave, coexists with ours; server zip sha256 052e5960…). It includes standalone
+  Quest tools (`decoder_ab`, `pyrowave_android`, fence tests). **Not installed or tested yet** (next chat).
+
+## VD vs ours on the Metro main menu (2026-10-07 ~18:30–18:50, worn, in-headset captures)
+- **Method found**: `adb shell screencap -p` returns the headset's final display buffer: 4128x2208, both
+  eyes, lens pre-warp, lossless PNG, for VD and ours alike (like-for-like stills). `adb shell screenrecord
+  --time-limit 5 --bit-rate 100000000` records 4128x2208 at ~71 fps (headset H.264, lossy) for flicker.
+  Files: results/local/metro-menu-2026-10-07/ (vd-screencap-183447.png, ours-haar1250-screencap-*.png,
+  compare-vd-vs-haar1250-{full,zoom}.png, ours-haar1250-rec-184530*.mp4; desktop-mirror PNGs = source only).
+- Ours (Haar 1250 + fast ABR m, 7f85e87) in the Metro menu: 88.2 fresh/s, GPU decode 6.2 ms, decode-to-fence
+  9.0 ms, latency p50 90 ms; battery 51 °C (owner raised the stop to 60 °C for this run, now the rule).
+- **Ours is darker**: on the matched picture, median luma 13 vs VD 22 (mean 25.9 vs 32.8, p90 70 vs 80);
+  detail energy equal (Laplacian std 10.1 vs 9.9). Our colour path has no adjustments (colour correction
+  off, encoding gamma 1.0, full range, `debug.q3pw.raw_srgb_copy=0`); upstream made raw sRGB eye copy the
+  default. Either VD brightens or our eye copy darkens: A/B `raw_srgb_copy=1` next.
+- At 2x zoom VD looks smoother; ours shows some Haar blockiness on edges (jacket, sign letters); text equal.
+- Owner (verbatim): "I feel like the screenshots you took are not from in headset view as they do not show
+  the same compression I can see and look identical to the VD ones, which isnt accurate". Our read: the
+  captures are the display buffer, but a still cannot show temporal shimmer — intra-only coding re-quantizes
+  fine detail every frame ("flashing"), while H.264 reuses static content. Judge compression over time.
+- Metro on our stream needs a per-process SteamVR launch (VD is the system OpenXR runtime; see below).
+
 ## Owner hands-on, 2026-10-07 ~17:45–18:00 (worn, candidate 7f85e87, Metro Awakening fence)
 | Cell | Owner (verbatim) | Measured |
 |---|---|---|
