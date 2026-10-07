@@ -1,6 +1,11 @@
 name: Regenerate pinned PyroWave shaders
 on:
   workflow_dispatch:
+  # workflow_dispatch needs this file on the default branch; a push of the workflow itself on a
+  # candidate branch runs it from that branch instead.
+  push:
+    branches: ['codex/fast53']
+    paths: ['.github/workflows/shaders.yml']
 permissions:
   contents: read
 jobs:
