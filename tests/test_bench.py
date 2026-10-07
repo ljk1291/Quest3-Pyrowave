@@ -245,6 +245,10 @@ class BenchTests(unittest.TestCase):
         self.assertEqual(experiment_effective(state)['enabled']['layer_filter'],2)
         state['property:debug.q3pw.layer_filter']['value']='7'
         self.assertEqual(experiment_effective(state)['enabled']['layer_filter'],0)
+        for value, enabled in (('', False), ('0', False), ('1', True), ('2', True),
+                               ('3', True), ('4', False), ('01', False), ('2x', False)):
+            state['property:debug.q3pw.fast53']['value'] = value
+            self.assertEqual(experiment_effective(state)['enabled']['fast53'], enabled)
 
     def test_effective_wavelet_prefers_haar_over_cdf53(self):
         from tools.quest3.bench import effective_pyrowave_config

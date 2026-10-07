@@ -7,8 +7,8 @@ import sys
 
 import unittest
 
-from tools.xrbench.fast53 import apron_tile, fast_tile, fast_address, gather_coordinates
-from tools.ci.check_fast53_shaders import verify, check_local_shader
+from tools.xrbench.fast53 import apron_tile, fast_tile, blocked_tile, fast_address, gather_coordinates
+from tools.ci.check_fast53_shaders import verify, check_local_shader, programs, spirv_sha256
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -61,8 +61,9 @@ def check_overlay_pin_selection_and_ci_contract():
     assert script.index('apply_patch "$dest/pyrowave" "$repo/patches/pyrowave-rdo-session-setting.patch"') < script.index(
         'apply_patch "$dest/pyrowave" "$repo/patches/pyrowave-fast53.patch"')
     source = patch.read_text()
-    assert 'bool fast53 = false;' in source
-    assert 'enabled && (!impl->legall53 || impl->fragment_path)' in source
+    assert 'int fast53 = 0;' in source
+    assert 'variant < 0 || variant > 3 || (variant && (!impl->legall53 || impl->fragment_path))' in source
+    assert 'return set_fast53_variant(enabled ? 1 : 0);' in source
     client = (ROOT / 'tools/pyroclient/pyroclient.cpp').read_text()
     assert 'choose_fast53(fast53_prop, legall53, fragment_path)' in client
     assert '__system_property_get("debug.q3pw.fast53", fast53_prop)' in client
@@ -71,6 +72,67 @@ def check_overlay_pin_selection_and_ci_contract():
 
 
 class Fast53Tests(unittest.TestCase):
+    @staticmethod
+    def blocked_reference(bands, group=(0, 0), **kwargs):
+        out = {}
+        for x in (0, 1):
+            for y in (0, 1):
+                out.update(apron_tile(bands, (2 * group[0] + x, 2 * group[1] + y), **kwargs))
+        return out
+
+    def test_phase_aligned_gathers_match_even_origin_mirror(self):
+        # Test every lane, including unused gather lanes at odd/tiny boundaries.
+        for width, height in ((1, 1), (2, 3), (3, 2), (7, 5), (31, 33), (41, 43), (164, 86)):
+            for layer in range(4):
+                for u in (0, 4 * ((height - 1) // 4)):
+                    for v in (0, 4 * ((width - 1) // 4)):
+                        for i in range(3):
+                            for j in range(3):
+                                origin = (u + 2 * i - layer // 2, v + 2 * j - layer % 2)
+                                got = gather_coordinates(origin, (height, width), (layer < 2, layer % 2 == 0))
+                                expected = [(fast_address(origin[0] + du, height, layer < 2),
+                                             fast_address(origin[1] + dv, width, layer % 2 == 0))
+                                            for du, dv in ((0, 0), (1, 0), (0, 1), (1, 1))]
+                                self.assertEqual(got, expected, (width, height, layer, origin))
+
+    def test_blocked_variants_parity_and_workgroup_coverage(self):
+        rng = random.Random(0x533)
+        for width, height in ((1, 1), (2, 3), (7, 5), (16, 16), (19, 17), (31, 33), (65, 67)):
+            bands = [[[rng.uniform(-.4, .4) for _ in range(width)] for _ in range(height)] for _ in range(4)]
+            for precision in (0, 1, 2):
+                for dc in (False, True):
+                    extent = (max(1, 2 * width - 1), max(1, 2 * height - 1))
+                    args = dict(precision=precision, dc=dc, extent=extent)
+                    outputs = {2: {}, 3: {}}
+                    for gy in range((width + 31) // 32):
+                        for gx in range((height + 31) // 32):
+                            ref = self.blocked_reference(bands, (gx, gy), **args)
+                            for variant in (2, 3):
+                                fast = blocked_tile(bands, (gx, gy), variant=variant, **args)
+                                self.assertEqual(fast, ref, (width, height, precision, dc, variant, gx, gy))
+                                self.assertFalse(outputs[variant].keys() & fast.keys())
+                                outputs[variant].update(fast)
+                    for output in outputs.values():
+                        self.assertEqual(len(output), extent[0] * extent[1])
+
+    def test_blocked_impulses_and_store_rounding(self):
+        for layer in range(4):
+            for y, x in ((0, 0), (0, 16), (16, 0), (16, 16), (7, 8)):
+                bands = [[[0.] * 17 for _ in range(17)] for _ in range(4)]
+                bands[layer][y][x] = .500244140625
+                for precision in (0, 1, 2):
+                    ref = self.blocked_reference(bands, precision=precision)
+                    for variant in (2, 3):
+                        self.assertEqual(blocked_tile(bands, precision=precision, variant=variant), ref)
+
+    def test_blocked_texture_instruction_counts(self):
+        bands = [[[.1] * 32 for _ in range(32)] for _ in range(4)]
+        for variant, instruction, per_invocation in ((2, 'fetch', 121), (3, 'gather', 36)):
+            counts = {}
+            out = blocked_tile(bands, variant=variant, counts=counts)
+            self.assertEqual(len(out), 4096)
+            self.assertEqual(counts, {'invocations': 64, instruction: 64 * per_invocation})
+
     def test_cropped_live_geometry_coarse_mip(self):
         # Five-level stereo 5248x2752 -> 164x86 at input_level=4.
         rng = random.Random(52482752)
@@ -79,16 +141,21 @@ class Fast53Tests(unittest.TestCase):
             for group in ((0, 0), (2, 5), (5, 10)):
                 with self.subTest(precision=precision, group=group):
                     self.assertEqual(fast_tile(bands, group, precision), apron_tile(bands, group, precision))
+            for group in ((0, 0), (1, 2), (2, 5)):
+                ref = self.blocked_reference(bands, group, precision=precision)
+                for variant in (2, 3):
+                    self.assertEqual(blocked_tile(bands, group, precision, variant=variant), ref)
 
     def test_generated_shader_gate(self):
-        def header(fast, change_default=False, extra=()):
+        def header(fast, change_default=False, extra=(), extra_variant=1, count=4):
             bank, assignments = [], []
             for fp16 in range(2):
                 for precision in range(3):
-                    for variant in range(2 if fast else 1):
+                    for variant in range(count if fast else 1):
                         words = [0x07230203, 0x10300, 0, 10 + precision + 3 * fp16, 0]
                         if variant:
-                            words += extra
+                            if variant == extra_variant:
+                                words += extra
                         elif change_default:
                             words[3] += 1
                         suffix = f'[{precision}][{variant}]' if fast else f'[{precision}]'
@@ -99,13 +166,26 @@ class Fast53Tests(unittest.TestCase):
             return ('static const uint32_t spirv_bank[] = {' + ','.join(hex(w) for w in bank) + '};\n' +
                     '\n'.join(assignments))
 
-        verify(header(False), header(True))
+        baseline, candidate = header(False), header(True)
+        frozen = {(indices[0], fp16): spirv_sha256(words)
+                  for (name, indices, fp16), words in programs(candidate).items()
+                  if name == 'idwt' and indices[1] == 1}
+
+        def check(candidate):
+            verify(baseline, candidate, frozen)
+
+        check(candidate)
         with self.assertRaisesRegex(ValueError, 'pre-existing shader changed'):
-            verify(header(False), header(True, change_default=True))
-        with self.assertRaisesRegex(ValueError, 'barrier'):
-            verify(header(False), header(True, extra=[(4 << 16) | 224, 1, 1, 1]))
-        with self.assertRaisesRegex(ValueError, 'workgroup storage'):
-            verify(header(False), header(True, extra=[(4 << 16) | 59, 1, 2, 4]))
+            check(header(True, change_default=True))
+        for variant in (1, 2, 3):
+            with self.assertRaisesRegex(ValueError, 'barrier'):
+                check(header(True, extra=[(4 << 16) | 224, 1, 1, 1], extra_variant=variant))
+            with self.assertRaisesRegex(ValueError, 'workgroup storage'):
+                check(header(True, extra=[(4 << 16) | 59, 1, 2, 4], extra_variant=variant))
+        with self.assertRaisesRegex(ValueError, 'measured v1 shader changed'):
+            check(header(True, extra=[(1 << 16) | 0]))  # OpNop still changes v1 bytes
+        with self.assertRaisesRegex(ValueError, 'missing fast53 variant'):
+            check(header(True, count=3))
         with self.assertRaisesRegex(ValueError, 'invalid SPIR-V instruction'):
             check_local_shader([0x07230203, 0, 0, 0, 0, 0])
 

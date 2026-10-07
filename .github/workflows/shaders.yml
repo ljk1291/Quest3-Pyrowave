@@ -22,6 +22,7 @@ jobs:
           compiler=$(find /tmp/shader-tools -type f -name slangmosh | head -n 1)
           # Recover the pinned pre-fast53 header even after the new header
           # has been folded into the additive patch (safe on repeat regeneration).
+          # Validate all 18 fast53 permutations and preserve the measured v1 control.
           git -C "$p" apply -R "$GITHUB_WORKSPACE/patches/pyrowave-fast53.patch"
           cp "$p/shaders/slangmosh.hpp" /tmp/pre-fast53.hpp
           git -C "$p" apply "$GITHUB_WORKSPACE/patches/pyrowave-fast53.patch"

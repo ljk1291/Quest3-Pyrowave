@@ -368,7 +368,7 @@ def experiment_effective(state):
         'display_scaling':(value('debug.oculus.forceDisplayScaling') == '1'
                            or value('debug.oculus.refreshRate') != ''),
         'haar_fused':value('debug.q3pw.haar_fused')=='1',
-        'fast53':value('debug.q3pw.fast53')=='1',
+        'fast53':value('debug.q3pw.fast53') in ('1', '2', '3'),
         'dequant_batch':value('debug.q3pw.dequant_batch')=='1',
         'convert_compute':value('debug.q3pw.convert_compute')=='1',
         'fragment_min_usage':value('debug.q3pw.fragment_min_usage')=='1',

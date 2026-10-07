@@ -1,4 +1,4 @@
-"""CPU proof of idwt.comp's gather/apron and barrier-free 2x2-pair variant.
+"""CPU proof of idwt.comp's gather/apron and barrier-free pair-local variants.
 
 Extends WO-6 (codex/wo6-fused-inverse) to literal 2D gather addressing,
 FP32/FP16 arithmetic, all shared stores, partial tiles and DCShift. No GPU claim.
@@ -135,3 +135,95 @@ def fast_tile(bands, group=(0, 0), precision=1, dc=False, extent=None):
                         value = a.store(value)
                         out[pixel] = a.math(value + .5) if dc else value
     return out
+
+
+def blocked_tile(bands, group=(0, 0), precision=1, dc=False, extent=None, variant=2, counts=None):
+    """4x4-pair v2/v3 model; count texture instructions, including edge overfetch.
+
+    A workgroup now covers 32x32 coefficient pairs. First-axis stored columns
+    round before horizontal updates; updated horizontal evens never narrow.
+    v3 loads column pairs in the shader's dependency order, using .wxzy lanes.
+    """
+    if variant not in (2, 3):
+        raise ValueError('blocked variant must be 2 or 3')
+    a = Arithmetic(precision)
+    res = (len(bands[0]), len(bands[0][0]))
+    extent = extent or (2 * res[1], 2 * res[0])
+    counts = counts if counts is not None else {}
+
+    def fetch(u, v, layer):
+        counts['fetch'] = counts.get('fetch', 0) + 1
+        u = fast_address(u, res[0], layer < 2)
+        v = fast_address(v, res[1], layer % 2 == 0)
+        return a.store(a.math(bands[layer][u][v]))
+
+    def gather(u, v, layer):
+        counts['gather'] = counts.get('gather', 0) + 1
+        coords = gather_coordinates((u, v), res, (layer < 2, layer % 2 == 0))
+        return [a.store(a.math(bands[layer][sy][sx])) for sy, sx in coords]
+
+    def column(u, v, band):
+        # fast53_column8 + four stateful fast53_next_pair calls.
+        previous, high = fetch(u - 1, v, band + 2), fetch(u, v, band + 2)
+        even = a.update(fetch(u, v, band), previous, high)
+        out = []
+        for i in range(1, 5):
+            next_high = fetch(u + i, v, band + 2)
+            next_even = a.update(fetch(u + i, v, band), high, next_high)
+            out.extend((a.store(even), a.store(a.predict(high, even, next_even))))
+            high, even = next_high, next_even
+        return out
+
+    def gather_columns(u, v, band):
+        low01 = gather(u, v, band)
+        highm0 = gather(u - 1, v, band + 2)
+        high12 = gather(u + 1, v, band + 2)
+        low23 = gather(u + 2, v, band)
+        high34 = gather(u + 3, v, band + 2)
+        low45 = gather(u + 4, v, band)
+        out = []
+        for lane in (0, 2):  # .xy are first column; .zw are its neighbour
+            e0 = a.update(low01[lane], highm0[lane], highm0[lane + 1])
+            e1 = a.update(low01[lane + 1], highm0[lane + 1], high12[lane])
+            e2 = a.update(low23[lane], high12[lane], high12[lane + 1])
+            e3 = a.update(low23[lane + 1], high12[lane + 1], high34[lane])
+            e4 = a.update(low45[lane], high34[lane], high34[lane + 1])
+            values = (e0, a.predict(highm0[lane + 1], e0, e1),
+                      e1, a.predict(high12[lane], e1, e2),
+                      e2, a.predict(high12[lane + 1], e2, e3),
+                      e3, a.predict(high34[lane], e3, e4))
+            out.append([a.store(value) for value in values])
+        return out
+
+    output = {}
+    for lane in range(64):
+        u = 32 * group[0] + 4 * (((lane >> 1) & 3) | ((lane >> 5) << 2))
+        v = 32 * group[1] + 4 * ((lane & 1) | (((lane >> 3) & 3) << 1))
+        if u >= res[0] or v >= res[1]:
+            continue
+        counts['invocations'] = counts.get('invocations', 0) + 1
+        low, high = {}, {}
+        if variant == 3:
+            for offset, band in ((0, 0), (-1, 1), (1, 1), (2, 0), (3, 1), (4, 0)):
+                cols = gather_columns(u, v + offset, band)
+                target = high if band else low
+                target[offset], target[offset + 1] = cols
+        else:
+            high[-1], high[0] = column(u, v - 1, 1), column(u, v, 1)
+            low[0] = column(u, v, 0)
+        even = [a.update(low[0][y], high[-1][y], high[0][y]) for y in range(8)]
+        for x in range(4):
+            if variant == 2:
+                high[x + 1] = column(u, v + x + 1, 1)
+                low[x + 1] = column(u, v + x + 1, 0)
+            next_even = [a.update(low[x + 1][y], high[x][y], high[x + 1][y]) for y in range(8)]
+            for y in range(8):
+                odd = a.predict(high[x][y], even[y], next_even[y])
+                for dx, value in enumerate((even[y], odd)):
+                    pixel = (2 * v + 2 * x + dx, 2 * u + y)
+                    if pixel[0] < extent[0] and pixel[1] < extent[1]:
+                        assert pixel not in output, 'overlapping invocation output'
+                        value = a.store(value)
+                        output[pixel] = a.math(value + .5) if dc else value
+            even = next_even
+    return output

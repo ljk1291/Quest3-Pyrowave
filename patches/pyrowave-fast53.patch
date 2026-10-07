@@ -1,33 +1,37 @@
 diff --git a/pyrowave-shared.def b/pyrowave-shared.def
-index 6a686a94f4dc9c602d8dc0c55416261fc549bcae..3e42d17e3064aa6ef94ebee12a7b90b42d50e63d 100644
+index 6a686a94f4dc9c602d8dc0c55416261fc549bcae..86a6b2af245019e263cff80a09174007224c4ce8 100644
 --- a/pyrowave-shared.def
 +++ b/pyrowave-shared.def
-@@ -43,5 +43,6 @@ EXPORTS
+@@ -43,5 +43,7 @@ EXPORTS
  	pyrowave_decoder_decode_cpu_buffer_synchronous
  	pyrowave_decoder_destroy
  
++	pyrowave_decoder_set_fast53_variant
 +	pyrowave_decoder_set_fast53_enabled
  	pyrowave_decoder_set_idwt_enabled
  	pyrowave_decoder_get_wavelet_view
 diff --git a/pyrowave.h b/pyrowave.h
-index 277efe909a420bed7190a991f8c760a96a49509c..4688dd44d7bd754bc83c212d5cfcf32c3eedaa23 100644
+index 277efe909a420bed7190a991f8c760a96a49509c..3900257cc5dcfc2fb635d696deb6c115c61fc900 100644
 --- a/pyrowave.h
 +++ b/pyrowave.h
-@@ -534,6 +534,9 @@ pyrowave_encoder_destroy(pyrowave_encoder encoder);
+@@ -534,6 +534,12 @@ pyrowave_encoder_destroy(pyrowave_encoder encoder);
  //////
  
  // Decoder
 +// Pair-local CDF 5/3 inverse, default disabled. Enabling requires CDF53 + compute.
 +// Change only while no decode is in flight; does not change bitstream semantics.
 +PYROWAVE_PUBLIC_API pyrowave_result pyrowave_decoder_set_fast53_enabled(pyrowave_decoder decoder, int enabled);
++// 0 = apron, 1 = original pair-local, 2 = 4x4 pairs, 3 = 4x4 pairs + gathers.
++// Same wavelet/path and idle-decoder requirements; other values are rejected.
++PYROWAVE_PUBLIC_API pyrowave_result pyrowave_decoder_set_fast53_variant(pyrowave_decoder decoder, int variant);
  /* XRW Experiment 3: run only the dequant pass and let the caller reconstruct from the
   * wavelet image (compute path only). The views are 2D-array views (layers LL, LH, HL, HH) of
   * mip `level` (0 = finest) for `component`, valid while the decoder lives, in GENERAL layout. */
 diff --git a/pyrowave_c.cpp b/pyrowave_c.cpp
-index 73114e29e207387bb1a63b18f9bd96f752e61bce..578c79524fbfcf5b812b68c93ce01b8c93220255 100644
+index 73114e29e207387bb1a63b18f9bd96f752e61bce..ebff6204888ee16cea3432fbffde6837cf7203e3 100644
 --- a/pyrowave_c.cpp
 +++ b/pyrowave_c.cpp
-@@ -1399,6 +1399,13 @@ bool pyrowave_decoder_decode_is_ready_with_sideband(pyrowave_decoder decoder, bo
+@@ -1399,6 +1399,20 @@ bool pyrowave_decoder_decode_is_ready_with_sideband(pyrowave_decoder decoder, bo
  	                                        active_block_mask, word_count);
  }
  
@@ -38,18 +42,25 @@ index 73114e29e207387bb1a63b18f9bd96f752e61bce..578c79524fbfcf5b812b68c93ce01b8c
 +	return PYROWAVE_SUCCESS;
 +}
 +
++pyrowave_result pyrowave_decoder_set_fast53_variant(pyrowave_decoder decoder, int variant)
++{
++	if (!decoder || !decoder->decoder.set_fast53_variant(variant))
++		return PYROWAVE_ERROR_INVALID_ARGUMENT;
++	return PYROWAVE_SUCCESS;
++}
++
  pyrowave_result pyrowave_decoder_set_idwt_enabled(pyrowave_decoder decoder, int enabled)
  {
  	if (!decoder)
 diff --git a/pyrowave_decoder.cpp b/pyrowave_decoder.cpp
-index f2fa70d513eab2293a8b968d75af7fc2f3cf5714..2abefd9d861d56d4afb97672b3e64a2b215bba3c 100644
+index f2fa70d513eab2293a8b968d75af7fc2f3cf5714..0a11bb2227eb9842b5d9814cb11782a6a8f1db71 100644
 --- a/pyrowave_decoder.cpp
 +++ b/pyrowave_decoder.cpp
 @@ -28,6 +28,7 @@ struct Decoder::Impl final : public WaveletBuffers
  {
  	bool fused_haar = getenv("PYROWAVE_FUSED_HAAR") && strcmp(getenv("PYROWAVE_FUSED_HAAR"), "1") == 0;
  	bool batch_dequant = getenv("PYROWAVE_BATCH_DEQUANT") && strcmp(getenv("PYROWAVE_BATCH_DEQUANT"), "1") == 0;
-+	bool fast53 = false;        // Opt-in per decoder; never inferred from the wavelet.
++	int fast53 = 0;        // Opt-in per decoder; never inferred from the wavelet.
  	bool idwt_enabled = true;   // XRW Experiment 3
  
  	BufferHandle dequant_offset_buffer, payload_data;
@@ -58,19 +69,62 @@ index f2fa70d513eab2293a8b968d75af7fc2f3cf5714..2abefd9d861d56d4afb97672b3e64a2b
      }
  
 -	cmd.set_program(shaders.idwt[Configuration::get().get_precision()]);
-+	cmd.set_program(shaders.idwt[Configuration::get().get_precision()][fast53 ? 1 : 0]);
++	cmd.set_program(shaders.idwt[Configuration::get().get_precision()][fast53]);
  	cmd.enable_subgroup_size_control(false);
  
  	auto start_idwt = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
-@@ -1116,6 +1117,14 @@ bool Decoder::init(Vulkan::Device *device, int width, int height, ChromaSubsampl
+@@ -769,6 +770,7 @@ bool Decoder::Impl::idwt(CommandBuffer &cmd, const ViewBuffers &views)
+ 		vec2 inv_resolution;
+ 	} push = {};
+ 
++	const int block_pairs = fast53 >= 2 ? 32 : 16;
+ 	for (int input_level = DecompositionLevels - 1; input_level >= 0; input_level--)
+ 	{
+ 		// Transposed.
+@@ -794,7 +796,8 @@ bool Decoder::Impl::idwt(CommandBuffer &cmd, const ViewBuffers &views)
+ 					cmd.begin_region(label);
+ 					cmd.set_storage_texture(0, 1, *views.planes[c]);
+ 					cmd.set_texture(0, 0, *component_layer_views[c][input_level], *mirror_repeat_sampler);
+-					cmd.dispatch((push.resolution.x + 15) / 16, (push.resolution.y + 15) / 16, 1);
++					cmd.dispatch((push.resolution.x + block_pairs - 1) / block_pairs,
++					             (push.resolution.y + block_pairs - 1) / block_pairs, 1);
+ 					cmd.end_region();
+ 				}
+ 			}
+@@ -803,7 +806,8 @@ bool Decoder::Impl::idwt(CommandBuffer &cmd, const ViewBuffers &views)
+ 				cmd.set_storage_texture(0, 1, *views.planes[0]);
+ 				cmd.begin_region("iDWT final");
+ 				cmd.set_texture(0, 0, *component_layer_views[0][input_level], *mirror_repeat_sampler);
+-				cmd.dispatch((push.resolution.x + 15) / 16, (push.resolution.y + 15) / 16, 1);
++				cmd.dispatch((push.resolution.x + block_pairs - 1) / block_pairs,
++				             (push.resolution.y + block_pairs - 1) / block_pairs, 1);
+ 				cmd.end_region();
+ 			}
+ 		}
+@@ -824,7 +828,8 @@ bool Decoder::Impl::idwt(CommandBuffer &cmd, const ViewBuffers &views)
+ 				char label[64];
+ 				snprintf(label, sizeof(label), "iDWT level %u, component %u", input_level - 1, c);
+ 				cmd.begin_region(label);
+-				cmd.dispatch((push.resolution.x + 15) / 16, (push.resolution.y + 15) / 16, 1);
++				cmd.dispatch((push.resolution.x + block_pairs - 1) / block_pairs,
++				             (push.resolution.y + block_pairs - 1) / block_pairs, 1);
+ 				cmd.end_region();
+ 			}
+ 		}
+@@ -1116,6 +1121,19 @@ bool Decoder::init(Vulkan::Device *device, int width, int height, ChromaSubsampl
  	return true;
  }
  
 +bool Decoder::set_fast53_enabled(bool enabled)
 +{
-+	if (enabled && (!impl->legall53 || impl->fragment_path))
++	return set_fast53_variant(enabled ? 1 : 0);
++}
++
++bool Decoder::set_fast53_variant(int variant)
++{
++	if (variant < 0 || variant > 3 || (variant && (!impl->legall53 || impl->fragment_path)))
 +		return false;
-+	impl->fast53 = enabled;
++	impl->fast53 = variant;
 +	return true;
 +}
 +
@@ -78,20 +132,21 @@ index f2fa70d513eab2293a8b968d75af7fc2f3cf5714..2abefd9d861d56d4afb97672b3e64a2b
  {
  	impl->idwt_enabled = enabled;
 diff --git a/pyrowave_decoder.hpp b/pyrowave_decoder.hpp
-index 5f6da998e8c0a60a181bb9e4e8c4495e4c0c5dff..fbb0ae03bbe72a443d0d4abdd7cd110e1d2ba428 100644
+index 5f6da998e8c0a60a181bb9e4e8c4495e4c0c5dff..6079da4710ed3b92cc7901b8a9167dac3a0ed36e 100644
 --- a/pyrowave_decoder.hpp
 +++ b/pyrowave_decoder.hpp
-@@ -41,6 +41,9 @@ public:
+@@ -41,6 +41,10 @@ public:
  
  	bool decode_is_ready(bool allow_partial_frame) const;
  
 +	// Default-off CDF53 compute inverse; false if enabling on another wavelet/path.
 +	bool set_fast53_enabled(bool enabled);
++	bool set_fast53_variant(int variant);
 +
  	// XRW Experiment 3: record dequant only (no iDWT) so an external reconstruction kernel can
  	// read the wavelet image; and expose that image's per-component, per-level array views.
  	void set_idwt_enabled(bool enabled);
-@@ -60,4 +63,4 @@ private:
+@@ -60,4 +64,4 @@ private:
  	struct Impl;
  	std::unique_ptr<Impl> impl;
  };
@@ -119,7 +174,7 @@ index 06b773eef91d323ac27044bbf0960797ca18614d..1b38679bf62746a785439dffe7dce48f
  bvec2 band(bvec2 a, bvec2 b)
  {
 diff --git a/shaders/idwt.comp b/shaders/idwt.comp
-index 18803c226c9d976ce639c2efc9e58dcfacd70783..33420c64ea407a3851275b4e9cc492febc41c89f 100644
+index 18803c226c9d976ce639c2efc9e58dcfacd70783..98b815fef80615bb38e6368eef8fc86c8d63bd5d 100644
 --- a/shaders/idwt.comp
 +++ b/shaders/idwt.comp
 @@ -26,6 +26,7 @@ layout(push_constant) uniform Registers
@@ -130,7 +185,7 @@ index 18803c226c9d976ce639c2efc9e58dcfacd70783..33420c64ea407a3851275b4e9cc492fe
  vec2 generate_mirror_uv(ivec2 coord, bool even_x, bool even_y)
  {
      coord -= ivec2(band(bvec2(even_x, even_y), lessThan(coord, ivec2(0))));
-@@ -278,8 +279,107 @@ void inverse_haar_pairs()
+@@ -278,8 +279,269 @@ void inverse_haar_pairs()
      }
  }
  
@@ -228,17 +283,179 @@ index 18803c226c9d976ce639c2efc9e58dcfacd70783..33420c64ea407a3851275b4e9cc492fe
 +    fast53_write(pixel + ivec2(2, 0), e1);
 +    fast53_write(pixel + ivec2(3, 0), o1);
 +}
++
++#if FAST53 >= 2
++// Only first-axis results may be narrowed: horizontal updated evens must stay
++// at arithmetic precision until the predict step. Pack the stored columns
++// into FP16 registers when available, matching the existing shared boundary.
++#if FP16 && PRECISION != 2
++#define FAST53_STORED4 f16vec4
++#else
++#define FAST53_STORED4 vec4
++#endif
++struct Fast53StoredColumn { FAST53_STORED4 lo; FAST53_STORED4 hi; };
++struct Fast53Column { VEC4 lo; VEC4 hi; };
++
++FAST53_STORED4 fast53_pack4(VEC4 value)
++{
++#if FP16 && PRECISION != 2
++    return FAST53_STORED4(value);
++#else
++    return fast53_store4(value);
++#endif
++}
++
++Fast53Column fast53_update_column(Fast53StoredColumn low, Fast53StoredColumn left, Fast53StoredColumn right)
++{
++    Fast53Column result;
++    result.lo = VEC4(low.lo) - FLOAT(0.25) * (VEC4(left.lo) + VEC4(right.lo));
++    result.hi = VEC4(low.hi) - FLOAT(0.25) * (VEC4(left.hi) + VEC4(right.hi));
++    return result;
++}
++
++void fast53_write_pair(ivec2 pixel, Fast53Column even, Fast53StoredColumn high, Fast53Column next_even)
++{
++    VEC4 odd_lo = VEC4(high.lo) + FLOAT(0.5) * (even.lo + next_even.lo);
++    VEC4 odd_hi = VEC4(high.hi) + FLOAT(0.5) * (even.hi + next_even.hi);
++    fast53_write(pixel, even.lo);
++    fast53_write(pixel + ivec2(0, 4), even.hi);
++    fast53_write(pixel + ivec2(1, 0), odd_lo);
++    fast53_write(pixel + ivec2(1, 4), odd_hi);
++}
++
++#if FAST53 == 2
++VEC2 fast53_next_pair(ivec2 coord, int band, inout FLOAT even, inout FLOAT high)
++{
++    FLOAT next_high = fast53_fetch(coord, band + 2);
++    FLOAT next_even = fast53_fetch(coord, band) - FLOAT(0.25) * (high + next_high);
++    VEC2 pair = VEC2(even, high + FLOAT(0.5) * (even + next_even));
++    even = next_even;
++    high = next_high;
++    return pair;
++}
++
++Fast53StoredColumn fast53_column8(ivec2 coord, int band)
++{
++    FLOAT previous = fast53_fetch(coord - ivec2(1, 0), band + 2);
++    FLOAT high = fast53_fetch(coord, band + 2);
++    FLOAT even = fast53_fetch(coord, band) - FLOAT(0.25) * (previous + high);
++    // Separate calls: GLSL does not specify function-argument evaluation order.
++    VEC2 p0 = fast53_next_pair(coord + ivec2(1, 0), band, even, high);
++    VEC2 p1 = fast53_next_pair(coord + ivec2(2, 0), band, even, high);
++    Fast53StoredColumn result;
++    result.lo = fast53_pack4(VEC4(p0, p1));
++    VEC2 p2 = fast53_next_pair(coord + ivec2(3, 0), band, even, high);
++    VEC2 p3 = fast53_next_pair(coord + ivec2(4, 0), band, even, high);
++    result.hi = fast53_pack4(VEC4(p2, p3));
++    return result;
++}
++
++void fast53_next_column(ivec2 coord, ivec2 pixel, inout Fast53Column even, inout Fast53StoredColumn high)
++{
++    Fast53StoredColumn next_high = fast53_column8(coord, 1);
++    Fast53Column next_even = fast53_update_column(fast53_column8(coord, 0), high, next_high);
++    fast53_write_pair(pixel, even, high, next_even);
++    even = next_even;
++    high = next_high;
++}
++#endif
++
++#if FAST53 == 3
++VEC4 fast53_gather(ivec2 coord, int layer)
++{
++    bvec2 low = bvec2(layer < 2, (layer & 1) == 0);
++    // Literal generate_mirror_uv arithmetic, including the post-+1 upper test.
++    // Low-band origins are even; high-band origins are odd (-1,1,3 relative
++    // to the block). At a crossed mirror point the duplicated endpoint makes
++    // this gather equal to selecting lanes from the original EVEN origins.
++    coord -= ivec2(band(low, lessThan(coord, ivec2(0))));
++    coord += 1;
++    coord += ivec2(band(not(low), greaterThanEqual(coord, resolution)));
++    vec2 uv = vec2(coord) * inv_resolution;
++    return fast53_store4(VEC4(textureGather(uTexture, vec3(uv.yx, float(layer)), 0)).wxzy);
++}
++
++// Six gathers reconstruct two adjacent eight-pixel columns. Vec2 lanes are
++// horizontal neighbours; .xz/.yw select successive vertical coefficients.
++void fast53_gather_columns(ivec2 coord, int low_layer, out Fast53StoredColumn first, out Fast53StoredColumn second)
++{
++    VEC4 low01 = fast53_gather(coord, low_layer);
++    VEC4 highm0 = fast53_gather(coord - ivec2(1, 0), low_layer + 2);
++    VEC4 high12 = fast53_gather(coord + ivec2(1, 0), low_layer + 2);
++    VEC2 e0 = low01.xz - FLOAT(0.25) * (highm0.xz + highm0.yw);
++    VEC2 e1 = low01.yw - FLOAT(0.25) * (highm0.yw + high12.xz);
++    VEC2 o0 = highm0.yw + FLOAT(0.5) * (e0 + e1);
++    VEC4 low23 = fast53_gather(coord + ivec2(2, 0), low_layer);
++    VEC2 e2 = low23.xz - FLOAT(0.25) * (high12.xz + high12.yw);
++    VEC2 o1 = high12.xz + FLOAT(0.5) * (e1 + e2);
++    first.lo = fast53_pack4(VEC4(e0.x, o0.x, e1.x, o1.x));
++    second.lo = fast53_pack4(VEC4(e0.y, o0.y, e1.y, o1.y));
++    VEC4 high34 = fast53_gather(coord + ivec2(3, 0), low_layer + 2);
++    VEC2 e3 = low23.yw - FLOAT(0.25) * (high12.yw + high34.xz);
++    VEC2 o2 = high12.yw + FLOAT(0.5) * (e2 + e3);
++    VEC4 low45 = fast53_gather(coord + ivec2(4, 0), low_layer);
++    VEC2 e4 = low45.xz - FLOAT(0.25) * (high34.xz + high34.yw);
++    VEC2 o3 = high34.xz + FLOAT(0.5) * (e3 + e4);
++    first.hi = fast53_pack4(VEC4(e2.x, o2.x, e3.x, o3.x));
++    second.hi = fast53_pack4(VEC4(e2.y, o2.y, e3.y, o3.y));
++}
++#endif
++
++void inverse_53_blocked()
++{
++    // 64 invocations, 4x4 coefficient pairs each: 32x32 pairs per workgroup.
++    ivec2 coord = ivec2(gl_WorkGroupID.xy) * 32 + 4 * unswizzle8x8(gl_LocalInvocationIndex);
++    if (any(greaterThanEqual(coord, resolution)))
++        return;
++    ivec2 pixel = 2 * coord.yx;
++#if FAST53 == 2
++    // 5 low + 6 high columns, 11 scalar fetches per column = 121 / 64 pixels.
++    Fast53StoredColumn previous = fast53_column8(coord - ivec2(0, 1), 1);
++    Fast53StoredColumn high = fast53_column8(coord, 1);
++    Fast53Column even = fast53_update_column(fast53_column8(coord, 0), previous, high);
++    fast53_next_column(coord + ivec2(0, 1), pixel, even, high);
++    fast53_next_column(coord + ivec2(0, 2), pixel + ivec2(2, 0), even, high);
++    fast53_next_column(coord + ivec2(0, 3), pixel + ivec2(4, 0), even, high);
++    fast53_next_column(coord + ivec2(0, 4), pixel + ivec2(6, 0), even, high);
++#else
++    // Six column-pair loads, six gathers each = 36 / 64 pixels. Stream them
++    // in dependency order so old columns die before the next pair is loaded.
++    Fast53StoredColumn low0, low1, hm, h0;
++    fast53_gather_columns(coord, 0, low0, low1);
++    fast53_gather_columns(coord - ivec2(0, 1), 1, hm, h0);
++    Fast53Column e0 = fast53_update_column(low0, hm, h0);
++    Fast53StoredColumn h1, h2;
++    fast53_gather_columns(coord + ivec2(0, 1), 1, h1, h2);
++    Fast53Column e1 = fast53_update_column(low1, h0, h1);
++    fast53_write_pair(pixel, e0, h0, e1);
++    Fast53StoredColumn low2, low3;
++    fast53_gather_columns(coord + ivec2(0, 2), 0, low2, low3);
++    Fast53Column e2 = fast53_update_column(low2, h1, h2);
++    fast53_write_pair(pixel + ivec2(2, 0), e1, h1, e2);
++    Fast53StoredColumn h3, h4;
++    fast53_gather_columns(coord + ivec2(0, 3), 1, h3, h4);
++    Fast53Column e3 = fast53_update_column(low3, h2, h3);
++    fast53_write_pair(pixel + ivec2(4, 0), e2, h2, e3);
++    Fast53StoredColumn low4, unused;
++    fast53_gather_columns(coord + ivec2(0, 4), 0, low4, unused);
++    Fast53Column e4 = fast53_update_column(low4, h3, h4);
++    fast53_write_pair(pixel + ivec2(6, 0), e3, h3, e4);
++#endif
++}
++#endif
 +#endif
 +
  void main()
  {
-+#if FAST53
++#if FAST53 >= 2
++    inverse_53_blocked();
++#elif FAST53 == 1
 +    inverse_53_pairs();
 +#else
      if (HAAR)
      {
          inverse_haar_pairs();
-@@ -315,4 +415,5 @@ void main()
+@@ -315,4 +577,5 @@ void main()
              imageStore(uOutput, ivec2(2 * y + 1, x) + BLOCK_SIZE * ivec2(gl_WorkGroupID.yx), v.yyyy);
          }
      }
@@ -7868,7 +8085,7 @@ index 6114ea75973ec66ae3d6b0937aedc5798287c044..ed1ad0ee065f619df9a2631acc40d67d
  }
  }
 diff --git a/shaders/slangmosh.json b/shaders/slangmosh.json
-index b7bbaf3ee477268207142d595b0b1199829c143e..e5991a09dcda46ba5a0413fc6194d9061511f424 100644
+index b7bbaf3ee477268207142d595b0b1199829c143e..261c2a2fb80cbd17cdf98fee501723cc2e305fff 100644
 --- a/shaders/slangmosh.json
 +++ b/shaders/slangmosh.json
 @@ -32,6 +32,11 @@
@@ -7877,7 +8094,7 @@ index b7bbaf3ee477268207142d595b0b1199829c143e..e5991a09dcda46ba5a0413fc6194d906
          },
 +        {
 +          "define": "FAST53",
-+          "count": 2,
++          "count": 4,
 +          "resolve": false
 +        },
          {

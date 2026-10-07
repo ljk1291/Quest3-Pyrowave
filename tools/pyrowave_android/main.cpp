@@ -127,10 +127,12 @@ int compare_fast53(int argc, char **argv) {
         fprintf(stderr, "comparison requires matching stereo 5248x2752 8-bit C420 streams (2624x2752 per eye)\n");
         return 1;
     }
-    const char *labels[] = {"apron53", "fast53", "haar"};
-    std::string outputs[3];
-    double mean_ms[3] = {};
-    for (int arm = 0; arm < 3; arm++) {
+    const char *labels[] = {"apron53", "fast53-v1", "fast53-v2", "fast53-v3", "haar"};
+    const char *variants[] = {"0", "1", "2", "3", "0"};
+    constexpr int haar_arm = 4;
+    std::string outputs[5];
+    double mean_ms[5] = {};
+    for (int arm = 0; arm < 5; arm++) {
         outputs[arm] = std::string(argv[4]) + "." + labels[arm] + ".y4m";
         printf("[Q3PW_FAST53_CHECK] arm=%s geometry=5248x2752 chroma=420 first_frame=1 warmup=5 samples=%s\n",
                labels[arm], iterations);
@@ -138,8 +140,8 @@ int compare_fast53(int argc, char **argv) {
         pid_t child = fork();
         if (child < 0) { perror("fork"); return 1; }
         if (child == 0) {
-            execlp(argv[0], argv[0], arm == 2 ? argv[3] : argv[2], outputs[arm].c_str(),
-                   "--fast53-worker", arm == 2 ? "haar" : "53", arm == 1 ? "1" : "0", iterations,
+            execlp(argv[0], argv[0], arm == haar_arm ? argv[3] : argv[2], outputs[arm].c_str(),
+                   "--fast53-worker", arm == haar_arm ? "haar" : "53", variants[arm], iterations,
                    static_cast<char *>(nullptr));
             perror("exec pyrowave_android");
             _exit(1);
@@ -160,48 +162,64 @@ int compare_fast53(int argc, char **argv) {
         if (!valid) { fprintf(stderr, "invalid GPU timing\n"); return 1; }
     }
 
-    FILE *reference = fopen(outputs[0].c_str(), "rb");
-    FILE *candidate = fopen(outputs[1].c_str(), "rb");
-    if (!reference || !candidate) {
-        if (reference) fclose(reference);
-        if (candidate) fclose(candidate);
-        fprintf(stderr, "cannot open comparison readbacks\n");
-        return 1;
-    }
-    bool valid = true, parity = true;
-    char ref_header[512], fast_header[512];
-    for (int line = 0; line < 2; line++) {
-        if (!fgets(ref_header, sizeof(ref_header), reference) ||
-            !fgets(fast_header, sizeof(fast_header), candidate) || strcmp(ref_header, fast_header)) valid = false;
-    }
-    const char *planes[] = {"Y", "Cb", "Cr"};
-    for (int plane = 0; plane < 3 && valid; plane++) {
-        const size_t count = size_t(cdf53.width) * cdf53.height / (plane ? 4 : 1);
-        std::vector<uint8_t> ref(count), fast(count);
-        valid = fread(ref.data(), 1, count, reference) == count &&
-                fread(fast.data(), 1, count, candidate) == count;
-        if (!valid) break;
-        unsigned maximum = 0;
-        uint64_t sum = 0;
-        for (size_t i = 0; i < count; i++) {
-            const unsigned difference = unsigned(std::abs(int(ref[i]) - int(fast[i])));
-            maximum = std::max(maximum, difference);
-            sum += difference;
+    printf("[Q3PW_FAST53_TIMING] apron53_ms=%.6f v1_ms=%.6f v2_ms=%.6f v3_ms=%.6f haar_ms=%.6f scope=standalone_decode\n",
+           mean_ms[0], mean_ms[1], mean_ms[2], mean_ms[3], mean_ms[haar_arm]);
+    bool any_parity = false;
+    int selected = 0;
+    std::string passing;
+    for (int variant = 1; variant <= 3; variant++) {
+        FILE *reference = fopen(outputs[0].c_str(), "rb");
+        FILE *candidate = fopen(outputs[variant].c_str(), "rb");
+        if (!reference || !candidate) {
+            if (reference) fclose(reference);
+            if (candidate) fclose(candidate);
+            fprintf(stderr, "cannot open comparison readbacks\n");
+            return 1;
         }
-        parity = parity && maximum <= 1;
-        printf("[Q3PW_FAST53_DIFF] plane=%s max=%u mean=%.9f code_values samples=%zu gate=%s\n",
-               planes[plane], maximum, double(sum) / double(count), count, maximum <= 1 ? "pass" : "fail");
+        bool valid = true, parity = true;
+        char ref_header[512], fast_header[512];
+        for (int line = 0; line < 2; line++) {
+            if (!fgets(ref_header, sizeof(ref_header), reference) ||
+                !fgets(fast_header, sizeof(fast_header), candidate) || strcmp(ref_header, fast_header)) valid = false;
+        }
+        const char *planes[] = {"Y", "Cb", "Cr"};
+        for (int plane = 0; plane < 3 && valid; plane++) {
+            const size_t count = size_t(cdf53.width) * cdf53.height / (plane ? 4 : 1);
+            std::vector<uint8_t> ref(count), fast(count);
+            valid = fread(ref.data(), 1, count, reference) == count &&
+                    fread(fast.data(), 1, count, candidate) == count;
+            if (!valid) break;
+            unsigned maximum = 0;
+            uint64_t sum = 0;
+            for (size_t i = 0; i < count; i++) {
+                const unsigned difference = unsigned(std::abs(int(ref[i]) - int(fast[i])));
+                maximum = std::max(maximum, difference);
+                sum += difference;
+            }
+            parity = parity && maximum <= 1;
+            printf("[Q3PW_FAST53_DIFF] variant=%d plane=%s max=%u mean=%.9f code_values samples=%zu gate=%s\n",
+                   variant, planes[plane], maximum, double(sum) / double(count), count, maximum <= 1 ? "pass" : "fail");
+        }
+        valid = valid && fgetc(reference) == EOF && fgetc(candidate) == EOF &&
+                !ferror(reference) && !ferror(candidate);
+        fclose(reference);
+        fclose(candidate);
+        if (!valid) { fprintf(stderr, "invalid readback for variant %d\n", variant); return 1; }
+        const double ratio = mean_ms[variant] / mean_ms[haar_arm];
+        const bool qualifies = parity && ratio <= 1.3;
+        any_parity = any_parity || parity;
+        printf("[Q3PW_FAST53_CHECK] variant=%d parity=%s gpu_ms=%.6f ratio_to_haar=%.6f timing=%s both=%s\n",
+               variant, parity ? "pass" : "fail", mean_ms[variant], ratio,
+               ratio <= 1.3 ? "pass" : "fail", qualifies ? "pass" : "fail");
+        if (qualifies) {
+            if (!passing.empty()) passing += ",";
+            passing += std::to_string(variant);
+            if (!selected || mean_ms[variant] < mean_ms[selected]) selected = variant;
+        }
     }
-    valid = valid && fgetc(reference) == EOF && fgetc(candidate) == EOF &&
-            !ferror(reference) && !ferror(candidate);
-    fclose(reference);
-    fclose(candidate);
-    const double ratio = mean_ms[1] / mean_ms[2];
-    printf("[Q3PW_FAST53_TIMING] apron53_ms=%.6f fast53_ms=%.6f haar_ms=%.6f fast53_over_haar=%.6f target_1_3=%s scope=standalone_decode\n",
-           mean_ms[0], mean_ms[1], mean_ms[2], ratio, ratio <= 1.3 ? "pass" : "fail");
-    printf("[Q3PW_FAST53_CHECK] parity=%s timing=%s live_vr=unverified\n",
-           valid && parity ? "pass" : "fail", ratio <= 1.3 ? "pass" : "fail");
-    return !valid || !parity ? 2 : ratio > 1.3 ? 3 : 0;
+    printf("[Q3PW_FAST53_CHECK] passing_variants=%s fastest_passing_variant=%d live_vr=unverified\n",
+           passing.empty() ? "none" : passing.c_str(), selected);
+    return selected ? 0 : any_parity ? 3 : 2;
 }
 
 } // namespace
@@ -211,7 +229,7 @@ int main(int argc, char **argv) {
     const bool comparison_worker = argc == 7 && !strcmp(argv[3], "--fast53-worker");
     if (comparison_worker) {
         if ((strcmp(argv[4], "53") && strcmp(argv[4], "haar")) ||
-            (strcmp(argv[5], "0") && strcmp(argv[5], "1")) || !comparison_iterations(argv[6])) return 1;
+            (strcmp(argv[5], "0") && !choose_fast53(argv[5], true, false).active) || !comparison_iterations(argv[6])) return 1;
         // Process-local overrides only. Never set an Android system property.
         if (setenv("PYROWAVE_WAVELET", argv[4], 1) || setenv("PYROWAVE_FAST53", argv[5], 1) ||
             setenv("PYROWAVE_ITERATIONS", argv[6], 1) || setenv("PYROWAVE_FORCE_COMPUTE", "1", 1) ||
@@ -530,8 +548,9 @@ int main(int argc, char **argv) {
     PW_CHECK(pyrowave_decoder_create(&decoderInfo, &decoder));
     const auto fast53 = choose_fast53(getenv("PYROWAVE_FAST53"),
                                      decoderInfo.wavelet == PYROWAVE_WAVELET_CDF53, fragmentPath);
-    if (fast53.active) PW_CHECK(pyrowave_decoder_set_fast53_enabled(decoder, 1));
-    printf("[Q3PW_FAST53] requested=%d active=%d reason=%s\n", fast53.requested, fast53.active, fast53.reason);
+    if (fast53.active) PW_CHECK(pyrowave_decoder_set_fast53_variant(decoder, fast53.variant));
+    printf("[Q3PW_FAST53] requested=%d active=%d variant=%d reason=%s\n",
+           fast53.requested, fast53.active, fast53.variant, fast53.reason);
 
     PW_CHECK(pyrowave_decoder_push_packet(decoder, wave.frame.data(), wave.frame.size()));
     const bool ready = pyrowave_decoder_decode_is_ready(decoder, false);
