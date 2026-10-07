@@ -78,7 +78,7 @@
     },
     "pyrowave_fast53": {
       "path": "patches/pyrowave-fast53.patch",
-      "sha256": "ae269cbaac6c4b8c001bdf9121e40b1bea7eeaab677de58a3259a66e8d15d618"
+      "sha256": "2c61de98c91a8a005be1424261f96c25b860d7b300014b000326ef19063e54c0"
     }
   },
   "rust": "1.97.1",
