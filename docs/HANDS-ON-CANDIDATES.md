@@ -34,6 +34,88 @@ so they aren't retried by accident.
   partial-decode + critical-packet UDP transport if UDP loss is the problem; (3) fast 5/3 decode;
   (4) owner's worn check of the winners.
 
+## Candidates for the owner's worn check (2026-10-07, 160 MHz) — NEWEST
+Installed pair: **q160 candidate** `codex/q160-candidate` 7f85e87 (CI 37589333446; APK
+20.13.0-ljk1291.2+7f85e87fd554, same cert) = output-queue f33c0cc + fast ABR + fast CDF 5/3, both opt-in.
+Files out/q160-candidate-37589333446; server ws/server-q160-candidate-37589333446. Rollback APK:
+out/output-queue-37527308692. All cells: PyroWave Haar, FOV crop 2624x2752/eye, 90 Hz, queue depth 3, TCP.
+
+### C5 — Haar 1000 + fast ABR (`hq-haar1000-fabr-metro`)  ← try first
+- Settings: C3 at 1000 Mbps plus `video.pyrowave.fast_abr.enabled=true` (floor 0.35, ×0.6, +0.05/frame,
+  1-frame backlog threshold, send buffer 1 MiB) and `extra.logging.log_to_disk=true` (per-second
+  `[Q3PW_FAST_ABR]` stats in the stage's session_log.txt).
+- Evidence (unworn, sweep `q160cand`): 89.8 / 89.9 fresh/s at 1009 Mbps, net p99 13.6–15.4 ms, multiplier 1.0
+  except one transient (min 0.36, 14 frames shrunk, 0 dropped). Visual: Haar 1000 = severity 1/1/1 (Astra),
+  first rate without square patches. Over-capacity proxy (2000 Mbps ceiling on a ~1.6 Gbps link): fast ABR
+  86.1 / 86.3 fresh/s at ~1.61 Gbps, net p50/p99 ~20/36 ms, 0 server drops, vs cap 70.2 / 70.0 at 41/53 ms.
+- Look at: head turns and strafing in Metro (stutter, lag, smear), fence detail; compare with C6 and C3.
+
+### C6 — Haar 1250 + fast ABR (`hq-haar1250-fabr-metro`)
+- As C5 at 1250 Mbps; send buffer 2.5 MB (1.5 frames). Unworn 89.3 / 89.8 fresh/s, net p99 17–18 ms.
+  Visual: severity 1/1/1, "nothing objectionable" (quality saturates here; 1500 is no better).
+- Less Wi-Fi headroom than C5 (live capacity ~1.6 Gbps unworn): fast ABR has to absorb more dips.
+
+### C7 — Haar 1000 + settings-only cap (`hq-haar1000-cap-metro`, runs on either pair)
+- 1 MiB send buffer + `avoid_video_glitching=false`, no new code. Unworn 89.9 / 90.0 fresh/s. Under overload
+  it keeps latency bounded by dropping frames (stutter rather than lag). Control for C5.
+- Default buffering (`hq-haar1000-metro`) is the "before" feel: unbounded lag on dips.
+
+### Candidate-pair sweep `q160cand` (10:27–10:43, unworn, 2 interleaved rounds)
+| Cell | Fresh/s | Mbps p50 | Network p50/p95/p99 ms | GPU decode | Notes |
+|---|---|---|---|---|---|
+| hq-haar1000 (fast ABR off) | 90.1, 88.5 | 1009 | 9.7–12.5 / 11.9–21.0 / 13.4–26.3 | 6.5–6.6 | new pair = old pair |
+| hq-haar1000-fabr | 89.8, 89.9 | 1008 | 9.6–10.0 / 11.8 / 13.6–15.4 | 6.6–7.4 | multiplier 1.0 |
+| hq-haar1250-fabr | 89.3, 89.8 | 1260 | 12.2 / 14.3 / 17.2–18.3 | 7.5 | |
+| hq-haar2000-cap | 70.2, 70.0 | 1845 | 41.5 / 49.2 / 53 | 8.6 | decode-to-fence 11.2 ms at 2.8 MB frames |
+| **hq-haar2000-fabr** | **86.1, 86.3** | **~1615** | **20 / 31 / 36** | 6.8 | multiplier mean 0.70–0.78, min 0.35 every second, 0 drops, 54–62 client skips |
+| hq-cdf53-750-f53 | 74.1 | 757 | 7.1 / 8.9 / 9.8 | **10.9** | fast53 live (apron kernel: 62.2 / 13.0 ms) |
+
+- Fast ABR tuning is open: at the capacity edge the AIMD saw-tooths (floor every second), and bunched
+  arrivals make the client skip ~4 frames/s. Next: gentler decrease (~×0.85), slower recovery (~0.02), a
+  backlog target band, and a send buffer that scales with frame size.
+
+## Visual ladder at 160 MHz (lossless dumps, 2026-10-07 10:04–10:22, swaying chart, unworn)
+Dumps by the installed f33c0cc pair; 8–10 exact post-fade pairs per cell (pruned to pairs; 36 GB free after).
+Sheets: results/local/session-25/compare-160/ (ws/compare_sheet.py). Mean / max |luma error|:
+
+| Cell | gratings | lines-text | gratings-right |
+|---|---|---|---|
+| Haar 500 | 1.25 / 70 | 1.26 / 69 | 1.12 / 66 |
+| Haar 750 | 0.81 / 31 | 0.59 / 31 | 0.75 / 60 |
+| **Haar 1000** | 0.53 / 12 | 0.45 / 18 | 0.45 / 14 |
+| **Haar 1250** | **0.35 / 8** | **0.33 / 11** | **0.32 / 8** |
+| Haar 1500 | 0.37 / 12 | 0.34 / 14 | 0.32 / 10 |
+| CDF 5/3 750 | 0.62 / 61 | 0.69 / 45 | 0.54 / 27 |
+| H.264 P4 (~270 Mbps actual) | 1.20 / 21 | 0.43 / 22 | 1.19 / 21 |
+
+- Planner's read: the 4–8 px square patches are gone from Haar 1000 on (only thin outlines along strokes
+  remain in the x16 difference); Haar 1250 is close to transparent. **Quality saturates at ~1250**: 1500 is
+  no better (the remaining ~0.33 is likely decoder FP16 storage precision and sub-pixel sway, not
+  compression), so there is no reason to push the link past ~1250. H.264 keeps text clean but shifts whole
+  grating stripes brighter/darker (the strongest structured error on gratings of all rows).
+- CDF 5/3 at 750 ≈ Haar 750 on this synthetic chart (Haar's penalty is small on hard-edged UI/text, +10 %
+  bytes offline, but +103 % on natural textures). The chart cannot show 5/3's advantage; Metro can.
+- **Astra's independent review** (task-muxuciqa-d2vbek, read-only, gpt-6-astra; still-image estimates, MIDDLE vs
+  LEFT, native scale checked): severity gratings / lines-text / gratings-right — Haar 500 3/3/3, Haar 750 2/2/2,
+  **Haar 1000 1/1/1** ("the first convincing cleanup of the square patches and faint-stroke loss"; borderline
+  1–2 under deliberate scrutiny), **Haar 1250 1/1/1** ("no persuasive square patches or disappearing
+  strokes"), Haar 1500 1/1/1 (same tier as 1250), CDF 5/3 750 2/2/2 (less rectangular damage but softening
+  and thickened faint strokes), H.264 P4 2/1/2 (clean text; systematic stripe brightness/width changes).
+  Ranking, thin lines/text: **Haar 1250 ≈ 1500 ≳ 1000 ≈ H.264 > Haar 750 ≳ CDF 750 > Haar 500**; dense
+  gratings: **Haar 1250 ≈ 1500 ≳ 1000 ≳ CDF 750 > Haar 750 ≳ H.264 ≳ Haar 500**. Patches stop being
+  visible at ~1000; 1250 is the confident "nothing objectionable" point. Motion shimmer is not judged from stills.
+- **Conclusion for problem 1 (chart): Haar at 1000–1250 Mbps over 160 MHz is the first configuration that
+  is visibly cleaner than the VD-like H.264 reference** (better gratings, text tied or better). Metro
+  (natural textures, where Haar is weakest) is the owner's check.
+
+## Fast CDF 5/3 inverse: device check (2026-10-07 ~10:28, candidate pair 7f85e87, standalone)
+`pyrowave_android --compare-fast53` on a real 5248x2752 chart frame at the 750 Mbps budget, precision 1:
+- **Parity PASS**: max 1 code value in Y/Cb/Cr (mean 0.0053 / 0.0005 / 0.0007): the kernel is exact.
+- **Timing**: GPU decode apron 5/3 12.59 ms → **fast53 10.13 ms** (−20 %) vs Haar 6.13 ms: 1.65x Haar
+  (target 1.3x) → expect ~80 fresh/s live, not 90. The pair-local kernel is fetch-bound (3.06 fetches/pixel
+  vs Haar's 1). Next options: larger blocks per invocation (4x4 pairs ≈ 1.9 fetches/pixel), textureGather,
+  or a hybrid (5/3 only on the coarse levels that produce Haar's 4–8 px squares, Haar on level 0).
+
 ## Why worn motion turns into 100–300 ms lag (source reading, 2026-10-07 ~09:10)
 PyroWave over TCP is sent through ALVR's stream socket: encoder → `send_video_nal` (2-frame
 `sync_channel`, `max_queued_server_video_frames = 2`, `try_send`) → video send thread → socket.
@@ -95,6 +177,39 @@ new bytes) and `ServerRotation: 5` was removed. No streaming setting changed; th
 - **Haar 1000 over TCP holds ~89–90 fresh/s unworn** at 1007 Mbps (network p99 15–36 ms); decode does not grow
   with bitrate (5.9–7.5 ms at 500–1000). 160 MHz makes 1000 Mbps feasible, but with little margin (TCP
   ceiling ~1.15 Gbps), so worn motion will need the latency cap below.
+- **Latency-cap A/B (sweep `cap160`, 09:23–09:40, 2 interleaved rounds, unworn)** — fresh/s, network p99 ms:
+
+  | Rate | Default send buffer | Cap (1 MiB + no wait-for-IDR) |
+  |---|---|---|
+  | 750 | 89.9 / 10.4, 90.0 / 10.3 | 90.0 / 10.7, 90.0 / 10.2 |
+  | 1000 | 89.8 / 13.4, 90.0 / 14.4 | 89.9 / 15.5, 90.0 / 15.0 |
+  | 1250 | 89.8 / 16.0, 89.7 / 17.9 | 89.8 / 24.1, 89.8 / 20.0 |
+
+  **The live TCP stream carries 1.26 Gbps at 90 fresh/s** (network p50 ~12 ms, decode 6.7–7.5 ms): the
+  Python probe's ~1.15 Gbps ceiling was a probe artifact. The cap costs nothing measurable unworn (no
+  drops); its benefit only shows when capacity dips (cross-traffic test next, then worn).
+- **Upper limit screen (sweep `hi160`, 1 round):**
+
+  | Cell | Fresh/s | Mbps | Network p50/p95/p99 ms | GPU decode |
+  |---|---|---|---|---|
+  | hq-haar1500 | 89.2 | 1512 | 14.0 / 25.7 / 36.0 | 6.7 |
+  | hq-haar1500-cap | 85.9 | 1513 | 32.8 / 39.8 / 42.8 | 7.0 |
+  | hq-haar2000 | 75.9 | (stats missing) | – | 7.7 |
+  | hq-haar2000-cap | 70.2 | 1849 | 41.7 / 49.2 / 54.1 | 8.5 |
+
+  Live TCP capacity at 160 MHz is between 1.5 and ~1.85 Gbps; 1500 holds ~89 fresh/s unworn with growing
+  tails. Above capacity the cap keeps latency bounded (~50 ms p99 at 2000) and drops frames instead.
+  **A 1 MiB cap is too small above ~1250 Mbps**: a 2.1 MB frame doesn't fit, TCP becomes window-limited
+  (1500-cap 85.9/s, 33 ms). The send buffer should scale with the frame (≳1.5 frames); 1 MiB is fine
+  ≤1000 Mbps (measured).
+- **Cross-traffic is not a usable motion proxy here (sweep `cross160`, 09:52–).** 800 Mbps TCP bursts to the
+  headset (400 ms on / 1600 ms off, `tools/quest3/crosstraffic.py`) left Haar 1000 at 88.8, 89.9 fresh/s
+  (default; net p99 16, 16 ms) and 89.2, 89.0 (cap; 21, 22 ms), and Haar 750 at 89.7–89.8 either way
+  (p99 13–15 ms), while the cross flow got only ~375 Mbps (vs a 1000 stream) or ~500 (vs 750) with ACK p50
+  35–48 ms / p99 57–98 ms. Restore exit 0 (VD rewrite rule above).
+  The video wins airtime, consistent with ALVR's DSCP EF marking being mapped to a higher WMM class by this
+  router (useful protection against other devices on the network). A worn head turn instead lowers the PHY
+  rate for every class, so the over-capacity cells (rate above link capacity) are the unattended proxy.
 - **PWU2 UDP is rejected** at every rate: 53–60 fresh/s. Not the radio: the receiver assembled ~4000 complete
   frames per run and dropped 1–5, but the UDP client path decodes serially (GPU decode 9.6–9.8 ms, submit→fence
   11.3–12.3 ms vs 5.9/8.6 on TCP) and has no output queue (docs/OUTPUT-QUEUE.md: "TCP PyroWave only"), so it
