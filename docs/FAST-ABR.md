@@ -1,5 +1,140 @@
 # Fast TCP PyroWave budget experiment
 
+## V2: selectable capacity controller
+
+The owner's follow-up reports v1 working in installed candidate `7f85e87`, but
+repeated cuts reach the 0.35 floor while pre-cut frames drain. Capacity mode addresses
+that failure. The v1 reference and original validation record below are retained.
+**V2 has no native-build or hardware acceptance evidence yet.**
+
+### Settings and same-build A/B
+
+Fast ABR remains default off and its new mode defaults to **Aimd**. This preserves
+existing sessions and makes the installed v1 controller available on the same build.
+New configurations use threshold **0.75** and send buffer **0 (automatic)**. Old
+saved thresholds/buffer sizes remain unchanged; missing mode migrates to Aimd.
+
+For v2, set `session_settings.video.pyrowave.fast_abr` to:
+
+```json
+{
+  "enabled": true,
+  "content": {
+    "mode": { "variant": "Capacity" },
+    "floor": 0.35,
+    "decrease": 0.6,
+    "recovery": 0.05,
+    "backlog_frames": 0.75,
+    "send_buffer_bytes": 0
+  }
+}
+```
+
+Reconnect after settings changes. `decrease` remains an Aimd parameter; Capacity
+uses measured capacity instead. `recovery` controls fast recovery in both modes;
+Capacity's slow probe is one percentage point of the current ceiling per frame.
+
+After CPU CI and a full Actions build, compare `Aimd / Capacity / Aimd` with all
+other fields identical, including threshold 0.75 and automatic buffer. Suggested
+ceilings are 1000/1250 Mbps as free-capacity controls and 1750/2000 Mbps as the
+over-capacity stress cells. Keep geometry, 90 Hz, client output queue, two-frame
+server queue and `avoid_video_glitching` identical. A separate legacy-reference
+cell uses Aimd, threshold 1.0, decrease 0.6, recovery 0.05 and explicit 1048576-byte
+buffer to reproduce v1 defaults; do not attribute that cell's buffer difference
+to the controller. Record the mode, actual buffer, capacity/age, cuts, floor frames,
+multiplier distribution, fresh/s, network tails, client skips and server drops.
+
+### Capacity policy
+
+- The sender measures payload bytes completed over up to **three adjacent busy
+  sends**. A send must occupy more than a quarter frame; adjacent sends may have
+  at most a tenth-frame scheduling gap, included in elapsed time. The first send
+  after idle is excluded because it can fill free socket space. Failures and idle
+  gaps reset the measurement window. Estimates older than eight frame periods
+  cannot set a congestion cut.
+- V1's pressure formula is unchanged. Capacity detects congestion using waiting
+  frames plus the active send's time **beyond one normal frame period**. A send
+  completing near one frame period is normal at capacity and no longer triggers
+  repeated congestion cuts by itself. The original raw pressure still guides
+  probing and remains the logged `backlog_p95_frames` for comparison with v1.
+- A congestion episode cuts once to **0.90 × measured capacity**, bounded by the
+  current budget and floor. With no fresh measurement, one provisional 10% cut is
+  used. The controller holds for three frames. A latched episode suppresses further
+  ordinary cuts until the queued/in-flight prefix present at the cut has completed
+  and excess backlog is at most 0.25 frame. This is a queue-drain indication, not
+  proof that TCP/NIC/AP buffers are empty. An emergency requires backlog above both
+  twice the configured threshold and the episode's previous peak plus one frame,
+  with at least two frames between cuts.
+- After the bounded hold, recover quickly toward **97%** of remembered capacity
+  (close to the proposed 95%, leaving room for estimator rounding in the 5% settling
+  band), then probe at +0.01/frame. While the sender is busy, trim probes toward
+  99% of measured capacity instead of repeatedly invoking congestion backoff.
+  This also permits an early capacity-based correction before the queue grows.
+- Three near-idle samples enable probing toward a previously measured high-water
+  capacity, helping recovery after a short dip. During that search a stale low
+  estimate cannot snap the budget back down when writes first start blocking.
+  A new busy-window measurement ends the search. Memory is stored in bits/s, so
+  changes in ALVR's ceiling do not rescale the remembered link capacity.
+
+Only the encode callback accesses the small Capacity policy mutex; the sender
+publishes feedback atomically and never takes it. There is no socket operation,
+allocation or logging in the per-frame controller. Aimd does not take this mutex.
+The native callback now receives the current ALVR bitrate ceiling on every frame.
+Disabled behavior, the byte-cap validation and the opt-in independent-frame IDR
+handling are unchanged.
+
+### Automatic socket buffer and telemetry
+
+An unset/zero buffer selects 1 MiB through 1000 Mbps. Above that it selects
+`ceil(1.5 * ceiling_bps / 8 / fps / 65536) * 65536`, bounded to 1–16 MiB.
+At 90 Hz this is 3 MiB for 1500 Mbps and 4 MiB for 2000 Mbps. Explicit nonzero
+buffers keep their v1 size. Startup uses the configured constant ceiling or adaptive
+maximum (1000 Mbps if uncapped); the sender then follows the actual native ceiling.
+Only changes in the 64 KiB-rounded bound cause a socket update. Updates are verified
+and logged, reset the sender measurement window, and disconnect on failure rather
+than continuing with an unknown buffer bound. The socket remains shared with audio.
+
+The existing per-second stats line adds:
+
+- `mode=Aimd|Capacity`.
+- `capacity_mbps`: latest busy-send estimate, zero before a valid sample.
+- `capacity_age_ms`: age of that sample, -1 before a valid sample. Idle application
+  traffic does not establish a new capacity estimate.
+- `cuts`: congestion/emergency cuts in the interval (every multiplicative reduction
+  in Aimd). Capacity's ordinary probe trims are not additional congestion episodes.
+- `frames_at_floor`: budget requests at the configured floor in the interval.
+
+### Tests and limits
+
+The existing standalone Rust CPU CI command now also compiles the capacity policy
+and deterministic TCP simulation. The simulation uses 100 microsecond virtual
+steps, a bounded socket buffer, blocked write admission, a two-frame channel and
+the actual controller/estimator. Tests require no floor hit and bounded buffered
+bytes at fixed capacities 1000/1100/1500/1600 Mbps beneath a 2000 Mbps ceiling;
+every multiplier after ten frames from first detection must be within 5% of capacity.
+The 1600 → 1100 → 1600 Mbps case holds the dip for 45 frames (0.5 s), checks the
+lower rate from frame 100 and recovery from frame 180 (0.5 s after restoration).
+A ±10% deterministic service-jitter variant checks rolling 20-frame means, as
+instantaneous link capacity also varies. Tests also cover no-pressure identity,
+episode/emergency behavior, estimator exclusions, stale measurements, changing
+ALVR ceilings, automatic sizes and v1 session migration. Original AIMD response
+tests retain their original explicit settings.
+
+Local source validation passed: a fresh replay of all 17 overlays, byte-for-byte
+agreement of all 14 patched files with the edited tree, reverse application,
+whitespace checks, all patch hashes and the two focused pin/order contract functions.
+The Python design model was exercised locally; Rust execution and native compilation
+remain assigned to Actions. The simulation models socket admission and queueing,
+not Windows TCP ACK/window/congestion-control internals, Wi-Fi retransmissions or
+audio competition. Busy-send throughput is an estimate, not verified delivered
+goodput. CPU scheduling or a changing socket window can bias it; remembered high
+capacity can produce a brief overshoot during probing. Adaptive ALVR mode and the
+larger buffer can change latency and need separate hardware comparisons. A longer
+outage or capacity below the configured floor can still cause drops. V2 runtime
+acceptance, standalone decode budget and sustained live VR are all unverified.
+
+## V1 reference
+
 Default off. This overlay extends the existing ALVR/PyroWave and JMS1717-derived
 paths and preserves their credits. It is a candidate for reducing motion-related
 TCP backlog, not a qualified bitrate or a guarantee of lossless frame delivery.
