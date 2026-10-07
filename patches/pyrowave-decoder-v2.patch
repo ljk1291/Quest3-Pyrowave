@@ -1,0 +1,1341 @@
+diff --git a/pyrowave-shared.def b/pyrowave-shared.def
+index 86a6b2af245019e263cff80a09174007224c4ce8..1e3d7335cbd9b958a55b20416fe601d8abb927cf 100644
+--- a/pyrowave-shared.def
++++ b/pyrowave-shared.def
+@@ -43,6 +43,8 @@ EXPORTS
+ 	pyrowave_decoder_decode_cpu_buffer_synchronous
+ 	pyrowave_decoder_destroy
+ 
++	pyrowave_decoder_set_haar32
++	pyrowave_decoder_set_cdf53v2
+ 	pyrowave_decoder_set_fast53_variant
+ 	pyrowave_decoder_set_fast53_enabled
+ 	pyrowave_decoder_set_idwt_enabled
+diff --git a/pyrowave.h b/pyrowave.h
+index 3900257cc5dcfc2fb635d696deb6c115c61fc900..a9aec22641d4178836c1ca997602e96a969845ed 100644
+--- a/pyrowave.h
++++ b/pyrowave.h
+@@ -546,6 +546,35 @@ PYROWAVE_PUBLIC_API pyrowave_result pyrowave_decoder_set_fast53_variant(pyrowave
+ PYROWAVE_PUBLIC_API pyrowave_result pyrowave_decoder_set_idwt_enabled(pyrowave_decoder decoder, int enabled);
+ PYROWAVE_PUBLIC_API pyrowave_result pyrowave_decoder_get_wavelet_view(pyrowave_decoder decoder, int component, int level,
+                                                                      VkImageView *view, VkFormat *format);
++/* Q3PW: Haar 4:2:0 compute path. enabled=1 reconstructs the inverse transform in two dispatches per
++ * plane, luma levels [2,3] and 4:2:0 chroma levels [1,3], with the same arithmetic and FP16 rounding
++ * points as the default level-by-level path. Adreno's float-to-half conversion is not bit-stable
++ * across shaders, so planes can differ from the default path by one code value on about 1% of
++ * pixels at equal PSNR. enabled=2 also stores levels 0-3 quad-packed (RGBA16F, one 2x2 quad of a
++ * band per texel; precision 1 only), which only this pass can read. enabled=3 additionally writes
++ * luma as an RGBA8_UNORM plane of half width and height, each texel one 2x2 pixel quad ((0,0),
++ * (1,0), (0,1), (1,1) in RGBA); the caller must pass such a plane and unpack it. enabled=4 is
++ * enabled=3 that also writes both 4:2:0 chroma planes into plane 1 as R8G8_UNORM (Cb in R, Cr in G);
++ * plane 2 must still be a valid image and is not written. enabled=5 is enabled=4 with planes 0 and 1
++ * both views of one RGBA8_UNORM image of width x height/2 (frame width and height divisible by 4):
++ * the packed luma quads fill x < width/2 and chroma fills x >= width/2, one pixel per texel with Cb
++ * in R, Cr in G and 0 in B and A, so a consumer can bilinear-filter chroma in hardware. Refused (PYROWAVE_ERROR_NOT_IMPLEMENTED, unchanged) for
++ * CDF wavelets, 4:4:4, the fragment path, PYROWAVE_FUSED_HAAR. Default 0. */
++PYROWAVE_PUBLIC_API pyrowave_result pyrowave_decoder_set_haar32(pyrowave_decoder decoder, int enabled);
++
++/* Q3PW Decoder V2: register-only inverse CDF 5/3, one dispatch per level and component with no shared
++ * memory or workgroup barriers. Same lifting and FP16 rounding points as the default 5/3 path, so
++ * planes match it to within one code value. mode=2 additionally writes luma as an RGBA8_UNORM plane
++ * of half width and height, each texel one 2x2 pixel quad ((0,0), (1,0), (0,1), (1,1) in RGBA), as
++ * pyrowave_decoder_set_haar32(3) does; mode=3 also stores levels 0-3 quad-packed (RGBA16F, precision 1
++ * only), as pyrowave_decoder_set_haar32(2) does. mode=4 and mode=5 add the 4:2:0 chroma outputs of
++ * pyrowave_decoder_set_haar32(4) and (5): Cb and Cr together in an R8G8_UNORM plane 1, or the packed
++ * YCbCr layout (planes 0 and 1 both views of one RGBA8_UNORM image of width x height/2, luma quads at
++ * x < width/2, Cb/Cr per texel at x >= width/2; width and height divisible by 4). Refused (PYROWAVE_ERROR_NOT_IMPLEMENTED, unchanged) unless the
++ * decoder is CDF 5/3 on the compute path with fast53 disabled. Default 0.
++ * Set only while idle. PYROWAVE_V2_PACKED_LEVELS=2 restricts packing to levels 0-1;
++ * otherwise levels 0-3 are packed. Modes outside 0..5 are rejected. */
++PYROWAVE_PUBLIC_API pyrowave_result pyrowave_decoder_set_cdf53v2(pyrowave_decoder decoder, int mode);
+ 
+ typedef struct pyrowave_decoder_create_info
+ {
+diff --git a/pyrowave_c.cpp b/pyrowave_c.cpp
+index ebff6204888ee16cea3432fbffde6837cf7203e3..e83855006fe5847b03fc5eff688a70f480d06922 100644
+--- a/pyrowave_c.cpp
++++ b/pyrowave_c.cpp
+@@ -1406,6 +1406,20 @@ pyrowave_result pyrowave_decoder_set_fast53_enabled(pyrowave_decoder decoder, in
+ 	return PYROWAVE_SUCCESS;
+ }
+ 
++pyrowave_result pyrowave_decoder_set_cdf53v2(pyrowave_decoder decoder, int mode)
++{
++	if (!decoder)
++		return PYROWAVE_ERROR_INVALID_ARGUMENT;
++	return decoder->decoder.set_cdf53v2(mode) ? PYROWAVE_SUCCESS : PYROWAVE_ERROR_NOT_IMPLEMENTED;
++}
++
++pyrowave_result pyrowave_decoder_set_haar32(pyrowave_decoder decoder, int enabled)
++{
++	if (!decoder)
++		return PYROWAVE_ERROR_INVALID_ARGUMENT;
++	return decoder->decoder.set_haar32(enabled) ? PYROWAVE_SUCCESS : PYROWAVE_ERROR_NOT_IMPLEMENTED;
++}
++
+ pyrowave_result pyrowave_decoder_set_fast53_variant(pyrowave_decoder decoder, int variant)
+ {
+ 	if (!decoder || !decoder->decoder.set_fast53_variant(variant))
+diff --git a/pyrowave_decoder.cpp b/pyrowave_decoder.cpp
+index 0a11bb2227eb9842b5d9814cb11782a6a8f1db71..6455e53286b23b528ddea5ffb93723437abfa0e1 100644
+--- a/pyrowave_decoder.cpp
++++ b/pyrowave_decoder.cpp
+@@ -58,6 +58,59 @@ struct Decoder::Impl final : public WaveletBuffers
+ 	bool dequant(CommandBuffer &cmd);
+ 	bool idwt(CommandBuffer &cmd, const ViewBuffers &views);
+ 	bool idwt_fragment(CommandBuffer &cmd, const ViewBuffers &views);
++	// Q3PW multilevel Haar: luma levels 4-3 and 2-0, 4:2:0 chroma levels 4 and 3-1, each group in one
++	// dispatch of idwt_haar32.comp (4:2:0 only, the layout its gate covers). Same arithmetic and FP16
++	// rounding points as the pair-local Haar path; two barriers instead of five. Default false.
++	bool haar32 = false;
++	// Mode 2: levels 0-3 hold quad-packed coefficients (RGBA16F, one 2x2 quad of a band per texel),
++	// so dequant stores two texels per invocation instead of eight and the multilevel pass fetches
++	// a child quad's band in one texel. Only the multilevel pass reads these levels.
++	bool quad_packed = false;
++	// Levels 0 .. packed_levels - 1 are quad-packed: four by default, two for the A/B override
++	// (level 4's bands can have an odd size, so it stays scalar).
++	int packed_levels = 2;
++	static constexpr int MaxPackedLevels = 4;
++	// Mode 3: also write luma as an RGBA8 plane of half width and height, one 2x2 pixel quad per
++	// texel. The caller provides that plane and unpacks it.
++	bool packed_luma_output = false;
++	// Mode 4: mode 3, and the 4:2:0 chroma final pass reconstructs Cb and Cr in one dispatch into
++	// the caller's RG8 plane 1 (plane 2 is unused): half the chroma stores of two R8 planes.
++	bool dual_chroma_output = false;
++	// Mode 5: mode 4 with both planes in one RGBA8 image of width x height/2, for a consumer that
++	// converts to RGB itself: luma quads at x < width/2, Cb/Cr pixels (R, G) at x >= width/2.
++	bool present_output = false;
++	int present_width() const { return width; }
++	Vulkan::ImageHandle packed_img;
++	Vulkan::ImageViewHandle packed_layer_views[NumComponents][MaxPackedLevels];
++	// Layer 0 (the LL slot) of each packed level as a 2D storage view: Decoder V2 mode 3 writes the
++	// next level's LL there as RGBA16F quads.
++	Vulkan::ImageViewHandle packed_ll_views[NumComponents][MaxPackedLevels];
++	bool packed_valid = false;
++	bool allocate_packed();
++	const ImageView &band_view(int component, int level) const
++	{
++		return quad_packed && level < packed_levels ? *packed_layer_views[component][level] : *component_layer_views[component][level];
++	}
++	// Production never enables upstream cost probes (they deliberately corrupt output).
++	int haar32_probe = 0;
++	int dequant_probe = 0;
++	bool can_haar32(bool packed) const
++	{
++		if (packed && Configuration::get().get_precision() != 1)
++			return false;
++		return haar && chroma == ChromaSubsampling::Chroma420 && !fragment_path && !fused_haar &&
++		       !cdf53v2;
++	}
++	bool idwt_haar32(CommandBuffer &cmd, const ViewBuffers &views);
++	// Q3PW Decoder V2: register-only inverse CDF 5/3 (idwt_cdf53v2.comp), one dispatch per level and
++	// component, no shared memory or barriers inside. Mode 2 also writes luma as packed RGBA8 quads,
++	// like haar32 mode 3. Default off.
++	bool cdf53v2 = false;
++	bool can_cdf53v2(bool dual_chroma = false) const
++	{
++		return legall53 && !fragment_path && !fast53 && (!dual_chroma || chroma == ChromaSubsampling::Chroma420);
++	}
++	bool idwt_cdf53v2(CommandBuffer &cmd, const ViewBuffers &views);
+ 	void init_block_meta() override;
+ 	void clear();
+ 
+@@ -330,6 +383,9 @@ bool Decoder::Impl::dequant(CommandBuffer &cmd)
+ 	else
+ 		cmd.set_program(shaders.wavelet_dequant[0]);
+ 
++	cmd.set_specialization_constant_mask(3);
++	cmd.set_specialization_constant(0, 0);
++	cmd.set_specialization_constant(1, false);
+ 	cmd.begin_region("DWT dequant");
+ 	auto start_dequant = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+ 
+@@ -346,6 +402,14 @@ bool Decoder::Impl::dequant(CommandBuffer &cmd)
+ 		                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+ 	}
+ 
++	if (quad_packed)
++	{
++		cmd.image_barrier(*packed_img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
++		                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
++		                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
++		                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
++	}
++
+ 	// De-quantize
+ 	for (int level = 0; level < DecompositionLevels; level++)
+ 	{
+@@ -381,7 +445,8 @@ bool Decoder::Impl::dequant(CommandBuffer &cmd)
+                 }
+ 				cmd.push_constants(&push, 0, sizeof(push));
+ 
+-				cmd.set_storage_texture(0, 0, *component_layer_views[component][level]);
++				cmd.set_storage_texture(0, 0, band_view(component, level));
++				cmd.set_specialization_constant(1, quad_packed && level < packed_levels);
+ 				cmd.set_storage_buffer(0, 1, *dequant_offset_buffer);
+ 
+ 				if (payload_r8_image && payload_r16_image && payload_r32_image)
+@@ -411,6 +476,7 @@ bool Decoder::Impl::dequant(CommandBuffer &cmd)
+ 	            fragment_path ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT : VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+ 	            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+ 
++	cmd.set_specialization_constant_mask(0);
+ 	auto end_dequant = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+ 	cmd.end_region();
+ 	cmd.enable_subgroup_size_control(false);
+@@ -735,8 +801,274 @@ bool Decoder::Impl::idwt_fragment(CommandBuffer &cmd, const ViewBuffers &views)
+ 	return true;
+ }
+ 
++bool Decoder::Impl::idwt_haar32(CommandBuffer &cmd, const ViewBuffers &views)
++{
++	// A packed luma plane is RGBA8 at half size; anything else would be written out of bounds.
++	if (present_output)
++	{
++		for (int i = 0; i < 2; i++)
++			if (views.planes[i]->get_format() != VK_FORMAT_R8G8B8A8_UNORM ||
++			    int(views.planes[i]->get_view_width()) != present_width() || int(views.planes[i]->get_view_height()) * 2 != height)
++			{
++				LOGE("Present output needs RGBA8 planes 0-1 of %d x height/2.\n", present_width());
++				return false;
++			}
++	}
++	else if (packed_luma_output &&
++	    (views.planes[0]->get_format() != VK_FORMAT_R8G8B8A8_UNORM ||
++	     int(views.planes[0]->get_view_width()) * 2 != width || int(views.planes[0]->get_view_height()) * 2 != height))
++	{
++		LOGE("Packed luma output needs an RGBA8 plane of half the frame size.\n");
++		return false;
++	}
++	if (dual_chroma_output && !present_output && views.planes[1]->get_format() != VK_FORMAT_R8G8_UNORM)
++	{
++		LOGE("Dual chroma output needs an RG8 plane 1.\n");
++		return false;
++	}
++	const int precision = Configuration::get().get_precision();
++	cmd.enable_subgroup_size_control(false);
++	auto start_idwt = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
++
++	struct
++	{
++		ivec2 root_size;
++		ivec2 output_size;
++		ivec2 output_offset;
++	} push = {};
++
++	// Each pass reconstructs `levels` levels from `top` downwards and ends in an LL intermediate or,
++	// for the last pass, the decoded plane. Luma splits [2,3] (top levels 4 and 2); 4:2:0 chroma has
++	// no level-0 bands and splits [1,3] (top levels 4 and 3). On Quest 3 at 4160x2208 these beat
++	// [3,2]/[2,2] by about 0.13 ms: the heavy bottom levels gain most from staying in registers.
++	// PYROWAVE_HAAR32_LUMA / _CHROMA override the split (level counts, each 1-3) for tuning.
++	auto schedule = [](const char *name, std::vector<int> fallback, int total) {
++		const char *value = getenv(name);
++		if (!value)
++			return fallback;
++		std::vector<int> counts;
++		int sum = 0;
++		for (const char *c = value; *c; c++)
++			if (*c >= '1' && *c <= '3')
++			{
++				counts.push_back(*c - '0');
++				sum += *c - '0';
++			}
++		return sum == total ? counts : fallback;
++	};
++	// Quad-packed levels 0-1 have no scalar LL slot, so the packed mode keeps the default split.
++	const std::vector<int> luma_passes =
++	    quad_packed ? std::vector<int>{ 2, 3 } : schedule("PYROWAVE_HAAR32_LUMA", { 2, 3 }, DecompositionLevels);
++	const std::vector<int> chroma_passes =
++	    quad_packed ? std::vector<int>{ 1, 3 } : schedule("PYROWAVE_HAAR32_CHROMA", { 1, 3 }, DecompositionLevels - 1);
++	const size_t pass_count = std::max(luma_passes.size(), chroma_passes.size());
++
++	for (size_t pass = 0; pass < pass_count; pass++)
++	{
++		cmd.set_specialization_constant_mask(63);
++		cmd.set_specialization_constant(3, haar32_probe);
++		for (int c = 0; c < NumComponents; c++)
++		{
++			const bool subsampled = chroma == ChromaSubsampling::Chroma420 && c != 0;
++			const std::vector<int> &passes = subsampled ? chroma_passes : luma_passes;
++			if (pass >= passes.size())
++				continue;
++			const bool dual = dual_chroma_output && subsampled && pass + 1 == passes.size();
++			// The dual pass for component 1 also reconstructs component 2.
++			if (dual && c == 2)
++				continue;
++			cmd.set_program(shaders.idwt_haar32[precision][dual ? 1 : 0]);
++			int top = DecompositionLevels - 1;
++			for (size_t i = 0; i < pass; i++)
++				top -= passes[i];
++			const int levels = passes[pass];
++			const bool final_pass = pass + 1 == passes.size();
++			// A three-level pass recomputes each root's top-level parent instead of sharing it, which
++			// gives four times the invocations on the tiny top level.
++			const bool root_below_top = levels == 3;
++			const int root_level = root_below_top ? top - 1 : top;
++			const int bottom = top - levels + 1;
++
++			int packed_bindings = 0;
++			for (int i = 0; i < 3; i++)
++			{
++				// Unused bindings still need a valid view; repeat the last level.
++				const int level = std::max(top - i, bottom);
++				cmd.set_texture(0, i, band_view(c, level), *mirror_repeat_sampler);
++				if (dual)
++					cmd.set_texture(0, 4 + i, band_view(2, level), *mirror_repeat_sampler);
++				if (quad_packed && level < packed_levels)
++					packed_bindings |= 1 << i;
++			}
++			cmd.set_specialization_constant(4, packed_bindings);
++
++			push.root_size.x = int(component_layer_views[c][root_level]->get_view_width());
++			push.root_size.y = int(component_layer_views[c][root_level]->get_view_height());
++			// A packed next level takes this pass's LL as quads in its layer 0.
++			const bool packed_ll = !final_pass && quad_packed && bottom - 1 < packed_levels;
++			const ImageView &output = final_pass ? *views.planes[c] :
++			                          packed_ll ? *packed_ll_views[c][bottom - 1] :
++			                                      *component_ll_views[c][bottom - 1];
++			const bool pack_output = packed_ll || (final_pass && c == 0 && packed_luma_output);
++			cmd.set_specialization_constant(5, pack_output);
++			cmd.set_storage_texture(0, 3, output);
++			push.output_size.x = int(output.get_view_width());
++			push.output_size.y = int(output.get_view_height());
++			push.output_offset = ivec2(0);
++			if (final_pass && present_output)
++			{
++				// Luma quads on the left, then one chroma pixel per texel.
++				push.output_size = ivec2(width / 2, height / 2);
++				if (c != 0)
++					push.output_offset.x = width / 2;
++			}
++
++			cmd.set_specialization_constant(0, levels);
++			cmd.set_specialization_constant(1, root_below_top);
++			cmd.set_specialization_constant(2, final_pass);
++			cmd.push_constants(&push, 0, sizeof(push));
++
++			char label[64];
++			snprintf(label, sizeof(label), "iDWT multilevel pass %d, component %d", int(pass), c);
++			cmd.begin_region(label);
++			cmd.dispatch((push.root_size.x + 7) / 8, (push.root_size.y + 7) / 8, 1);
++			cmd.end_region();
++		}
++		cmd.set_specialization_constant_mask(0);
++		cmd.barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
++		            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
++	}
++
++	auto end_idwt = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
++	device->register_time_interval("GPU", std::move(start_idwt), std::move(end_idwt), "iDWT");
++	return true;
++}
++
++bool Decoder::Impl::idwt_cdf53v2(CommandBuffer &cmd, const ViewBuffers &views)
++{
++	// The same output layouts as haar32 modes 3-5.
++	if (present_output)
++	{
++		for (int i = 0; i < 2; i++)
++			if (views.planes[i]->get_format() != VK_FORMAT_R8G8B8A8_UNORM ||
++				int(views.planes[i]->get_view_width()) != present_width() || int(views.planes[i]->get_view_height()) * 2 != height)
++			{
++				LOGE("Present output needs RGBA8 planes 0-1 of %d x height/2.\n", present_width());
++				return false;
++			}
++	}
++	else if (packed_luma_output &&
++		(views.planes[0]->get_format() != VK_FORMAT_R8G8B8A8_UNORM ||
++		 int(views.planes[0]->get_view_width()) * 2 != width || int(views.planes[0]->get_view_height()) * 2 != height))
++	{
++		LOGE("Packed luma output needs an RGBA8 plane of half the frame size.\n");
++		return false;
++	}
++	if (dual_chroma_output && !present_output && views.planes[1]->get_format() != VK_FORMAT_R8G8_UNORM)
++	{
++		LOGE("Dual chroma output needs an RG8 plane 1.\n");
++		return false;
++	}
++	const int precision = Configuration::get().get_precision();
++	cmd.enable_subgroup_size_control(false);
++	auto start_idwt = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
++
++	struct
++	{
++		ivec2 band_size;
++		ivec2 output_size;
++		ivec2 output_offset;
++	} push = {};
++
++	// PYROWAVE_V2_LEVEL_TIMES=1 adds one GPU interval per level ("iDWT L<n>") for profiling.
++	const bool level_times = getenv("PYROWAVE_V2_LEVEL_TIMES");
++	QueryPoolHandle level_start = level_times ? cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT) : QueryPoolHandle{};
++	const bool dispatch_times = level_times && atoi(getenv("PYROWAVE_V2_LEVEL_TIMES")) == 2;
++	QueryPoolHandle dispatch_start = dispatch_times ? cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT) : QueryPoolHandle{};
++
++	for (int input_level = DecompositionLevels - 1; input_level >= 0; input_level--)
++	{
++		cmd.set_specialization_constant_mask(7);
++		for (int c = 0; c < NumComponents; c++)
++		{
++			const bool subsampled = chroma == ChromaSubsampling::Chroma420 && c != 0;
++			// 4:2:0 chroma has no level-0 bands; its level-1 synthesis writes the plane.
++			if (subsampled && input_level == 0)
++				continue;
++			const bool final_pass = input_level == (subsampled ? 1 : 0);
++			// Modes 4-5: one pass reconstructs both chroma components (component 1 does it).
++			const bool dual = dual_chroma_output && subsampled && final_pass;
++			if (dual && c == 2)
++				continue;
++			cmd.set_program(shaders.idwt_cdf53v2[precision][dual ? 1 : 0]);
++			// Mode 3: levels 0-1 are quad-packed, including the LL slot this pass writes for level 0-1.
++			const bool packed_ll = !final_pass && quad_packed && input_level - 1 < packed_levels;
++			const ImageView &output = final_pass ? *views.planes[c] :
++			                          packed_ll ? *packed_ll_views[c][input_level - 1] :
++			                                      *component_ll_views[c][input_level - 1];
++			const bool pack_output = packed_ll || (final_pass && c == 0 && packed_luma_output);
++			cmd.set_texture(0, 0, band_view(c, input_level), *mirror_repeat_sampler);
++			if (dual)
++				cmd.set_texture(0, 2, band_view(2, input_level), *mirror_repeat_sampler);
++			cmd.set_storage_texture(0, 1, output);
++			cmd.set_specialization_constant(0, final_pass);
++			cmd.set_specialization_constant(1, pack_output);
++			cmd.set_specialization_constant(2, quad_packed && input_level < packed_levels);
++			push.band_size.x = int(component_layer_views[c][input_level]->get_view_width());
++			push.band_size.y = int(component_layer_views[c][input_level]->get_view_height());
++			push.output_size.x = int(output.get_view_width());
++			push.output_size.y = int(output.get_view_height());
++			push.output_offset = ivec2(0);
++			if (final_pass && present_output)
++			{
++				// Luma quads on the left, then one chroma pixel per texel.
++				push.output_size = ivec2(width / 2, height / 2);
++				if (c != 0)
++					push.output_offset.x = width / 2;
++			}
++			cmd.push_constants(&push, 0, sizeof(push));
++
++			char label[64];
++			snprintf(label, sizeof(label), "iDWT 5/3 v2 level %d, component %d", input_level, c);
++			cmd.begin_region(label);
++			// One invocation per 2x2 coefficient quad, 8x8 invocations per group.
++			cmd.dispatch((push.band_size.x + 15) / 16, (push.band_size.y + 15) / 16, 1);
++			cmd.end_region();
++			if (dispatch_times)
++			{
++				// PYROWAVE_V2_LEVEL_TIMES=2: serialize and time every dispatch ("iDWT L<n> c<c>").
++				cmd.barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
++				            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
++				auto dispatch_end = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
++				static const char *const dnames[5][3] = {
++					{ "iDWT L0 c0", "iDWT L0 c1", "iDWT L0 c2" }, { "iDWT L1 c0", "iDWT L1 c1", "iDWT L1 c2" },
++					{ "iDWT L2 c0", "iDWT L2 c1", "iDWT L2 c2" }, { "iDWT L3 c0", "iDWT L3 c1", "iDWT L3 c2" },
++					{ "iDWT L4 c0", "iDWT L4 c1", "iDWT L4 c2" } };
++				device->register_time_interval("GPU", std::move(dispatch_start), QueryPoolHandle(dispatch_end), dnames[input_level][c]);
++				dispatch_start = dispatch_end;
++			}
++		}
++		cmd.set_specialization_constant_mask(0);
++		cmd.barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
++		            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
++		if (level_times)
++		{
++			auto level_end = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
++			static const char *const names[] = { "iDWT L0", "iDWT L1", "iDWT L2", "iDWT L3", "iDWT L4" };
++			device->register_time_interval("GPU", std::move(level_start), QueryPoolHandle(level_end), names[input_level]);
++			level_start = level_end;
++		}
++	}
++
++	auto end_idwt = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
++	device->register_time_interval("GPU", std::move(start_idwt), std::move(end_idwt), "iDWT");
++	return true;
++}
++
+ bool Decoder::Impl::idwt(CommandBuffer &cmd, const ViewBuffers &views)
+ {
++	if (haar32) return idwt_haar32(cmd, views);
++	if (cdf53v2) return idwt_cdf53v2(cmd, views);
+     if (haar && fused_haar)
+     {
+         cmd.set_program(shaders.idwt_haar_fused[Configuration::get().get_precision()]);
+@@ -1126,9 +1458,89 @@ bool Decoder::set_fast53_enabled(bool enabled)
+ 	return set_fast53_variant(enabled ? 1 : 0);
+ }
+ 
++bool Decoder::Impl::allocate_packed()
++{
++	if (packed_valid)
++		return true;
++	auto info = ImageCreateInfo::immutable_2d_image(aligned_width / 4, aligned_height / 4, VK_FORMAT_R16G16B16A16_SFLOAT);
++	info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
++	info.initial_layout = VK_IMAGE_LAYOUT_UNDEFINED;
++	info.layers = NumFrequencyBandsPerLevel * NumComponents;
++	info.layout = ImageLayout::General;
++	info.levels = MaxPackedLevels;
++	packed_img = device->create_image(info);
++	if (!packed_img)
++		return false;
++	device->set_name(*packed_img, "wavelet-buffer-quad-packed");
++	for (int level = 0; level < MaxPackedLevels; level++)
++	{
++		for (int component = 0; component < NumComponents; component++)
++		{
++			ImageViewCreateInfo view_info = {};
++			view_info.image = packed_img.get();
++			view_info.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
++			view_info.view_type = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
++			view_info.base_level = level;
++			view_info.levels = 1;
++			view_info.base_layer = 4 * component;
++			view_info.layers = 4;
++			packed_layer_views[component][level] = device->create_image_view(view_info);
++			view_info.view_type = VK_IMAGE_VIEW_TYPE_2D;
++			view_info.layers = 1;
++			packed_ll_views[component][level] = device->create_image_view(view_info);
++			if (!packed_layer_views[component][level] || !packed_ll_views[component][level])
++				return false;
++		}
++	}
++	packed_valid = true;
++	return true;
++}
++
++bool Decoder::set_haar32(int mode)
++{
++	if (mode < 0 || mode > 5 || (mode && !impl->can_haar32(mode >= 2)))
++		return false;
++	if (mode >= 2 && (impl->width % 2 || impl->height % 2))
++		return false;
++	if (mode >= 5 && (impl->width % 4 || impl->height % 4))
++		return false;
++	if (mode >= 2 && !impl->allocate_packed())
++		return false;
++	if (!mode && !impl->haar32) return true;
++	impl->haar32 = mode != 0;
++	impl->quad_packed = mode >= 2;
++	// Levels 0-3 (PYROWAVE_HAAR32_PACKED_LEVELS=2 restores the levels 0-1 layout for A/B).
++	impl->packed_levels = getenv("PYROWAVE_HAAR32_PACKED_LEVELS") && !strcmp(getenv("PYROWAVE_HAAR32_PACKED_LEVELS"), "2") ? 2 : 4;
++	impl->packed_luma_output = mode >= 3;
++	impl->dual_chroma_output = mode >= 4;
++	impl->present_output = mode >= 5;
++	return true;
++}
++
++bool Decoder::set_cdf53v2(int mode)
++{
++	if (mode < 0 || mode > 5 || (mode && !impl->can_cdf53v2(mode >= 4)))
++		return false;
++	if (mode >= 2 && (impl->width % 2 || impl->height % 2))
++		return false;
++	if (mode >= 5 && (impl->width % 4 || impl->height % 4))
++		return false;
++	if (mode >= 3 && (Configuration::get().get_precision() != 1 || !impl->allocate_packed()))
++		return false;
++	if (!mode && !impl->cdf53v2) return true;
++	impl->cdf53v2 = mode != 0;
++	impl->quad_packed = mode >= 3;
++	// PYROWAVE_V2_PACKED_LEVELS=2 restores the haar32 layout (A/B only).
++	impl->packed_levels = getenv("PYROWAVE_V2_PACKED_LEVELS") && !strcmp(getenv("PYROWAVE_V2_PACKED_LEVELS"), "2") ? 2 : 4;
++	impl->packed_luma_output = mode >= 2;
++	impl->dual_chroma_output = mode >= 4;
++	impl->present_output = mode >= 5;
++	return true;
++}
++
+ bool Decoder::set_fast53_variant(int variant)
+ {
+-	if (variant < 0 || variant > 3 || (variant && (!impl->legall53 || impl->fragment_path)))
++	if (variant < 0 || variant > 3 || (variant && (!impl->legall53 || impl->fragment_path || impl->cdf53v2)))
+ 		return false;
+ 	impl->fast53 = variant;
+ 	return true;
+diff --git a/pyrowave_decoder.hpp b/pyrowave_decoder.hpp
+index 6079da4710ed3b92cc7901b8a9167dac3a0ed36e..362b82e9eeb091d6e54ecf1c028965987a0efa5a 100644
+--- a/pyrowave_decoder.hpp
++++ b/pyrowave_decoder.hpp
+@@ -43,6 +43,8 @@ public:
+ 
+ 	// Default-off CDF53 compute inverse; false if enabling on another wavelet/path.
+ 	bool set_fast53_enabled(bool enabled);
++	bool set_haar32(int mode);
++	bool set_cdf53v2(int mode);
+ 	bool set_fast53_variant(int variant);
+ 
+ 	// XRW Experiment 3: record dequant only (no iDWT) so an external reconstruction kernel can
+diff --git a/pyrowave_encoder.cpp b/pyrowave_encoder.cpp
+index 98813f2191d1603b81fe248d0d9d45608fde7e4c..68901546630a867a9e8f787115caaf9ff512560e 100644
+--- a/pyrowave_encoder.cpp
++++ b/pyrowave_encoder.cpp
+@@ -109,6 +109,7 @@ struct Encoder::Impl final : public WaveletBuffers
+ 
+ 	uint32_t sequence_count = 0;
+ 	RDODensity rdo_density = {};
++	bool headset_csf = false;
+ };
+ 
+ float Encoder::Impl::get_quant_rdo_distortion_scale(int level, int component, int band) const
+@@ -116,7 +117,7 @@ float Encoder::Impl::get_quant_rdo_distortion_scale(int level, int component, in
+ 	// From the original Linelet RDO model. The helper preserves its legacy
+ 	// numeric expression when PYROWAVE_RDO_PX_PER_DEG is unset.
+ 	float csf = rdo_quant_csf(rdo_density, level, component, band,
+-	                         chroma == ChromaSubsampling::Chroma420, DecompositionLevels);
++	                         chroma == ChromaSubsampling::Chroma420, DecompositionLevels, headset_csf);
+ 
+ 	// Due to filtering, distortion in lower bands will result in more noise power.
+ 	// By scaling the distortion by this factor, we ensure uniform results.
+@@ -439,7 +440,7 @@ bool Encoder::Impl::quant(CommandBuffer &cmd, float quant_scale)
+ {
+ 	auto start_quant = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+ 	cmd.begin_region("DWT quantize");
+-	cmd.set_program(shaders.wavelet_quant);
++	cmd.set_program(shaders.wavelet_quant[headset_csf ? 1 : 0]);
+ 
+ 	cmd.set_specialization_constant_mask(0);
+ 	if (device->supports_subgroup_size_log2(true, 3, 7))
+@@ -1250,6 +1251,8 @@ Encoder::Encoder()
+ bool Encoder::init(Device *device, int width_, int height_, ChromaSubsampling chroma_, bool legall53_, bool haar_,
+                    float rdo_pixels_per_degree)
+ {
++	const char *csf_request = std::getenv("PYROWAVE_HEADSET_CSF");
++	impl->headset_csf = csf_request && !std::strcmp(csf_request, "1");
+ 	const bool has_embedding_override = rdo_pixels_per_degree > 0.0f;
+ 	const char *requested_rdo_density = has_embedding_override ? nullptr : std::getenv("PYROWAVE_RDO_PX_PER_DEG");
+ 	impl->rdo_density = has_embedding_override
+@@ -1260,6 +1263,11 @@ bool Encoder::init(Device *device, int width_, int height_, ChromaSubsampling ch
+ 		LOGE("PyroWave RDO density must be finite and in (0, 10000].\n");
+ 		return false;
+ 	}
++	if (impl->headset_csf)
++		impl->rdo_density = rdo_density_from_pixels_per_degree(float(height_) / 99.0f);
++	LOGI("[Q3PW_HEADSET_CSF] active=%d nyquist=%.9g lf_boost=%g chroma_csf=%g discard_weight=%d\n",
++	     impl->headset_csf, rdo_cpd_nyquist(impl->rdo_density), impl->headset_csf ? 6.0 : 1.0,
++	     impl->headset_csf ? 1.6 : 0.6, impl->headset_csf);
+ 	LOGI("PyroWave RDO viewing density: requested %s, effective %.9g px/deg, Nyquist %.9g cycles/deg%s.\n",
+ 	     has_embedding_override ? "embedding override" : requested_rdo_density && *requested_rdo_density ? requested_rdo_density : "(legacy 96 DPI @ 1m)",
+ 	     impl->rdo_density.pixels_per_degree,
+diff --git a/pyrowave_rdo_density.hpp b/pyrowave_rdo_density.hpp
+index ec2ae178abbfb325434a3d1afe9e36d4cbd9698e..434868329de8b996de614b0a959ec235f4cf372c 100644
+--- a/pyrowave_rdo_density.hpp
++++ b/pyrowave_rdo_density.hpp
+@@ -84,7 +84,7 @@ inline RDODensityReport rdo_density_report(const RDODensity &density)
+ }
+ 
+ inline float rdo_quant_csf(const RDODensity &density, int level, int component, int band,
+-				  bool chroma420, int decomposition_levels)
++				  bool chroma420, int decomposition_levels, bool headset_csf = false)
+ {
+ 	float horiz_midpoint = (band & 1) ? 0.75f : 0.25f;
+ 	float vert_midpoint = (band & 2) ? 0.75f : 0.25f;
+@@ -92,8 +92,10 @@ inline float rdo_quant_csf(const RDODensity &density, int level, int component,
+ 	            rdo_cpd_nyquist(density) * std::exp2(-float(level));
+ 	cpd = std::max(cpd, 8.0f);
+ 	float csf = 2.6f * (0.0192f + 0.114f * cpd) * std::exp(-std::pow(0.114f * cpd, 1.1f));
++	// JMS1717 headset weighting: coarse amplitudes x6, 4:2:0 chroma 1.6.
++	if (headset_csf && level >= 3) csf *= 6.0f;
+ 	if (component != 0 && level != decomposition_levels - 1 && chroma420)
+-		csf *= 0.6f;
++		csf *= headset_csf ? 1.6f : 0.6f;
+ 	return csf;
+ }
+ }
+diff --git a/shaders/idwt_cdf53v2.comp b/shaders/idwt_cdf53v2.comp
+new file mode 100644
+index 0000000000000000000000000000000000000000..29503d43ba260d79812a6978289e67764621adf9
+--- /dev/null
++++ b/shaders/idwt_cdf53v2.comp
+@@ -0,0 +1,246 @@
++#version 450
++// Copyright (c) 2025 Hans-Kristian Arntzen
++// Copyright (c) 2026 Quest3-Pyrowave contributors
++// SPDX-License-Identifier: MIT
++//
++// Register-only inverse CDF 5/3 (LeGall), one level per dispatch: Decoder V2.
++// idwt.comp loads a 32x32 tile plus a 9/7-sized apron into shared memory, transposes it twice and
++// needs four workgroup barriers; on Adreno 740 that costs about 3x the pair-local Haar pass. 5/3
++// synthesis reaches only one coefficient to each side, so here each invocation rebuilds a 4x4 output
++// block (a 2x2 coefficient quad of each band) straight from the band texels around it, with no
++// shared memory, barrier or transpose. Neighbouring invocations re-fetch the overlap through the
++// texture cache instead.
++//
++// Arithmetic and FP16 rounding points follow idwt.comp at precision 1: vertical lifting, round,
++// horizontal lifting, round, store. Lifting, per dimension, for lows s and highs d of one band:
++//   s'[i] = s[i] - (d[i-1] + d[i]) / 4,  x[2i] = s'[i],  x[2i+1] = d[i] + (s'[i] + s'[i+1]) / 2
++// Boundary extension is the one idwt.comp gets from its mirrored-repeat gathers:
++//   s[N] = s[N-1],  d[-1] = d[0],  d[N] = d[N-2]   (lows never need s[-1] here).
++//
++// Bands: layer 0 = LL, 1 = high in x (HL), 2 = high in y (LH), 3 = HH.
++//
++//   FINAL         output is a decoded plane: add the DC shift and guard stores against the plane
++//                 size, which may be smaller than the aligned pyramid.
++//   PACK_OUTPUT   write 2x2 output quads, one texel each ((0,0), (1,0), (0,1), (1,1) in RGBA): four
++//                 stores per invocation instead of sixteen. RGBA8 for the final luma plane, RGBA16F
++//                 for an LL intermediate that the next level reads with PACKED_INPUT.
++//   PACKED_INPUT  every band holds 2x2 coefficient quads at half size, as wavelet_dequant.comp
++//                 writes them with PACKED (and this shader with PACK_OUTPUT for LL): 25 fetches per
++//                 invocation instead of 49.
++//   DUAL          (compile-time variant) the final 4:2:0 chroma pass rebuilds Cb (uBands) and Cr
++//                 (uBands2) together and stores them as one texel, Cb in R and Cr in G: an RG8
++//                 plane (decoder mode 4), or the right half of the packed YCbCr image (mode 5,
++//                 output_offset = (width / 2, 0)).
++//                 With PACK_OUTPUT too (mode 6), two horizontally adjacent pixels per texel,
++//                 (Cb, Cr) of the left one in RG and of the right one in BA.
++#extension GL_EXT_control_flow_attributes : require
++#if FP16
++#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
++#endif
++#if !FP16 && PRECISION == 0
++#undef PRECISION
++#define PRECISION 1
++#endif
++#if FP16 && PRECISION == 0
++#define FLOAT float16_t
++#define VEC4 f16vec4
++#else
++#define FLOAT float
++#define VEC4 vec4
++#endif
++
++layout(local_size_x = 8, local_size_y = 8) in;
++layout(constant_id = 0) const bool FINAL = false;
++layout(constant_id = 1) const bool PACK_OUTPUT = false;
++layout(constant_id = 2) const bool PACKED_INPUT = false;
++
++layout(set = 0, binding = 0) uniform mediump sampler2DArray uBands;
++layout(set = 0, binding = 1) writeonly mediump uniform image2D uOutput;
++#if DUAL
++layout(set = 0, binding = 2) uniform mediump sampler2DArray uBands2;
++#endif
++
++layout(push_constant) uniform Registers
++{
++	ivec2 band_size;     // coefficients per band, also when PACKED_INPUT
++	ivec2 output_size;   // texels this pass may write, before output_offset
++	ivec2 output_offset; // added to every store (mode 5 chroma: the right half of the image)
++};
++
++FLOAT intermediate(FLOAT v)
++{
++#if PRECISION == 2
++	return v;
++#elif FP16
++	return FLOAT(float16_t(v));
++#else
++	return FLOAT(unpackHalf2x16(packHalf2x16(vec2(float(v), 0.0))).x);
++#endif
++}
++
++// Four output samples 2*i0 .. 2*i0+3 from lows s[i0..i0+2] and highs d[i0-1..i0+2].
++void synthesize(FLOAT s0, FLOAT s1, FLOAT s2, FLOAT dm, FLOAT d0, FLOAT d1, FLOAT d2, out FLOAT x[4])
++{
++	FLOAT e0 = s0 - FLOAT(0.25) * (dm + d0);
++	FLOAT e1 = s1 - FLOAT(0.25) * (d0 + d1);
++	FLOAT e2 = s2 - FLOAT(0.25) * (d1 + d2);
++	x[0] = e0;
++	x[1] = d0 + FLOAT(0.5) * (e0 + e1);
++	x[2] = e1;
++	x[3] = d1 + FLOAT(0.5) * (e1 + e2);
++}
++
++// Coefficients around the invocation's quad, G[ry + 1][rx + 1] for offsets -1..2 from 2 * quad.
++// A low dimension only uses offsets 0..2, a high one -1..2. Everything below is unrolled with
++// literal bounds so the four 4x4 arrays stay in registers.
++#define MIRROR_HIGH(v, n) ((v) < 0 ? 0 : ((v) >= (n) ? 2 * (n) - 2 - (v) : (v)))
++#define LOAD_SCALAR(G, BAND, HX, HY) \
++	[[unroll]] for (int ry = (HY) ? -1 : 0; ry <= 2; ry++) \
++		[[unroll]] for (int rx = (HX) ? -1 : 0; rx <= 2; rx++) \
++		{ \
++			int x_ = c0.x + rx, y_ = c0.y + ry; \
++			x_ = (HX) ? MIRROR_HIGH(x_, band_size.x) : min(x_, band_size.x - 1); \
++			y_ = (HY) ? MIRROR_HIGH(y_, band_size.y) : min(y_, band_size.y - 1); \
++			G[ry + 1][rx + 1] = FLOAT(texelFetch(bands, ivec3(x_, y_, BAND), 0).x); \
++		}
++// Quad offsets -1..1 hold coefficient offsets -1 (quad -1, odd), 0..1 (quad 0) and 2 (quad 1, even).
++// Edges mirror by copying rows and columns: d[-1] = d[0], d[N] = d[N-2], s[N] = s[N-1].
++#define LOAD_PACKED(G, BAND, HX, HY) \
++	[[unroll]] for (int qy = (HY) ? -1 : 0; qy <= 1; qy++) \
++		[[unroll]] for (int qx = (HX) ? -1 : 0; qx <= 1; qx++) \
++		{ \
++			vec4 t_ = texelFetch(bands, ivec3(clamp(quad + ivec2(qx, qy), ivec2(0), quads - 1), BAND), 0); \
++			[[unroll]] for (int e = 0; e < 4; e++) \
++			{ \
++				int rx = 2 * qx + (e & 1), ry = 2 * qy + (e >> 1); \
++				if (rx >= ((HX) ? -1 : 0) && rx <= 2 && ry >= ((HY) ? -1 : 0) && ry <= 2) \
++					G[ry + 1][rx + 1] = FLOAT(t_[e]); \
++			} \
++		} \
++	[[unroll]] for (int r = 0; r < 4; r++) \
++	{ \
++		if ((HX) && left) G[r][0] = G[r][1]; \
++		if (right) G[r][3] = G[r][(HX) ? 1 : 2]; \
++	} \
++	[[unroll]] for (int r = 0; r < 4; r++) \
++	{ \
++		if ((HY) && top) G[0][r] = G[1][r]; \
++		if (bottom) G[3][r] = G[(HY) ? 1 : 2][r]; \
++	}
++
++// The 4x4 output block of one component for the invocation's coefficient quad.
++void reconstruct(mediump sampler2DArray bands, ivec2 quad, FLOAT dc, out FLOAT rows[4][4])
++{
++	ivec2 c0 = 2 * quad;
++	FLOAT LL[4][4], HL[4][4], LH[4][4], HH[4][4];
++	if (PACKED_INPUT)
++	{
++		ivec2 quads = band_size >> 1;
++		bool left = c0.x == 0, top = c0.y == 0;
++		bool right = c0.x + 2 >= band_size.x, bottom = c0.y + 2 >= band_size.y;
++		LOAD_PACKED(LL, 0, false, false)
++		LOAD_PACKED(HL, 1, true, false)
++		LOAD_PACKED(LH, 2, false, true)
++		LOAD_PACKED(HH, 3, true, true)
++	}
++	else
++	{
++		LOAD_SCALAR(LL, 0, false, false)
++		LOAD_SCALAR(HL, 1, true, false)
++		LOAD_SCALAR(LH, 2, false, true)
++		LOAD_SCALAR(HH, 3, true, true)
++	}
++
++	// Vertical pass: low columns (LL over LH) and high columns (HL over HH), rows 4*quad.y .. +3.
++	FLOAT low_cols[3][4], high_cols[4][4];
++	for (int k = 0; k < 3; k++)
++	{
++		FLOAT col[4];
++		synthesize(LL[1][k + 1], LL[2][k + 1], LL[3][k + 1],
++		           LH[0][k + 1], LH[1][k + 1], LH[2][k + 1], LH[3][k + 1], col);
++		for (int r = 0; r < 4; r++)
++			low_cols[k][r] = intermediate(col[r]);
++	}
++	for (int k = 0; k < 4; k++)
++	{
++		FLOAT col[4];
++		synthesize(HL[1][k], HL[2][k], HL[3][k], HH[0][k], HH[1][k], HH[2][k], HH[3][k], col);
++		for (int r = 0; r < 4; r++)
++			high_cols[k][r] = intermediate(col[r]);
++	}
++
++	// Horizontal pass, one output row at a time.
++	for (int r = 0; r < 4; r++)
++	{
++		FLOAT x[4];
++		synthesize(low_cols[0][r], low_cols[1][r], low_cols[2][r],
++		           high_cols[0][r], high_cols[1][r], high_cols[2][r], high_cols[3][r], x);
++		for (int k = 0; k < 4; k++)
++			rows[r][k] = intermediate(x[k]) + dc;
++	}
++}
++
++void main()
++{
++	ivec2 quad = ivec2(gl_GlobalInvocationID.xy);
++	if (any(greaterThanEqual(2 * quad, band_size)))
++		return;
++
++	const FLOAT dc = FINAL ? FLOAT(0.5) : FLOAT(0.0);
++	FLOAT rows[4][4];
++	reconstruct(uBands, quad, dc, rows);
++#if DUAL
++	FLOAT rows2[4][4];
++	reconstruct(uBands2, quad, dc, rows2);
++#endif
++
++	// Workgroup-uniform: interior groups of the final plane store without per-pixel checks.
++#if DUAL
++	// Mode 6: PACK_OUTPUT stores horizontal pixel pairs.
++	ivec2 group_end = (ivec2(gl_WorkGroupID.xy) + 1) * ivec2(gl_WorkGroupSize.xy) * (PACK_OUTPUT ? ivec2(2, 4) : ivec2(4));
++#else
++	ivec2 group_end = (ivec2(gl_WorkGroupID.xy) + 1) * ivec2(gl_WorkGroupSize.xy) * (PACK_OUTPUT ? 2 : 4);
++#endif
++	bool guarded = FINAL && any(greaterThan(group_end, output_size));
++
++#if DUAL
++	if (PACK_OUTPUT)
++	{
++		// Mode 6: (Cb, Cr) of two horizontally adjacent pixels per texel, 8 stores instead of 16.
++		for (int r = 0; r < 4; r++)
++			for (int k = 0; k < 2; k++)
++			{
++				ivec2 pair = ivec2(2, 4) * quad + ivec2(k, r);
++				if (!guarded || all(lessThan(pair, output_size)))
++					imageStore(uOutput, output_offset + pair,
++							   VEC4(rows[r][2 * k], rows2[r][2 * k], rows[r][2 * k + 1], rows2[r][2 * k + 1]));
++			}
++	}
++	else
++#endif
++	if (PACK_OUTPUT)
++	{
++		for (int qy = 0; qy < 2; qy++)
++			for (int qx = 0; qx < 2; qx++)
++			{
++				ivec2 texel = 2 * quad + ivec2(qx, qy);
++				if (!guarded || all(lessThan(texel, output_size)))
++					imageStore(uOutput, output_offset + texel, VEC4(rows[2 * qy][2 * qx], rows[2 * qy][2 * qx + 1],
++					                                rows[2 * qy + 1][2 * qx], rows[2 * qy + 1][2 * qx + 1]));
++			}
++	}
++	else
++	{
++		for (int r = 0; r < 4; r++)
++			for (int k = 0; k < 4; k++)
++			{
++				ivec2 pixel = 4 * quad + ivec2(k, r);
++				if (!guarded || all(lessThan(pixel, output_size)))
++#if DUAL
++					imageStore(uOutput, output_offset + pixel, VEC4(rows[r][k], rows2[r][k], 0.0, 0.0));
++#else
++					imageStore(uOutput, output_offset + pixel, VEC4(rows[r][k]));
++#endif
++			}
++	}
++}
+diff --git a/shaders/idwt_haar32.comp b/shaders/idwt_haar32.comp
+new file mode 100644
+index 0000000000000000000000000000000000000000..fad28e0fdbaa6720a37f20e8022f90485e469938
+--- /dev/null
++++ b/shaders/idwt_haar32.comp
+@@ -0,0 +1,300 @@
++#version 450
++// Copyright (c) 2025 Hans-Kristian Arntzen
++// Copyright (c) 2026 Quest3-Pyrowave contributors
++// SPDX-License-Identifier: MIT
++//
++// Multi-level inverse Haar (first written for a [3,2] split): one dispatch reconstructs one to
++// three levels.
++// Each invocation owns one root coefficient and rebuilds its subtree in registers, so there is
++// no shared memory, no workgroup barrier and no apron. Haar synthesis is pair-local, and every
++// level of the aligned wavelet pyramid is exactly twice the next coarser one, so every fetch
++// below a valid root is in bounds; only the root and, for the final plane, the stores need
++// guards. The arithmetic and FP16 rounding points are those of idwt.comp's pair-local path. On
++// Adreno 740 the decoded planes still differ from the level-by-level decoder by one code value on
++// about 1% of pixels at equal PSNR: the driver's float-to-half conversion rounds differently
++// depending on code shape (two schedules of this shader with identical arithmetic disagree too).
++//
++//   LEVELS          levels reconstructed (1 to 3), sampled from uLevel0 (coarsest) downwards.
++//   ROOT_BELOW_TOP  the root is a coefficient one level below uLevel0; its LL value is the
++//                   matching quadrant of its parent, recomputed per invocation (four cached
++//                   fetches) instead of exchanged through shared memory. Otherwise the root
++//                   is in uLevel0, whose layer 0 holds its LL value.
++//   FINAL           output is a decoded plane: add the DC shift and guard stores against the
++//                   plane size, which may be smaller than the aligned pyramid.
++//
++// The output image has no format qualifier (shaderStorageImageWriteWithoutFormat, as in
++// idwt.comp), so the same SPIR-V legally writes the R16F/R32F LL intermediates and R8 planes.
++#if FP16
++#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
++#endif
++#if !FP16 && PRECISION == 0
++#undef PRECISION
++#define PRECISION 1
++#endif
++#if FP16 && PRECISION == 0
++#define FLOAT float16_t
++#define VEC2 f16vec2
++#define VEC4 f16vec4
++#else
++#define FLOAT float
++#define VEC2 vec2
++#define VEC4 vec4
++#endif
++// DUAL (a separate program): reconstruct two components at once, the second from bindings 4-6,
++// into one two-channel output. The 4:2:0 chroma final pass writes Cb and Cr as one RG8 plane, half
++// the stores of two R8 planes. ELEM is one value per component.
++#if DUAL
++#define ELEM VEC2
++#else
++#define ELEM FLOAT
++#endif
++
++layout(local_size_x = 8, local_size_y = 8) in;
++layout(constant_id = 0) const int LEVELS = 2;
++layout(constant_id = 1) const bool ROOT_BELOW_TOP = false;
++layout(constant_id = 2) const bool FINAL = false;
++// Cost probe (PYROWAVE_HAAR32_PROBE, never a decode mode): 1 drops the stores unless a value is
++// impossible, 2 replaces band fetches by values derived from the coordinate, 3 drops only the
++// scalar final-plane stores (the 4:2:0 chroma planes in mode 3).
++layout(constant_id = 3) const int PROBE = 0;
++// Bit i set: binding i holds quad-packed coefficients (RGBA = the 2x2 quad (0,0), (1,0), (0,1),
++// (1,1) of one band, at half the level's size), as wavelet_dequant.comp writes them with PACKED.
++layout(constant_id = 4) const int PACKED = 0;
++// The output holds 2x2 quads in the same order, one per texel: the RGBA8 luma plane at half size
++// for the final pass, or a quad-packed LL slot (RGBA16F) for the next pass. A two-level invocation
++// writes four texels instead of sixteen values, a one-level invocation one texel instead of four.
++layout(constant_id = 5) const bool PACK_OUTPUT = false;
++
++layout(set = 0, binding = 0) uniform mediump sampler2DArray uLevel0;
++layout(set = 0, binding = 1) uniform mediump sampler2DArray uLevel1;
++layout(set = 0, binding = 2) uniform mediump sampler2DArray uLevel2;
++layout(set = 0, binding = 3) writeonly mediump uniform image2D uOutput;
++#if DUAL
++layout(set = 0, binding = 4) uniform mediump sampler2DArray uLevel0B;
++layout(set = 0, binding = 5) uniform mediump sampler2DArray uLevel1B;
++layout(set = 0, binding = 6) uniform mediump sampler2DArray uLevel2B;
++#endif
++
++layout(push_constant) uniform Registers
++{
++	ivec2 root_size;
++	ivec2 output_size;
++	// Added to every final-plane store (mode 5 places both planes in one image); bounds checks use
++	// the unshifted coordinate.
++	ivec2 output_offset;
++};
++
++ELEM haar_intermediate(ELEM v)
++{
++#if PRECISION == 2
++	return v;
++#elif FP16
++	return v;
++#elif DUAL
++	return unpackHalf2x16(packHalf2x16(v));
++#else
++	return FLOAT(unpackHalf2x16(packHalf2x16(vec2(float(v), 0.0))).x);
++#endif
++}
++
++vec4 fetch_plane(int plane, int level, ivec2 coord, int band)
++{
++	if (PROBE == 2 && band != 0)
++		return vec4(float((coord.x ^ coord.y) & 7) * 0.125);
++#if DUAL
++	if (plane != 0)
++	{
++		if (level == 0)
++			return texelFetch(uLevel0B, ivec3(coord, band), 0);
++		else if (level == 1)
++			return texelFetch(uLevel1B, ivec3(coord, band), 0);
++		else
++			return texelFetch(uLevel2B, ivec3(coord, band), 0);
++	}
++#endif
++	if (level == 0)
++		return texelFetch(uLevel0, ivec3(coord, band), 0);
++	else if (level == 1)
++		return texelFetch(uLevel1, ivec3(coord, band), 0);
++	else
++		return texelFetch(uLevel2, ivec3(coord, band), 0);
++}
++
++bool packed(int level)
++{
++	return ((PACKED >> level) & 1) != 0;
++}
++
++// One coefficient. A packed level holds it in the quad at coord / 2.
++FLOAT fetch_one(int plane, int level, ivec2 coord, int band)
++{
++	if (!packed(level))
++		return FLOAT(fetch_plane(plane, level, coord, band).x);
++	vec4 quad = fetch_plane(plane, level, coord >> 1, band);
++	return FLOAT(quad[(coord.x & 1) | ((coord.y & 1) << 1)]);
++}
++
++ELEM fetch(int level, ivec2 coord, int band)
++{
++#if DUAL
++	return ELEM(fetch_one(0, level, coord, band), fetch_one(1, level, coord, band));
++#else
++	return fetch_one(0, level, coord, band);
++#endif
++}
++
++// The four coefficients 2 * quad + (i & 1, i >> 1): one texel when packed.
++void fetch_quad_one(int plane, int level, ivec2 quad, int band, out FLOAT v[4])
++{
++	if (packed(level))
++	{
++		vec4 t = fetch_plane(plane, level, quad, band);
++		v[0] = FLOAT(t.x); v[1] = FLOAT(t.y); v[2] = FLOAT(t.z); v[3] = FLOAT(t.w);
++	}
++	else
++	{
++		for (int i = 0; i < 4; i++)
++			v[i] = FLOAT(fetch_plane(plane, level, 2 * quad + ivec2(i & 1, i >> 1), band).x);
++	}
++}
++
++void fetch_quad(int level, ivec2 quad, int band, out ELEM v[4])
++{
++#if DUAL
++	FLOAT a[4], b[4];
++	fetch_quad_one(0, level, quad, band, a);
++	fetch_quad_one(1, level, quad, band, b);
++	for (int i = 0; i < 4; i++)
++		v[i] = ELEM(a[i], b[i]);
++#else
++	fetch_quad_one(0, level, quad, band, v);
++#endif
++}
++
++// One 2x2 synthesis, as in idwt.comp's inverse_haar_pairs: vertical, round, horizontal, round.
++// q[0] = (0,0), q[1] = (1,0), q[2] = (0,1), q[3] = (1,1).
++void synthesize_values(ELEM a, ELEM horizontal, ELEM vertical, ELEM diagonal, out ELEM q[4])
++{
++	ELEM low_even = a - FLOAT(0.5) * vertical;
++	ELEM low_odd = low_even + vertical;
++	ELEM high_even = horizontal - FLOAT(0.5) * diagonal;
++	ELEM high_odd = high_even + diagonal;
++	low_even = haar_intermediate(low_even);
++	low_odd = haar_intermediate(low_odd);
++	high_even = haar_intermediate(high_even);
++	high_odd = haar_intermediate(high_odd);
++	ELEM even_even = low_even - FLOAT(0.5) * high_even;
++	ELEM even_odd = low_odd - FLOAT(0.5) * high_odd;
++	q[0] = haar_intermediate(even_even);
++	q[1] = haar_intermediate(even_even + high_even);
++	q[2] = haar_intermediate(even_odd);
++	q[3] = haar_intermediate(even_odd + high_odd);
++}
++
++void synthesize(ELEM a, int level, ivec2 coord, out ELEM q[4])
++{
++	synthesize_values(a, fetch(level, coord, 1), fetch(level, coord, 2), fetch(level, coord, 3), q);
++}
++
++void store(ivec2 pixel, ELEM value, bool guarded)
++{
++	if (FINAL)
++		value += FLOAT(0.5);
++#if DUAL
++	if ((PROBE == 1 || (PROBE == 3 && FINAL)) && value.x != FLOAT(-12345.0))
++		return;
++	if (!guarded || all(lessThan(pixel, output_size)))
++		imageStore(uOutput, pixel + output_offset, VEC4(value, FLOAT(0.0), FLOAT(0.0)));
++#else
++	if ((PROBE == 1 || (PROBE == 3 && FINAL)) && value != FLOAT(-12345.0))
++		return;
++	if (!guarded || all(lessThan(pixel, output_size)))
++		imageStore(uOutput, pixel + output_offset, VEC4(value));
++#endif
++}
++
++// DUAL with PACK_OUTPUT (mode 6): the pixel quad at texel goes out as two texels of horizontal
++// pixel pairs, (Cb, Cr) of the left pixel in RG and of the right one in BA.
++void store_quad(ivec2 texel, ELEM q[4], bool guarded)
++{
++#if DUAL
++	for (int row = 0; row < 2; row++)
++	{
++		ivec2 pair = ivec2(texel.x, 2 * texel.y + row);
++		VEC4 value = VEC4(q[2 * row], q[2 * row + 1]) + VEC4(FINAL ? 0.5 : 0.0);
++		if ((PROBE == 1 || (PROBE == 3 && FINAL)) && value.x != FLOAT(-12345.0))
++			continue;
++		if (!guarded || all(lessThan(pair, output_size)))
++			imageStore(uOutput, pair + output_offset, value);
++	}
++#else
++	VEC4 value = VEC4(q[0], q[1], q[2], q[3]) + VEC4(FINAL ? 0.5 : 0.0);
++	if (PROBE == 1 && value.x != FLOAT(-12345.0))
++		return;
++	if (!guarded || all(lessThan(texel, output_size)))
++		imageStore(uOutput, texel + output_offset, value);
++#endif
++}
++
++void main()
++{
++	ivec2 root = ivec2(gl_GlobalInvocationID.xy);
++	if (any(greaterThanEqual(root, root_size)))
++		return;
++
++	const int first = ROOT_BELOW_TOP ? 1 : 0;
++	const int depth = LEVELS - first;
++	// Workgroup-uniform: interior groups of the final plane store without per-pixel checks.
++	// output_size counts texels, which are 2x2 pixel quads when PACK_OUTPUT (horizontal pairs
++	// when DUAL too).
++#if DUAL
++	ivec2 shift = PACK_OUTPUT ? ivec2(depth - 1, depth) : ivec2(depth);
++#else
++	ivec2 shift = ivec2(PACK_OUTPUT ? depth - 1 : depth);
++#endif
++	ivec2 group_end = ((ivec2(gl_WorkGroupID.xy) + 1) * ivec2(gl_WorkGroupSize.xy)) << shift;
++	bool guarded = FINAL && any(greaterThan(group_end, output_size));
++
++	ELEM a;
++	if (ROOT_BELOW_TOP)
++	{
++		ELEM parent[4];
++		synthesize(fetch(0, root >> 1, 0), 0, root >> 1, parent);
++		int quadrant = (root.x & 1) | ((root.y & 1) << 1);
++		a = parent[quadrant];
++	}
++	else
++		a = fetch(0, root, 0);
++
++	ELEM children[4];
++	synthesize(a, first, root, children);
++	if (depth == 1)
++	{
++		// The root's four children are the quad at root.
++		if (PACK_OUTPUT)
++		{
++			store_quad(root, children, guarded);
++			return;
++		}
++		for (int i = 0; i < 4; i++)
++			store(2 * root + ivec2(i & 1, i >> 1), children[i], guarded);
++		return;
++	}
++
++	// The children's bands form the quad at root of the next level.
++	ELEM horizontal[4], vertical[4], diagonal[4];
++	fetch_quad(first + 1, root, 1, horizontal);
++	fetch_quad(first + 1, root, 2, vertical);
++	fetch_quad(first + 1, root, 3, diagonal);
++	for (int i = 0; i < 4; i++)
++	{
++		ivec2 child = 2 * root + ivec2(i & 1, i >> 1);
++		ELEM pixels[4];
++		synthesize_values(children[i], horizontal[i], vertical[i], diagonal[i], pixels);
++		if (PACK_OUTPUT)
++			store_quad(child, pixels, guarded);
++		else
++			for (int j = 0; j < 4; j++)
++				store(2 * child + ivec2(j & 1, j >> 1), pixels[j], guarded);
++	}
++}
+diff --git a/shaders/slangmosh.json b/shaders/slangmosh.json
+index 261c2a2fb80cbd17cdf98fee501723cc2e305fff..651b5f07267b02a6aa38598d89f5a7f6c6cb271b 100644
+--- a/shaders/slangmosh.json
++++ b/shaders/slangmosh.json
+@@ -81,7 +81,14 @@
+     {
+       "name": "wavelet_quant",
+       "compute": true,
+-      "path": "wavelet_quant.comp"
++      "path": "wavelet_quant.comp",
++      "variants": [
++        {
++          "define": "HEADSET_CSF",
++          "count": 2,
++          "resolve": false
++        }
++      ]
+     },
+     {
+       "name": "wavelet_dequant",
+@@ -110,6 +117,50 @@
+           "resolve": true
+         }
+       ]
++    },
++    {
++      "name": "idwt_haar32",
++      "compute": true,
++      "path": "idwt_haar32.comp",
++      "variants": [
++        {
++          "define": "PRECISION",
++          "count": 3,
++          "resolve": false
++        },
++        {
++          "define": "DUAL",
++          "count": 2,
++          "resolve": false
++        },
++        {
++          "define": "FP16",
++          "count": 2,
++          "resolve": true
++        }
++      ]
++    },
++    {
++      "name": "idwt_cdf53v2",
++      "compute": true,
++      "path": "idwt_cdf53v2.comp",
++      "variants": [
++        {
++          "define": "PRECISION",
++          "count": 3,
++          "resolve": false
++        },
++        {
++          "define": "DUAL",
++          "count": 2,
++          "resolve": false
++        },
++        {
++          "define": "FP16",
++          "count": 2,
++          "resolve": true
++        }
++      ]
+     }
+   ]
+ }
+diff --git a/shaders/wavelet_dequant.comp b/shaders/wavelet_dequant.comp
+index 42fa7821997ead9c7964f4d1f3d53b9dff3722e0..89292a91534cf7d0e8804a5bdb1d13cb04ca6447 100644
+--- a/shaders/wavelet_dequant.comp
++++ b/shaders/wavelet_dequant.comp
+@@ -14,8 +14,28 @@
+ #endif
+ 
+ layout(local_size_x = 128) in;
++layout(constant_id = 0) const int PROBE = 0;
+ 
+ layout(set = 0, binding = 0) writeonly uniform image2DArray uDequantImg;
++// Quad-packed output for the multilevel Haar path: uDequantImg is RGBA at half the band size and
++// each texel holds one 2x2 quad, (0,0), (1,0), (0,1), (1,1) in RGBA. Each invocation's 4x2 values
++// start at an even coordinate, so they are exactly two quads.
++layout(constant_id = 1) const bool PACKED = false;
++
++void store_values(ivec2 coord, int layer, mat2x4 v)
++{
++    if (PACKED)
++    {
++        ivec2 quad = coord >> 1;
++        imageStore(uDequantImg, ivec3(quad, layer), vec4(v[0][0], v[0][1], v[1][0], v[1][1]));
++        imageStore(uDequantImg, ivec3(quad + ivec2(1, 0), layer), vec4(v[0][2], v[0][3], v[1][2], v[1][3]));
++        return;
++    }
++    for (int j = 0; j < 2; j++)
++        for (int i = 0; i < 4; i++)
++            imageStore(uDequantImg, ivec3(coord + ivec2(i, j), layer), vec4(v[j][i]));
++}
++
+ 
+ layout(set = 0, binding = 1) readonly buffer PayloadOffsets
+ {
+@@ -244,9 +264,9 @@ void main()
+ 
+     if (offset_u32 == ~0u)
+     {
+-        for (int j = 0; j < 2; j++)
+-            for (int i = 0; i < 4; i++)
+-                imageStore(uDequantImg, ivec3(coord + ivec2(i, j), output_layer), vec4(0.0));
++        if (PROBE == 1)
++            return;
++        store_values(coord, output_layer, mat2x4(vec4(0.0), vec4(0.0)));
+         return;
+     }
+ 
+@@ -388,7 +408,7 @@ void main()
+     }
+ 
+     // Write output.
+-    for (int j = 0; j < 2; j++)
+-        for (int i = 0; i < 4; i++)
+-            imageStore(uDequantImg, ivec3(coord + ivec2(i, j), output_layer), vec4(v[j][i]));
++    if (PROBE == 1 && v[0][0] != -12345.0)
++        return;
++    store_values(coord, output_layer, v);
+ }
+diff --git a/shaders/wavelet_quant.comp b/shaders/wavelet_quant.comp
+index 70794e754d478a1accb1198cf06d4c4a8cfe0d7e..b3a248d16d87cfa959e286cbfe55ca489d8d63fa 100644
+--- a/shaders/wavelet_quant.comp
++++ b/shaders/wavelet_quant.comp
+@@ -252,6 +252,10 @@ void encode_payload(ivec2 block_index_8x8, mat2x4 texels)
+ 
+     // Record distortion for throwing away everything.
+     float square_error = subgroupClusteredAdd((dot(texels[0], texels[0]) + dot(texels[1], texels[1])) * inv_quant_squared, 8);
++#if HEADSET_CSF
++    // JMS1717: discarded blocks carry the same band weight as kept bit planes.
++    square_error *= registers.rdo_distortion_scale;
++#endif
+     if ((gl_SubgroupInvocationID & 7u) == 0)
+         block_stats.stats[block_index].errors[msb + 1] = QuantStats(float16_t(min(60000.0, square_error)), uint16_t(0));
+ 

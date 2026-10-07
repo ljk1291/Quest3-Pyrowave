@@ -33,7 +33,9 @@ def load():
             and re.fullmatch(r"[0-9a-f]{64}", loader.get("sha256", ""))):
         raise SystemExit("sources.lock.json: openxr_loader must include a release and SHA-256")
     patches = data.get("patches", {})
-    for key, path in (("pyrowave_fast53", "patches/pyrowave-fast53.patch"),
+    for key, path in (("pyrowave_decoder_v2", "patches/pyrowave-decoder-v2.patch"),
+                      ("alvr_decoder_v2", "patches/alvr-decoder-v2.patch"),
+                      ("pyrowave_fast53", "patches/pyrowave-fast53.patch"),
                       ("pyrowave_rdo_density", "patches/pyrowave-rdo-density.patch"),
                       ("pyrowave_rdo_live_readback", "patches/pyrowave-rdo-live-readback.patch"),
                       ("pyrowave_rdo_session_setting", "patches/pyrowave-rdo-session-setting.patch"),
@@ -59,7 +61,7 @@ def load():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--github-env", action="store_true")
-    parser.add_argument("--value", choices=("rust", "android_ndk", "pyrowave_fast53_patch_sha256", "pyrowave_rdo_density_patch_sha256",
+    parser.add_argument("--value", choices=("rust", "android_ndk", "pyrowave_decoder_v2_patch_sha256", "alvr_decoder_v2_patch_sha256", "pyrowave_fast53_patch_sha256", "pyrowave_rdo_density_patch_sha256",
                         "pyrowave_rdo_live_readback_patch_sha256", "pyrowave_rdo_session_setting_patch_sha256",
                         "wo8_light_centre_phase_patch_sha256", "alvr_pyrowave_rdo_live_readback_patch_sha256",
                         "alvr_pyrowave_rdo_session_setting_patch_sha256", "nvenc_dimension_preflight_patch_sha256", "foveated_staging_correctness_patch_sha256",
@@ -71,6 +73,8 @@ def main():
     data = load()
     if args.value:
         patch_values = {
+            "pyrowave_decoder_v2_patch_sha256": "pyrowave_decoder_v2",
+            "alvr_decoder_v2_patch_sha256": "alvr_decoder_v2",
             "pyrowave_fast53_patch_sha256": "pyrowave_fast53",
             "pyrowave_rdo_density_patch_sha256": "pyrowave_rdo_density",
             "pyrowave_rdo_live_readback_patch_sha256": "pyrowave_rdo_live_readback",
@@ -94,6 +98,8 @@ def main():
             print(data[args.value])
         return
     values = {
+        "PYROWAVE_DECODER_V2_PATCH_SHA256": data["patches"]["pyrowave_decoder_v2"]["sha256"],
+        "ALVR_DECODER_V2_PATCH_SHA256": data["patches"]["alvr_decoder_v2"]["sha256"],
         "ALVR_URL": data["alvr"]["url"],
         "PYROWAVE_URL": data["pyrowave"]["url"],
         "GRANITE_URL": data["granite"]["url"],

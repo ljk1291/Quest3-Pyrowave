@@ -20,7 +20,8 @@ def make_pyrowave(root):
     shader_dir = root / "pyrowave/shaders"
     shader_dir.mkdir(parents=True, exist_ok=True)
     files = ("wavelet_dequant.comp", "dwt_quant_scale.h", "constants.h", "idwt.comp", "idwt_haar_fused.comp",
-             "dwt.comp", "dwt_common.h", "dwt_swizzle.h", "slangmosh.json", "slangmosh.hpp")
+             "dwt.comp", "dwt_common.h", "dwt_swizzle.h", "slangmosh.json", "slangmosh.hpp",
+             "wavelet_quant.comp", "idwt_haar32.comp", "idwt_cdf53v2.comp")
     hashes = {}
     for name in files:
         content = ("shader:" + name).encode()

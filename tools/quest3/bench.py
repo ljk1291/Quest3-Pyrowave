@@ -26,6 +26,7 @@ EXPERIMENT_PROPERTIES = (
     'debug.q3pw.decode_priority',
     'debug.oculus.forceDisplayScaling', 'debug.oculus.refreshRate',
     'debug.q3pw.haar_fused','debug.q3pw.fast53','debug.q3pw.dequant_batch','debug.q3pw.convert_compute',
+    'debug.q3pw.cdf53v2', 'debug.q3pw.haar32', 'debug.q3pw.packed_levels',
     'debug.q3pw.fragment_min_usage','debug.q3pw.optimal_ahb_usage','debug.q3pw.loop_probe',
     'debug.q3pw.runtime_display_time','debug.q3pw.pass_profile','debug.q3pw.hide_performance_overlay','debug.q3pw.staging_isolation','debug.q3pw.staging_init','debug.q3pw.staging_preserve',
     'debug.q3pw.layer_filter',
@@ -369,6 +370,9 @@ def experiment_effective(state):
                            or value('debug.oculus.refreshRate') != ''),
         'haar_fused':value('debug.q3pw.haar_fused')=='1',
         'fast53':value('debug.q3pw.fast53') in ('1', '2', '3'),
+        # Requests only: the native markers report precondition downgrades.
+        'cdf53v2':value('debug.q3pw.cdf53v2') in ('1', '2', '3', '4', '5'),
+        'haar32':value('debug.q3pw.haar32') in ('1', '2', '3', '4', '5'),
         'dequant_batch':value('debug.q3pw.dequant_batch')=='1',
         'convert_compute':value('debug.q3pw.convert_compute')=='1',
         'fragment_min_usage':value('debug.q3pw.fragment_min_usage')=='1',
@@ -383,6 +387,7 @@ def experiment_effective(state):
     return {'raw':raw,'verified':True,'enabled':enabled,
             # Property readback proves only the request; use the native marker for the grant.
             'requested_decode_priority':value('debug.q3pw.decode_priority') or 'unset',
+            'requested_packed_levels':2 if value('debug.q3pw.packed_levels') == '2' else 4,
             'effective_decode_workers':2 if enabled['decode_workers'] else 1,
             'effective_direct_flip_y':value('debug.q3pw.direct_flip_y')!='0',
             'effective_pyro_precision':value('debug.xrwired.pyro_precision') or '1',

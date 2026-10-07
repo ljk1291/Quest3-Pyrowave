@@ -100,6 +100,12 @@ actual_fast_abr_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha25
 [ "$actual_fast_abr_patch" = "$expected_fast_abr_patch" ] || { echo "Fast ABR patch hash differs" >&2; exit 1; }
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/fast-abr.patch"
 
+# JMS1717 Decoder V2 / haar32 and headset CSF port, opt-in after our existing stack.
+expected_alvr_decoder_v2_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value alvr_decoder_v2_patch_sha256)
+actual_alvr_decoder_v2_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/alvr-decoder-v2.patch")
+[ "$actual_alvr_decoder_v2_patch" = "$expected_alvr_decoder_v2_patch" ] || { echo "alvr-decoder-v2 patch hash differs" >&2; exit 1; }
+apply_patch "$dest/ALVR-20.13.0" "$repo/patches/alvr-decoder-v2.patch"
+
 checkout "$PYROWAVE_URL" "$dest/pyrowave" "$PYROWAVE_BASE"
 # pyrowave's checkout_granite.sh pins a newer Granite (9d44761), which spiked encoder p99 to 14 ms;
 # the measurements used 842d9d5, cloned here with all of its submodules.
@@ -122,11 +128,17 @@ actual_rdo_session_setting_patch=$($python_cmd -c 'import hashlib, sys; print(ha
 [ "$actual_rdo_session_setting_patch" = "$expected_rdo_session_setting_patch" ] || { echo "PyroWave RDO session-setting patch hash does not match sources.lock.json" >&2; exit 1; }
 apply_patch "$dest/pyrowave" "$repo/patches/pyrowave-rdo-session-setting.patch"
 
-# WO-6: default-off, pair-local CDF 5/3 inverse. Keep last in the PyroWave stack.
+# WO-6: default-off, pair-local CDF 5/3 inverse. Keep before the Decoder V2 overlay.
 expected_fast53_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value pyrowave_fast53_patch_sha256)
 actual_fast53_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/pyrowave-fast53.patch")
 [ "$actual_fast53_patch" = "$expected_fast53_patch" ] || { echo "PyroWave fast53 patch hash differs" >&2; exit 1; }
 apply_patch "$dest/pyrowave" "$repo/patches/pyrowave-fast53.patch"
+
+# JMS1717 Decoder V2 / haar32 and headset CSF port, opt-in after our existing stack.
+expected_pyrowave_decoder_v2_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value pyrowave_decoder_v2_patch_sha256)
+actual_pyrowave_decoder_v2_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/pyrowave-decoder-v2.patch")
+[ "$actual_pyrowave_decoder_v2_patch" = "$expected_pyrowave_decoder_v2_patch" ] || { echo "pyrowave-decoder-v2 patch hash differs" >&2; exit 1; }
+apply_patch "$dest/pyrowave" "$repo/patches/pyrowave-decoder-v2.patch"
 
 
 echo "sources ready in $dest: ALVR ${ALVR_BASE%${ALVR_BASE#???????}}, pyrowave ${PYROWAVE_BASE%${PYROWAVE_BASE#???????}}, Granite ${GRANITE_COMMIT%${GRANITE_COMMIT#???????}}"

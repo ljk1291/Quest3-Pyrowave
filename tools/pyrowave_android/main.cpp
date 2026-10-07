@@ -24,6 +24,7 @@
 #include "haar_fused_spv.h"
 #include "idwt97_fused_spv.h"
 #include "../pyroclient/fast53.h"
+#include "../pyroclient/decoder_modes.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -222,16 +223,122 @@ int compare_fast53(int argc, char **argv) {
     return selected ? 0 : any_parity ? 3 : 2;
 }
 
+int compare_v2(int argc, char **argv) {
+    if (argc != 5 && argc != 6) {
+        fprintf(stderr, "usage: %s --compare-v2 <cdf53.wave> <haar.wave> <output-prefix> [iterations=30]\n", argv[0]);
+        return 1;
+    }
+    const char *iterations = argc == 6 ? argv[5] : "30";
+    if (!comparison_iterations(iterations)) {
+        fprintf(stderr, "iterations must be 1..1000\n");
+        return 1;
+    }
+    WaveFile cdf53, haar;
+    if (!cdf53.load(argv[2]) || !haar.load(argv[3])) return 1;
+    if (cdf53.width < 32 || cdf53.height < 32 || cdf53.width > 8192 || cdf53.height > 8192 ||
+        cdf53.width % 4 || cdf53.height % 4 || cdf53.chroma != 0 || cdf53.format != 0 ||
+        haar.width != cdf53.width || haar.height != cdf53.height || haar.chroma != cdf53.chroma ||
+        haar.format != cdf53.format || haar.full_range != cdf53.full_range) {
+        fprintf(stderr, "comparison requires matching 8-bit C420 streams, 32..8192 dimensions divisible by 4\n");
+        return 1;
+    }
+    const char *labels[] = {"cdf53-stock", "cdf53-v2-1", "cdf53-v2-2", "cdf53-v2-3", "cdf53-v2-4", "cdf53-v2-5",
+                            "haar-stock", "haar32-1", "haar32-2", "haar32-3", "haar32-4", "haar32-5"};
+    const char *variants[] = {"0", "1", "2", "3", "4", "5", "0", "1", "2", "3", "4", "5"};
+    constexpr int haar_arm = 6;
+    std::string outputs[12];
+    double mean_ms[12] = {};
+    for (int arm = 0; arm < 12; arm++) {
+        outputs[arm] = std::string(argv[4]) + "." + labels[arm] + ".y4m";
+        printf("[Q3PW_V2_CHECK] arm=%s geometry=%dx%d chroma=420 first_frame=1 warmup=5 samples=%s\n",
+               labels[arm], cdf53.width, cdf53.height, iterations);
+        fflush(nullptr);
+        pid_t child = fork();
+        if (child < 0) { perror("fork"); return 1; }
+        if (child == 0) {
+            execlp(argv[0], argv[0], arm >= haar_arm ? argv[3] : argv[2], outputs[arm].c_str(),
+                   "--v2-worker", arm >= haar_arm ? "haar" : "53", variants[arm], iterations,
+                   static_cast<char *>(nullptr));
+            perror("exec pyrowave_android");
+            _exit(1);
+        }
+        int status = 0;
+        pid_t waited;
+        do { waited = waitpid(child, &status, 0); } while (waited < 0 && errno == EINTR);
+        if (waited < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+            fprintf(stderr, "comparison arm %s failed\n", labels[arm]);
+            return 1;
+        }
+        const std::string timing_path = outputs[arm] + ".timing";
+        FILE *timing = fopen(timing_path.c_str(), "r");
+        if (!timing) { perror("timing readback"); return 1; }
+        const bool valid = fscanf(timing, "%lf", &mean_ms[arm]) == 1 &&
+                           std::isfinite(mean_ms[arm]) && mean_ms[arm] > 0;
+        fclose(timing);
+        if (!valid) { fprintf(stderr, "invalid GPU timing\n"); return 1; }
+    }
+
+    bool all_parity = true;
+    for (int variant = 1; variant < 12; variant++) {
+        if (variant == haar_arm) continue;
+        const int reference_arm = variant < haar_arm ? 0 : haar_arm;
+        FILE *reference = fopen(outputs[reference_arm].c_str(), "rb");
+        FILE *candidate = fopen(outputs[variant].c_str(), "rb");
+        if (!reference || !candidate) {
+            if (reference) fclose(reference);
+            if (candidate) fclose(candidate);
+            fprintf(stderr, "cannot open comparison readbacks\n");
+            return 1;
+        }
+        bool valid = true, parity = true;
+        char ref_header[512], fast_header[512];
+        for (int line = 0; line < 2; line++) {
+            if (!fgets(ref_header, sizeof(ref_header), reference) ||
+                !fgets(fast_header, sizeof(fast_header), candidate) || strcmp(ref_header, fast_header)) valid = false;
+        }
+        const char *planes[] = {"Y", "Cb", "Cr"};
+        for (int plane = 0; plane < 3 && valid; plane++) {
+            const size_t count = size_t(cdf53.width) * cdf53.height / (plane ? 4 : 1);
+            std::vector<uint8_t> ref(count), fast(count);
+            valid = fread(ref.data(), 1, count, reference) == count &&
+                    fread(fast.data(), 1, count, candidate) == count;
+            if (!valid) break;
+            unsigned maximum = 0;
+            uint64_t sum = 0;
+            for (size_t i = 0; i < count; i++) {
+                const unsigned difference = unsigned(std::abs(int(ref[i]) - int(fast[i])));
+                maximum = std::max(maximum, difference);
+                sum += difference;
+            }
+            parity = parity && maximum <= 1;
+            printf("[Q3PW_V2_DIFF] arm=%s plane=%s max=%u mean=%.9f code_values samples=%zu gate=%s\n",
+                   labels[variant], planes[plane], maximum, double(sum) / double(count), count, maximum <= 1 ? "pass" : "fail");
+        }
+        valid = valid && fgetc(reference) == EOF && fgetc(candidate) == EOF &&
+                !ferror(reference) && !ferror(candidate);
+        fclose(reference);
+        fclose(candidate);
+        if (!valid) { fprintf(stderr, "invalid readback for variant %d\n", variant); return 1; }
+        all_parity = all_parity && parity;
+        printf("[Q3PW_V2_TIMING] arm=%s gpu_ms=%.6f stock_ms=%.6f parity=%s standalone_90hz_decode_budget=%s live_vr=unverified\n",
+               labels[variant], mean_ms[variant], mean_ms[reference_arm], parity ? "pass" : "fail",
+               mean_ms[variant] <= 1000.0 / 90.0 ? "within_mean_only" : "exceeded_mean");
+    }
+    return all_parity ? 0 : 2;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
     if (argc > 1 && !strcmp(argv[1], "--compare-fast53")) return compare_fast53(argc, argv);
-    const bool comparison_worker = argc == 7 && !strcmp(argv[3], "--fast53-worker");
+    if (argc > 1 && !strcmp(argv[1], "--compare-v2")) return compare_v2(argc, argv);
+    const bool v2_worker = argc == 7 && !strcmp(argv[3], "--v2-worker");
+    const bool comparison_worker = v2_worker || (argc == 7 && !strcmp(argv[3], "--fast53-worker"));
     if (comparison_worker) {
         if ((strcmp(argv[4], "53") && strcmp(argv[4], "haar")) ||
-            (strcmp(argv[5], "0") && !choose_fast53(argv[5], true, false).active) || !comparison_iterations(argv[6])) return 1;
+            (strcmp(argv[5], "0") && !(v2_worker ? parse_decoder_mode(argv[5]) : choose_fast53(argv[5], true, false).active)) || !comparison_iterations(argv[6])) return 1;
         // Process-local overrides only. Never set an Android system property.
-        if (setenv("PYROWAVE_WAVELET", argv[4], 1) || setenv("PYROWAVE_FAST53", argv[5], 1) ||
+        if (setenv("PYROWAVE_WAVELET", argv[4], 1) || setenv("PYROWAVE_FAST53", v2_worker ? "0" : argv[5], 1) ||
             setenv("PYROWAVE_ITERATIONS", argv[6], 1) || setenv("PYROWAVE_FORCE_COMPUTE", "1", 1) ||
             setenv("PYROWAVE_AHB", "0", 1) || setenv("PYROWAVE_FUSED_HAAR", "0", 1) ||
             setenv("PYROWAVE_BATCH_DEQUANT", "0", 1) || unsetenv("PYROWAVE_FORCE_FRAGMENT") ||
@@ -370,17 +477,62 @@ int main(int argc, char **argv) {
     }();
     printf("decode target: %s\n", useAhb ? "AHardwareBuffer RGBA8" : "plain R8_UNORM");
 
+    // --- Decode.
+    // pyrowave.h: "Decoder: VK_QUEUE_COMPUTE_BIT (if using normal path), VK_QUEUE_GRAPHICS_BIT
+    // (if using fragment path)". The default is compute, so the fragment path needs this or the
+    // work is recorded against the wrong queue type.
+    PW_CHECK(pyrowave_device_set_queue_type(
+        pyro, fragmentPath ? VK_QUEUE_GRAPHICS_BIT : VK_QUEUE_COMPUTE_BIT));
+    printf("queue type: %s\n", fragmentPath ? "GRAPHICS" : "COMPUTE");
+
+    pyrowave_decoder_create_info decoderInfo = {};
+    decoderInfo.device = pyro;
+    decoderInfo.width = wave.width;
+    decoderInfo.height = wave.height;
+    decoderInfo.chroma =
+        chroma444 ? PYROWAVE_CHROMA_SUBSAMPLING_444 : PYROWAVE_CHROMA_SUBSAMPLING_420;
+    decoderInfo.fragment_path = fragmentPath;
+    // XRW Experiment 2: PYROWAVE_WAVELET=53 -> CDF 5/3 decoder (compute only); the stream's
+    // header must agree or pyrowave rejects the packet. PYROWAVE_PRECISION is read by pyrowave
+    // itself (0 = FP16 math, 1 = FP32 math / FP16 storage, 2 = FP32).
+    const char *wv = getenv("PYROWAVE_WAVELET");
+    decoderInfo.wavelet = (wv && strcmp(wv, "53") == 0) ? PYROWAVE_WAVELET_CDF53
+                        : (wv && strcmp(wv, "haar") == 0) ? PYROWAVE_WAVELET_HAAR : PYROWAVE_WAVELET_CDF97;
+    printf("wavelet: %s, PYROWAVE_PRECISION=%s\n", decoderInfo.wavelet == PYROWAVE_WAVELET_HAAR ? "Haar" : decoderInfo.wavelet == PYROWAVE_WAVELET_CDF53 ? "CDF 5/3" : "CDF 9/7",
+           getenv("PYROWAVE_PRECISION") ? getenv("PYROWAVE_PRECISION") : "(default 1)");
+    pyrowave_decoder decoder = nullptr;
+    PW_CHECK(pyrowave_decoder_create(&decoderInfo, &decoder));
+    const auto fast53 = choose_fast53(getenv("PYROWAVE_FAST53"),
+                                     decoderInfo.wavelet == PYROWAVE_WAVELET_CDF53, fragmentPath);
+    if (fast53.active) PW_CHECK(pyrowave_decoder_set_fast53_variant(decoder, fast53.variant));
+    printf("[Q3PW_FAST53] requested=%d active=%d variant=%d reason=%s\n",
+           fast53.requested, fast53.active, fast53.variant, fast53.reason);
+
+    const int new_mode = v2_worker ? parse_decoder_mode(argv[5]) : 0;
+    const bool new_haar = decoderInfo.wavelet == PYROWAVE_WAVELET_HAAR;
+    if (new_mode) {
+        PW_CHECK(new_haar ? pyrowave_decoder_set_haar32(decoder, new_mode) :
+                            pyrowave_decoder_set_cdf53v2(decoder, new_mode));
+    }
+    const bool packed_luma = new_mode >= (new_haar ? 3 : 2);
+    const bool dual_chroma = new_mode >= 4;
+    const bool present_ycbcr = new_mode == 5;
     const VkFormat planeFormat = useAhb ? VK_FORMAT_R8G8B8A8_UNORM : VK_FORMAT_R8_UNORM;
     Plane planes[3] = {};
+    VkFormat plane_formats[3] = {planeFormat, planeFormat, planeFormat};
     for (int i = 0; i < 3; i++) {
         Plane &p = planes[i];
         p.width = i == 0 ? wave.width : chroma_w;
         p.height = i == 0 ? wave.height : chroma_h;
 
+        if (i == 0 && packed_luma) {
+            p.width = present_ycbcr ? wave.width : wave.width / 2; p.height = wave.height / 2;
+            plane_formats[i] = VK_FORMAT_R8G8B8A8_UNORM;
+        } else if (i == 1 && dual_chroma) plane_formats[i] = VK_FORMAT_R8G8_UNORM;
         if (!useAhb) {
             VkImageCreateInfo plainInfo = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
             plainInfo.imageType = VK_IMAGE_TYPE_2D;
-            plainInfo.format = planeFormat;
+            plainInfo.format = plane_formats[i];
             plainInfo.extent = { (uint32_t)p.width, (uint32_t)p.height, 1u };
             plainInfo.mipLevels = 1;
             plainInfo.arrayLayers = 1;
@@ -421,7 +573,7 @@ int main(int argc, char **argv) {
             VkImageViewCreateInfo plainView = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
             plainView.image = p.image;
             plainView.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            plainView.format = planeFormat;
+            plainView.format = plane_formats[i];
             plainView.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
             VK_CHECK(vkCreateImageView(device, &plainView, nullptr, &p.view));
             printf("plane[%d]: %dx%d plain R8, %llu bytes\n", i, p.width, p.height,
@@ -521,37 +673,6 @@ int main(int argc, char **argv) {
                (unsigned long long)ahbProps.allocationSize);
     }
 
-    // --- Decode.
-    // pyrowave.h: "Decoder: VK_QUEUE_COMPUTE_BIT (if using normal path), VK_QUEUE_GRAPHICS_BIT
-    // (if using fragment path)". The default is compute, so the fragment path needs this or the
-    // work is recorded against the wrong queue type.
-    PW_CHECK(pyrowave_device_set_queue_type(
-        pyro, fragmentPath ? VK_QUEUE_GRAPHICS_BIT : VK_QUEUE_COMPUTE_BIT));
-    printf("queue type: %s\n", fragmentPath ? "GRAPHICS" : "COMPUTE");
-
-    pyrowave_decoder_create_info decoderInfo = {};
-    decoderInfo.device = pyro;
-    decoderInfo.width = wave.width;
-    decoderInfo.height = wave.height;
-    decoderInfo.chroma =
-        chroma444 ? PYROWAVE_CHROMA_SUBSAMPLING_444 : PYROWAVE_CHROMA_SUBSAMPLING_420;
-    decoderInfo.fragment_path = fragmentPath;
-    // XRW Experiment 2: PYROWAVE_WAVELET=53 -> CDF 5/3 decoder (compute only); the stream's
-    // header must agree or pyrowave rejects the packet. PYROWAVE_PRECISION is read by pyrowave
-    // itself (0 = FP16 math, 1 = FP32 math / FP16 storage, 2 = FP32).
-    const char *wv = getenv("PYROWAVE_WAVELET");
-    decoderInfo.wavelet = (wv && strcmp(wv, "53") == 0) ? PYROWAVE_WAVELET_CDF53
-                        : (wv && strcmp(wv, "haar") == 0) ? PYROWAVE_WAVELET_HAAR : PYROWAVE_WAVELET_CDF97;
-    printf("wavelet: %s, PYROWAVE_PRECISION=%s\n", decoderInfo.wavelet == PYROWAVE_WAVELET_HAAR ? "Haar" : decoderInfo.wavelet == PYROWAVE_WAVELET_CDF53 ? "CDF 5/3" : "CDF 9/7",
-           getenv("PYROWAVE_PRECISION") ? getenv("PYROWAVE_PRECISION") : "(default 1)");
-    pyrowave_decoder decoder = nullptr;
-    PW_CHECK(pyrowave_decoder_create(&decoderInfo, &decoder));
-    const auto fast53 = choose_fast53(getenv("PYROWAVE_FAST53"),
-                                     decoderInfo.wavelet == PYROWAVE_WAVELET_CDF53, fragmentPath);
-    if (fast53.active) PW_CHECK(pyrowave_decoder_set_fast53_variant(decoder, fast53.variant));
-    printf("[Q3PW_FAST53] requested=%d active=%d variant=%d reason=%s\n",
-           fast53.requested, fast53.active, fast53.variant, fast53.reason);
-
     PW_CHECK(pyrowave_decoder_push_packet(decoder, wave.frame.data(), wave.frame.size()));
     const bool ready = pyrowave_decoder_decode_is_ready(decoder, false);
     printf("decode_is_ready(complete) = %s\n", ready ? "yes" : "no");
@@ -570,14 +691,16 @@ int main(int argc, char **argv) {
             v.width = (uint32_t)planes[i].width;
             v.height = (uint32_t)planes[i].height;
         }
-        v.image_format = planeFormat;
-        v.view_format = planeFormat;
+        v.image_format = plane_formats[i];
+        v.view_format = plane_formats[i];
         v.mip_level = 0;
         v.layer = 0;
         v.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
         v.swizzle = VK_COMPONENT_SWIZZLE_IDENTITY;
         v.layout = VK_IMAGE_LAYOUT_GENERAL;
     }
+
+    if (present_ycbcr) buffers.planes[1] = buffers.planes[0];
 
     // Record the decode into OUR command buffer and submit it ourselves.
     //
@@ -1009,6 +1132,7 @@ int main(int argc, char **argv) {
 
     vkCmdWriteTimestamp(decodeCmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPool, 1);
 
+    if (!v2_worker) { // Comparison measures decode only; packed layouts require a different consumer.
     // --- T2 -> T3: the conversion pass.
     // The decode wrote the planes; make them readable and put the RGBA target in GENERAL.
     {
@@ -1047,6 +1171,7 @@ int main(int argc, char **argv) {
     vkCmdDispatch(decodeCmd, (uint32_t)((wave.width + 7) / 8), (uint32_t)((wave.height + 7) / 8),
                   1);
 
+    }
     vkCmdWriteTimestamp(decodeCmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPool, 2);
 
     VK_CHECK(vkEndCommandBuffer(decodeCmd));
@@ -1125,7 +1250,7 @@ int main(int argc, char **argv) {
         cmdInfo.commandBufferCount = 1;
         VK_CHECK(vkAllocateCommandBuffers(device, &cmdInfo, &cmd));
 
-        const VkDeviceSize biggest = (VkDeviceSize)wave.width * wave.height;
+        const VkDeviceSize biggest = (VkDeviceSize)wave.width * wave.height * 4;
         VkBufferCreateInfo bufInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
         bufInfo.size = biggest;
         bufInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
@@ -1157,10 +1282,14 @@ int main(int argc, char **argv) {
         VK_CHECK(vkBindBufferMemory(device, readbackBuffer, readbackMemory, 0));
     }
 
+    std::vector<uint8_t> raw_planes[3];
     for (int i = 0; i < 3; i++) {
-        Plane &p = planes[i];
+        const int physical = present_ycbcr ? 0 : dual_chroma && i == 2 ? 1 : i;
+        Plane &p = planes[physical];
 
         if (!useAhb) {
+            if (raw_planes[physical].empty()) {
+
             VkCommandBufferBeginInfo begin = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
             begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
             VK_CHECK(vkResetCommandBuffer(cmd, 0));
@@ -1198,8 +1327,20 @@ int main(int argc, char **argv) {
 
             void *mappedBuf = nullptr;
             VK_CHECK(vkMapMemory(device, readbackMemory, 0, VK_WHOLE_SIZE, 0, &mappedBuf));
-            fwrite(mappedBuf, 1, (size_t)p.width * p.height, out);
+            const size_t channels = plane_formats[physical] == VK_FORMAT_R8G8B8A8_UNORM ? 4 :
+                                    plane_formats[physical] == VK_FORMAT_R8G8_UNORM ? 2 : 1;
+            const auto *bytes = static_cast<const uint8_t *>(mappedBuf);
+            raw_planes[physical].assign(bytes, bytes + size_t(p.width) * p.height * channels);
             vkUnmapMemory(device, readbackMemory);
+            }
+            const int w = i == 0 ? wave.width : chroma_w, h = i == 0 ? wave.height : chroma_h;
+            std::vector<uint8_t> unpacked(size_t(w) * h);
+            for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+                const size_t offset = decoder_sample_offset(i, x, y, wave.width, p.width,
+                                                             packed_luma, dual_chroma, present_ycbcr);
+                unpacked[size_t(y) * w + x] = raw_planes[physical].at(offset);
+            }
+            fwrite(unpacked.data(), 1, unpacked.size(), out);
             continue;
         }
 

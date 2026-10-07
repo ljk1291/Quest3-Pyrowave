@@ -83,6 +83,14 @@
     "pyrowave_fast53": {
       "path": "patches/pyrowave-fast53.patch",
       "sha256": "51304263261e9258ff0484a50b3caa1084493e93523d488c3f5ca51c7500db71"
+    },
+    "pyrowave_decoder_v2": {
+      "path": "patches/pyrowave-decoder-v2.patch",
+      "sha256": "10a4de8de103fe28c7a8164736f04d33cee1cd134d1fe82d0cf0693d8d47ce84"
+    },
+    "alvr_decoder_v2": {
+      "path": "patches/alvr-decoder-v2.patch",
+      "sha256": "2b8df09e10af76c70f91e8e83a4c37d297eddc1fd4cbb8ade7c6b885afd0a9d3"
     }
   },
   "rust": "1.97.1",

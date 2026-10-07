@@ -69,6 +69,13 @@ jobs:
           python3 -m unittest tools.tests.test_fast53 -v
           g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/fast53_test.cpp -o /tmp/fast53-policy
           /tmp/fast53-policy
+      - name: Decoder V2 port policies and patch integrity (CPU only)
+        run: |
+          python3 -m unittest tools.tests.test_decoder_v2_port -v
+          g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/decoder_modes_test.cpp -o /tmp/decoder-modes
+          /tmp/decoder-modes
+          g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/headset_csf_test.cpp -I "$XRWIRED_INPUTS/research/pyrowave" -o /tmp/headset-csf
+          /tmp/headset-csf
       - name: Opt-in decoder queue priority parsing and fallback (CPU only)
         run: g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/decode_priority_test.cpp -o /tmp/decode-priority && /tmp/decode-priority
       - run: g++ -std=c++17 -Wall -Wextra -Werror tools/pyroclient/pass_profile_test.cpp -o /tmp/pass-profile && /tmp/pass-profile

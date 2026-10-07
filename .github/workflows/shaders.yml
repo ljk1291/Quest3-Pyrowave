@@ -4,7 +4,7 @@ on:
   # workflow_dispatch needs this file on the default branch; a push of the workflow itself on a
   # candidate branch runs it from that branch instead.
   push:
-    branches: ['codex/fast53']
+    branches: ['codex/fast53', 'codex/decoder-v2']
     paths: ['.github/workflows/shaders.yml']
 permissions:
   contents: read
@@ -14,6 +14,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sh tools/ci/fetch_sources.sh "$GITHUB_WORKSPACE/ws/research"
+      - name: Pinned client shader compiler
+        run: |
+          ndk=$(python3 tools/ci/source_lock.py --value android_ndk)
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" >/dev/null
+          echo "Q3PW_GLSLC=$ANDROID_HOME/ndk/$ndk/shader-tools/linux-x86_64/glslc" >> "$GITHUB_ENV"
       - name: Build pinned shader compiler
         run: |
           p="$GITHUB_WORKSPACE/ws/research/pyrowave"
@@ -23,15 +28,22 @@ jobs:
           # Recover the pinned pre-fast53 header even after the new header
           # has been folded into the additive patch (safe on repeat regeneration).
           # Validate all 18 fast53 permutations and preserve the measured v1 control.
+          git -C "$p" apply -R "$GITHUB_WORKSPACE/patches/pyrowave-decoder-v2.patch"
+          cp "$p/shaders/slangmosh.hpp" /tmp/pre-decoder-v2.hpp
           git -C "$p" apply -R "$GITHUB_WORKSPACE/patches/pyrowave-fast53.patch"
           cp "$p/shaders/slangmosh.hpp" /tmp/pre-fast53.hpp
           git -C "$p" apply "$GITHUB_WORKSPACE/patches/pyrowave-fast53.patch"
+          python3 tools/ci/check_fast53_shaders.py /tmp/pre-fast53.hpp /tmp/pre-decoder-v2.hpp
+          git -C "$p" apply "$GITHUB_WORKSPACE/patches/pyrowave-decoder-v2.patch"
           "$compiler" "$p/shaders/slangmosh.json" --namespace PyroWave --output "$p/shaders/slangmosh.hpp" -O --strip
-          python3 tools/ci/check_fast53_shaders.py /tmp/pre-fast53.hpp "$p/shaders/slangmosh.hpp"
+          python3 tools/ci/check_decoder_v2_shaders.py /tmp/pre-decoder-v2.hpp "$p/shaders/slangmosh.hpp"
           python3 tools/ci/check_shader_manifest.py "$p" --write
-          mkdir out
+          mkdir -p out
           cp "$p/shaders/slangmosh.hpp" "$p/shaders/quest3-manifest.json" out/
-          sha256sum "$p/shaders/wavelet_dequant.comp" "$p/shaders/idwt.comp" "$p/shaders/idwt_haar_fused.comp" "$p/shaders/dwt_common.h" "$p/shaders/slangmosh.json" > out/SOURCE-SHA256.txt
+          python3 tools/pyroclient/compile_shaders.py --glslc "$Q3PW_GLSLC" --output-dir out/pyroclient
+          python3 tools/pyroclient/compile_shaders.py --check --output-dir out/pyroclient
+          "$Q3PW_GLSLC" --version > out/CLIENT-COMPILER.txt
+          sha256sum "$p/shaders/idwt_cdf53v2.comp" "$p/shaders/idwt_haar32.comp" "$p/shaders/wavelet_quant.comp" "$p/shaders/wavelet_dequant.comp" "$p/shaders/idwt.comp" "$p/shaders/idwt_haar_fused.comp" "$p/shaders/dwt_common.h" "$p/shaders/slangmosh.json" > out/SOURCE-SHA256.txt
       - uses: actions/upload-artifact@v4
         with:
           name: PyroWave-generated-shaders

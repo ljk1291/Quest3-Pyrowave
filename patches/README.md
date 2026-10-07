@@ -1,5 +1,14 @@
 # Patches
 
+## Decoder V2 port overlays
+
+`pyrowave-decoder-v2.patch` and `alvr-decoder-v2.patch` adapt JMS1717's MIT-licensed
+fast decoder / headset CSF work from upstream commit
+`adeb86b83f2d23333faeb315105f164a198271b8` to this fork's existing stack. Behavior
+is opt-in and default-off; source pins and earlier overlays are preserved.
+See [DECODER-V2-PORT](../docs/DECODER-V2-PORT.md) for controls, pending shader fold,
+validation limits and exact CI steps. Preserve the original PyroWave/Granite credits.
+
 ## `fast-abr.patch`: opt-in per-frame TCP PyroWave budget
 
 Additive overlay last, after `client-output-queue.patch`, SHA-256 pinned in

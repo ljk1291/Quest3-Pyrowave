@@ -119,6 +119,10 @@ int main(int argc, char **argv) {
     }
     AHardwareBuffer_Desc d = {};
     AHardwareBuffer_describe(ahb, &d);
+    if (d.width == uint32_t(w.width) && d.height * 2 == uint32_t(w.height)) {
+        fprintf(stderr, "Mode-5 buffer contains packed YCbCr: use ALVR frame_dump for RGB or --compare-v2 for plane parity. This probe supports '-' timing only for mode 5.\n");
+        return 2;
+    }
     if (!d.width || !d.height || d.layers != 1 ||
         d.format != AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM ||
         uint64_t(d.width) * d.height > (256ull * 1024 * 1024) / 4) return 2;

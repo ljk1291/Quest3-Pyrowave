@@ -1,0 +1,450 @@
+diff --git a/alvr/graphics/resources/direct_eye_fragment.glsl b/alvr/graphics/resources/direct_eye_fragment.glsl
+index 3503607d81dbf7b945d5c6cce5242a523bf06477..801a853a1013eae9d54a1a6ab351d5a62c834041 100644
+--- a/alvr/graphics/resources/direct_eye_fragment.glsl
++++ b/alvr/graphics/resources/direct_eye_fragment.glsl
+@@ -8,12 +8,13 @@ uniform float encoding_gamma;
+ in vec2 uv;
+ out vec4 out_color;
+ // Q3PW_FOVEATION_FUNCTION
++// Q3PW_PRESENT_FUNCTION
+ void main() {
+     vec2 sample_uv = uv;
+ #ifdef Q3PW_FFE
+     sample_uv = direct_foveated_uv(uv);
+ #endif
+-    vec3 color = texture(tex, sample_uv).rgb;
++    vec3 color = q3pw_present_ycbcr ? q3pw_present_sample(sample_uv) : texture(tex, sample_uv).rgb;
+     if (fix_limited_range != 0)
+         color = vec3(16.0 / 255.0) + (219.0 / 255.0) * color;
+     if (srgb_correction != 0) {
+diff --git a/alvr/graphics/resources/frame_dump_fragment.glsl b/alvr/graphics/resources/frame_dump_fragment.glsl
+index d6673d46ec77214a16a31c438f7dd5b3c203a205..2d1f5484831034d3811a5a096ef49e3d1036b755 100644
+--- a/alvr/graphics/resources/frame_dump_fragment.glsl
++++ b/alvr/graphics/resources/frame_dump_fragment.glsl
+@@ -5,4 +5,5 @@ precision highp samplerExternalOES;
+ in highp vec2 uv;
+ uniform samplerExternalOES tex;
+ layout(location=0) out vec4 color;
+-void main() { color = texture(tex, uv); }
++// Q3PW_PRESENT_FUNCTION
++void main() { color = q3pw_present_ycbcr ? vec4(q3pw_present_sample(uv), 1.0) : texture(tex, uv); }
+diff --git a/alvr/graphics/resources/present_ycbcr.glsl b/alvr/graphics/resources/present_ycbcr.glsl
+new file mode 100644
+index 0000000000000000000000000000000000000000..cc562bf7ad5a427b9beda964ff4522199ac91a2a
+--- /dev/null
++++ b/alvr/graphics/resources/present_ycbcr.glsl
+@@ -0,0 +1,36 @@
++// Adapted from JMS1717/Quest3-Pyrowave adeb86b (MIT), mode 5 only.
++// RGBA8 width x height/2: luma 2x2 quads on the left; Cb/Cr in RG on the right.
++uniform bool q3pw_present_ycbcr;
++uniform highp vec2 q3pw_frame_size;
++
++float q3pw_luma(highp ivec2 p) {
++    highp vec2 size = q3pw_frame_size * vec2(1.0, 0.5);
++    vec4 quad = texture(tex, (vec2(p >> 1) + 0.5) / size);
++    int i = (p.x & 1) | ((p.y & 1) << 1);
++    return i == 0 ? quad.r : i == 1 ? quad.g : i == 2 ? quad.b : quad.a;
++}
++
++vec3 q3pw_present_sample(highp vec2 uv) {
++    highp vec2 pos = uv * q3pw_frame_size;
++    highp ivec2 last = ivec2(q3pw_frame_size) - 1;
++#ifdef Q3PW_FFE
++    // WO-8's mapping is unchanged. Match the original RGB sampler's bilinear
++    // luma interpolation, keeping each eye's samples on its own side of the seam.
++    highp vec2 p = pos - 0.5;
++    highp ivec2 lo = ivec2(uv.x < 0.5 ? 0 : int(q3pw_frame_size.x) / 2, 0);
++    highp ivec2 hi = ivec2(lo.x + int(q3pw_frame_size.x) / 2 - 1, last.y);
++    highp ivec2 a = clamp(ivec2(floor(p)), lo, hi);
++    highp ivec2 b = clamp(ivec2(floor(p)) + 1, lo, hi);
++    vec2 f = fract(p);
++    float Y = mix(mix(q3pw_luma(a), q3pw_luma(ivec2(b.x, a.y)), f.x),
++                  mix(q3pw_luma(ivec2(a.x, b.y)), q3pw_luma(b), f.x), f.y);
++#else
++    float Y = q3pw_luma(clamp(ivec2(pos), ivec2(0), last));
++#endif
++    highp vec2 half_size = q3pw_frame_size * 0.5;
++    highp vec2 c = clamp(pos * 0.5, vec2(0.5), half_size - 0.5);
++    vec2 chroma = texture(tex, vec2((half_size.x + c.x) / q3pw_frame_size.x, c.y / half_size.y)).rg - 0.5;
++    return clamp(vec3(Y + 1.5748 * chroma.y,
++                      Y - 0.1873 * chroma.x - 0.4681 * chroma.y,
++                      Y + 1.8556 * chroma.x), 0.0, 1.0);
++}
+diff --git a/alvr/graphics/resources/staging_fragment.glsl b/alvr/graphics/resources/staging_fragment.glsl
+index 5fd8190ec28161d8953a8355bb0c9a9457973727..3fb9f17298190fb6889bbdf6da4b6ef7c533ad05 100644
+--- a/alvr/graphics/resources/staging_fragment.glsl
++++ b/alvr/graphics/resources/staging_fragment.glsl
+@@ -13,8 +13,9 @@ const float LIMITED_MAX = 235.0 / 255.0;
+ in vec2 uv;
+ out vec4 out_color;
+ 
++// Q3PW_PRESENT_FUNCTION
+ void main() {
+-    vec3 color = texture(tex, uv).rgb;
++    vec3 color = q3pw_present_ycbcr ? q3pw_present_sample(uv) : texture(tex, uv).rgb;
+ #ifdef FIX_LIMITED_RANGE
+     color = LIMITED_MIN + ((LIMITED_MAX - LIMITED_MIN) * color);
+ #endif
+diff --git a/alvr/graphics/src/direct_eye.rs b/alvr/graphics/src/direct_eye.rs
+index a35f4fa2f454d794fdef3fcc91604b23c6ec4474..0a3c5b87df0f8598d30172fcf3f85b68b7775b83 100644
+--- a/alvr/graphics/src/direct_eye.rs
++++ b/alvr/graphics/src/direct_eye.rs
+@@ -82,6 +82,7 @@ pub struct DirectEyeRenderer {
+     vertex_array: gl::VertexArray,
+     framebuffers: [Vec<gl::Framebuffer>; 2],
+     resolution: UVec2,
++    decoded: UVec2,
+     view_idx: gl::UniformLocation,
+     flip_y: gl::UniformLocation,
+     flip: bool,
+@@ -110,6 +111,7 @@ unsafe fn compile_program(gl: &gl::Context, foveation: bool) -> Result<gl::Progr
+                 source.replace("#version 300 es", "#version 300 es\n#define Q3PW_FFE")
+                     .replace("// Q3PW_FOVEATION_FUNCTION", include_str!("../resources/direct_eye_foveation.glsl"))
+             } else { source.to_owned() };
++            let source = super::present_ycbcr::source(&source);
+             gl.shader_source(shader, &source);
+             gl.compile_shader(shader);
+             if !gl.get_shader_compile_status(shader) {
+@@ -132,7 +134,7 @@ impl DirectEyeRenderer {
+     /// Any compile/import-target failure leaves the existing renderer usable.
+     #[expect(clippy::too_many_arguments)]
+     pub(super) fn new(context: Rc<GraphicsContext>, config: &DirectEyeConfig,
+-               flip: bool, asynchronous: bool, copy_wait_us: i32, raw_srgb_requested: bool, image_cache_requested: bool, foveation: Option<&DirectEyeFoveation>) -> Result<Self, String> {
++               flip: bool, asynchronous: bool, copy_wait_us: i32, raw_srgb_requested: bool, image_cache_requested: bool, foveation: Option<&DirectEyeFoveation>, decoded: UVec2) -> Result<Self, String> {
+         context.make_current();
+         let gl = &context.gl_context;
+         if foveation.is_some() && !gl.supported_extensions().contains("GL_OES_EGL_image_external_essl3") {
+@@ -204,7 +206,7 @@ impl DirectEyeRenderer {
+             gl.use_program(None);
+             match setup {
+                 Ok((view_idx, flip_y, ffe_params)) => Ok(Self { context, program, source_texture,
+-                    vertex_array, framebuffers, resolution: config.resolution,
++                    vertex_array, framebuffers, resolution: config.resolution, decoded,
+                     view_idx, flip_y, flip, ffe_params, asynchronous: Cell::new(asynchronous),
+                     image_cache_enabled: Cell::new(image_cache_requested && cfg!(target_os = "android")),
+                     image_cache: RefCell::new(Vec::new()), pending: RefCell::new(None), copy_wait_ns: copy_wait_us.clamp(0, 2000) * 1000, bypass_srgb }),
+@@ -338,7 +340,8 @@ impl DirectEyeRenderer {
+         let started = Instant::now();
+         let cached = self.cached_source_texture(buffer);
+         let source_texture = cached.unwrap_or(self.source_texture);
+-        let draw = || self.draw(source_texture, indices, started);
++        let present = super::present_ycbcr::layout(buffer, self.decoded);
++        let draw = || self.draw(source_texture, indices, started, present);
+         if cached.is_some() { draw(); }
+         else { self.context.render_ahardwarebuffer_using_texture(buffer, self.source_texture, draw); }
+     }
+@@ -361,12 +364,23 @@ impl DirectEyeRenderer {
+         let gl = &self.context.gl_context;
+         gl.bind_texture(GL_TEXTURE_EXTERNAL_OES, Some(self.source_texture));
+         (self.context.image_target_texture_2d)(GL_TEXTURE_EXTERNAL_OES, image);
+-        self.draw(self.source_texture, [0, 0], Instant::now());
++        self.draw(self.source_texture, [0, 0], Instant::now(), false);
+     }
+ 
+-    unsafe fn draw(&self, source_texture: gl::Texture, indices: [u32; 2], started: Instant) {
++    #[cfg(all(test, target_os = "linux"))]
++    pub(super) unsafe fn render_present_egl_image_for_test(&self, image: super::egl::EGLImage) {
++        self.context.make_current();
++        let gl = &self.context.gl_context;
++        gl.active_texture(gl::TEXTURE0);
++        gl.bind_texture(GL_TEXTURE_EXTERNAL_OES, Some(self.source_texture));
++        (self.context.image_target_texture_2d)(GL_TEXTURE_EXTERNAL_OES, image);
++        self.draw(self.source_texture, [0, 0], Instant::now(), true);
++    }
++
++    unsafe fn draw(&self, source_texture: gl::Texture, indices: [u32; 2], started: Instant, present: bool) {
+             let gl = &self.context.gl_context;
+             gl.use_program(Some(self.program));
++            super::present_ycbcr::bind(gl, self.program, present, self.decoded);
+             gl.bind_vertex_array(Some(self.vertex_array));
+             gl.viewport(0, 0, self.resolution.x as i32, self.resolution.y as i32);
+             for state in [gl::SCISSOR_TEST, gl::STENCIL_TEST, gl::DEPTH_TEST, gl::BLEND, gl::CULL_FACE] {
+diff --git a/alvr/graphics/src/frame_dump.rs b/alvr/graphics/src/frame_dump.rs
+index 99a29954ed12939e27e15b5d1811ac493000d75d..0a9efef72657cb10aaa241cafd9b9131852b067d 100644
+--- a/alvr/graphics/src/frame_dump.rs
++++ b/alvr/graphics/src/frame_dump.rs
+@@ -199,7 +199,8 @@ unsafe fn read_pixels(gl: &gl::Context, size: UVec2) -> Result<Vec<u8>, String>
+ }
+ 
+ unsafe fn read_decoded(context: &GraphicsContext, source: *mut c_void,
+-    packed: UVec2, test_image: Option<super::egl::EGLImage>) -> Result<Image, String> {
++    packed: UVec2, test_image: Option<(super::egl::EGLImage, bool)>) -> Result<Image, String> {
++    let present = test_image.map_or_else(|| super::present_ycbcr::layout(source, packed), |(_, present)| present);
+     let gl = &context.gl_context;
+     if !gl.supported_extensions().contains("GL_OES_EGL_image_external_essl3") { return Err("missing external-image ESSL3".into()); }
+     let _state = State::save(gl);
+@@ -210,7 +211,7 @@ unsafe fn read_decoded(context: &GraphicsContext, source: *mut c_void,
+     for (kind, code) in [(gl::VERTEX_SHADER, include_str!("../resources/frame_dump_vertex.glsl")),
+         (gl::FRAGMENT_SHADER, include_str!("../resources/frame_dump_fragment.glsl"))] {
+         let shader = gl.create_shader(kind)?; objects.shaders.push(shader);
+-        gl.shader_source(shader, code); gl.compile_shader(shader);
++        gl.shader_source(shader, &super::present_ycbcr::source(code)); gl.compile_shader(shader);
+         if !gl.get_shader_compile_status(shader) { return Err(gl.get_shader_info_log(shader)); }
+         gl.attach_shader(program, shader);
+     }
+@@ -225,7 +226,7 @@ unsafe fn read_decoded(context: &GraphicsContext, source: *mut c_void,
+     gl.tex_storage_2d(gl::TEXTURE_2D, 1, gl::RGBA8, size.x as i32, size.y as i32);
+     gl.framebuffer_texture_2d(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, Some(target), 0);
+     let external = gl.create_texture()?; objects.textures.push(external);
+-    objects.image = if let Some(image) = test_image { image } else {
++    objects.image = if let Some((image, _)) = test_image { image } else {
+         let native = (context.get_native_client_buffer)(source);
+         if native.is_null() { return Err("missing native client buffer".into()); }
+         let attributes = [0x30D2, 1, super::egl::NONE]; // EGL_IMAGE_PRESERVED_KHR
+@@ -236,13 +237,15 @@ unsafe fn read_decoded(context: &GraphicsContext, source: *mut c_void,
+     gl.bind_texture(GL_TEXTURE_EXTERNAL_OES, Some(external));
+     (context.image_target_texture_2d)(GL_TEXTURE_EXTERNAL_OES, objects.image);
+     gl.bind_sampler(0, None);
+-    for (p, v) in [(gl::TEXTURE_MIN_FILTER, gl::NEAREST), (gl::TEXTURE_MAG_FILTER, gl::NEAREST),
++    let filter = if present { gl::LINEAR } else { gl::NEAREST };
++    for (p, v) in [(gl::TEXTURE_MIN_FILTER, filter), (gl::TEXTURE_MAG_FILTER, filter),
+         (gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE), (gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE)] { gl.tex_parameter_i32(GL_TEXTURE_EXTERNAL_OES, p, v as i32); }
+     for &(cap, _) in &_state.caps { gl.disable(cap); }
+     gl.color_mask(true, true, true, true);
+     gl.viewport(0, 0, size.x as i32, size.y as i32);
+     gl.use_program(Some(program));
+     gl.uniform_1_i32(gl.get_uniform_location(program, "tex").as_ref(), 0);
++    super::present_ycbcr::bind(gl, program, present, packed);
+     gl.draw_arrays(gl::TRIANGLES, 0, 3);
+     Ok(Image { stage: "post_decode", size, pixels: read_pixels(gl, size)?, row_order: "top_down" })
+ }
+@@ -304,7 +307,7 @@ mod frame_dump_gles_tests {
+             gl.pixel_store_i32(gl::PACK_SKIP_PIXELS, 3);
+             gl.active_texture(gl::TEXTURE3);
+             let before = State::save(gl);
+-            let decoded = read_decoded(&context, std::ptr::null_mut(), UVec2::new(32, 32), Some(image)).unwrap();
++            let decoded = read_decoded(&context, std::ptr::null_mut(), UVec2::new(32, 32), Some((image, false))).unwrap();
+             let mut images = read_presented(&context, UVec2::new(64, 32), [texture.0.get(); 2]).unwrap();
+             images.push(decoded);
+             assert_eq!(images.len(), 3);
+@@ -327,4 +330,85 @@ mod frame_dump_gles_tests {
+             gl.delete_framebuffer(fbo); gl.delete_vertex_array(vao); gl.delete_texture(texture);
+         }
+     }
++    #[test]
++    fn packed_ycbcr_dump_direct_and_staging_match_rgb_for_both_eyes() {
++        assert_eq!(std::env::var("LIBGL_ALWAYS_SOFTWARE").as_deref(), Ok("1"));
++        let context = Rc::new(GraphicsContext::new_gl());
++        assert_eq!(context.adapter.get_info().device_type, wgpu::DeviceType::Cpu);
++        context.make_current();
++        let gl = &context.gl_context;
++        unsafe {
++            let eye = UVec2::new(32, 32);
++            let width = eye.x * 2;
++            let height = eye.y;
++            let mut packed = vec![0; (width * height / 2 * 4) as usize];
++            let mut expected = vec![0; (width * height * 4) as usize];
++            for y in 0..height { for x in 0..width {
++                let luma = (32 + (x * 3 + y * 5) % 160) as u8;
++                let offset = ((y / 2 * width + x / 2) * 4 + (x & 1) + 2 * (y & 1)) as usize;
++                packed[offset] = luma;
++                let yy = luma as f32 / 255.0;
++                let cb = 112.0 / 255.0 - 0.5;
++                let cr = 154.0 / 255.0 - 0.5;
++                let rgb = [yy + 1.5748 * cr, yy - 0.1873 * cb - 0.4681 * cr, yy + 1.8556 * cb];
++                let base = ((y * width + x) * 4) as usize;
++                for c in 0..3 { expected[base + c] = (rgb[c].clamp(0.0, 1.0) * 255.0).round() as u8; }
++                expected[base + 3] = 255;
++            }}
++            for y in 0..height / 2 { for x in width / 2..width {
++                let offset = ((y * width + x) * 4) as usize;
++                packed[offset..offset + 4].copy_from_slice(&[112, 154, 0, 0]);
++            }}
++            let source = gl.create_texture().unwrap();
++            gl.bind_texture(gl::TEXTURE_2D, Some(source));
++            gl.tex_storage_2d(gl::TEXTURE_2D, 1, gl::RGBA8, width as i32, (height / 2) as i32);
++            gl.tex_sub_image_2d(gl::TEXTURE_2D, 0, 0, 0, width as i32, (height / 2) as i32,
++                gl::RGBA, gl::UNSIGNED_BYTE, gl::PixelUnpackData::Slice(Some(&packed)));
++            gl.finish();
++            let attrs = [0x30D2, 1, super::super::egl::NONE];
++            let image = (context.create_image)(context.egl_display.as_ptr(), context.egl_context.as_ptr(),
++                0x30B1, source.0.get() as usize as *mut c_void, attrs.as_ptr());
++            assert!(!image.is_null());
++            let decoded = read_decoded(&context, std::ptr::null_mut(), eye, Some((image, true))).unwrap();
++            for (i, (got, want)) in decoded.pixels.iter().zip(&expected).enumerate() {
++                assert!((*got as i32 - *want as i32).abs() <= 1, "packed RGB byte {i}: {got} vs {want}");
++            }
++            let mut targets = Vec::new();
++            for _ in 0..2 {
++                let tex = gl.create_texture().unwrap();
++                gl.bind_texture(gl::TEXTURE_2D, Some(tex));
++                gl.tex_storage_2d(gl::TEXTURE_2D, 1, gl::RGBA8, eye.x as i32, eye.y as i32);
++                targets.push(tex);
++            }
++            let config = super::super::direct_eye::DirectEyeConfig {
++                textures: [vec![targets[0].0.get()], vec![targets[1].0.get()]], resolution: eye,
++                srgb_correction: false, srgb_target: false, fix_limited_range: false, encoding_gamma: 1.0,
++            };
++            let direct = super::super::direct_eye::DirectEyeRenderer::new(Rc::clone(&context), &config,
++                false, false, 0, false, false, None, eye).unwrap();
++            let staging = super::super::staging::StagingRenderer::new(Rc::clone(&context),
++                [targets[0], targets[1]], eye, false, false);
++            staging.set_isolation(true);
++            for use_direct in [false, true] {
++                if use_direct { direct.render_present_egl_image_for_test(image); }
++                else { staging.render_present_egl_image_for_test(image); }
++                let eyes = read_presented(&context, eye, [targets[0].0.get(), targets[1].0.get()]).unwrap();
++                for (e, output) in eyes.iter().enumerate() {
++                    for y in 0..eye.y as usize { for x in 0..eye.x as usize {
++                        let a = (y * eye.x as usize + x) * 4;
++                        let b = (y * width as usize + e * eye.x as usize + x) * 4;
++                        for c in 0..4 {
++                            assert!((output.pixels[a + c] as i32 - decoded.pixels[b + c] as i32).abs() <= 1,
++                                "direct={use_direct} eye={e} x={x} y={y} channel={c}");
++                        }
++                    }}
++                }
++            }
++            drop(staging); drop(direct);
++            (context.destroy_image)(context.egl_display.as_ptr(), image);
++            gl.delete_texture(source);
++            for target in targets { gl.delete_texture(target); }
++        }
++    }
++
+ }
+diff --git a/alvr/graphics/src/lib.rs b/alvr/graphics/src/lib.rs
+index bcd49bdbe1bc79476fa05744935cfbd5e1d9129a..b5c5484d03e2a1281020b77cdb12d815fbdc0853 100644
+--- a/alvr/graphics/src/lib.rs
++++ b/alvr/graphics/src/lib.rs
+@@ -1,3 +1,4 @@
++mod present_ycbcr;
+ mod direct_eye;
+ mod frame_dump;
+ mod frame_dump_config;
+diff --git a/alvr/graphics/src/present_ycbcr.rs b/alvr/graphics/src/present_ycbcr.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..7cdc76a222bb831d53913e526a45ce38797a56eb
+--- /dev/null
++++ b/alvr/graphics/src/present_ycbcr.rs
+@@ -0,0 +1,38 @@
++//! Mode-5 layout recognition and shader binding (JMS1717 adeb86b, MIT).
++use alvr_common::glam::UVec2;
++use glow::{self as gl, HasContext};
++use std::ffi::c_void;
++
++#[cfg(target_os = "android")]
++#[repr(C)]
++#[derive(Default)]
++struct HardwareBufferDesc {
++    width: u32, height: u32, layers: u32, format: u32, usage: u64,
++    stride: u32, rfu0: u32, rfu1: u64,
++}
++
++pub(super) fn layout(buffer: *const c_void, eye: UVec2) -> bool {
++    #[cfg(target_os = "android")]
++    {
++        #[link(name = "android")]
++        extern "C" { fn AHardwareBuffer_describe(buffer: *const c_void, desc: *mut HardwareBufferDesc); }
++        if buffer.is_null() || eye.x == 0 || eye.y == 0 { return false; }
++        let mut desc = HardwareBufferDesc::default();
++        unsafe { AHardwareBuffer_describe(buffer, &mut desc); }
++        // Explicit full stereo geometry, never the render/swapchain size. Normal
++        // RGBA output, including MediaCodec, has full height and fails this check.
++        desc.layers == 1 && desc.format == 1 && desc.width == 2 * eye.x && desc.height * 2 == eye.y
++    }
++    #[cfg(not(target_os = "android"))]
++    { let _ = (buffer, eye); false }
++}
++
++pub(super) fn source(source: &str) -> String {
++    source.replace("// Q3PW_PRESENT_FUNCTION", include_str!("../resources/present_ycbcr.glsl"))
++}
++
++pub(super) unsafe fn bind(gl: &gl::Context, program: gl::Program, present: bool, eye: UVec2) {
++    gl.uniform_1_i32(gl.get_uniform_location(program, "q3pw_present_ycbcr").as_ref(), present as i32);
++    gl.uniform_2_f32(gl.get_uniform_location(program, "q3pw_frame_size").as_ref(),
++        (eye.x * 2) as f32, eye.y as f32);
++}
+diff --git a/alvr/graphics/src/staging.rs b/alvr/graphics/src/staging.rs
+index 0e8eca139857ba340782300824f20555be7f25ee..0781662eba411beb7a3164f01650ea2ea1de07b7 100644
+--- a/alvr/graphics/src/staging.rs
++++ b/alvr/graphics/src/staging.rs
+@@ -78,7 +78,7 @@ impl StagingRenderer {
+         if fix_limited_range {
+             frag_lines.insert(1, "#line 0 1\n#define FIX_LIMITED_RANGE");
+         }
+-        let frag_str = frag_lines.join("\n");
++        let frag_str = super::present_ycbcr::source(&frag_lines.join("\n"));
+ 
+         let program = create_program(
+             gl,
+@@ -131,13 +131,14 @@ impl StagingRenderer {
+             hardware_buffer,
+             self.surface_texture,
+             self.preserve_image.get(),
+-            || unsafe { self.draw_copy(wait_for_copy); },
++            || unsafe { self.draw_copy(wait_for_copy, super::present_ycbcr::layout(hardware_buffer, self.viewport_size.as_uvec2())); },
+         );
+     }
+ 
+-    unsafe fn draw_copy(&self, wait_for_copy: bool) {
++    unsafe fn draw_copy(&self, wait_for_copy: bool, present: bool) {
+         let gl = &self.context.gl_context;
+                 ck!(gl.use_program(Some(self.program)));
++                super::present_ycbcr::bind(gl, self.program, present, self.viewport_size.as_uvec2());
+ 
+                 ck!(gl.viewport(0, 0, self.viewport_size.x, self.viewport_size.y));
+                 ck!(gl.disable(gl::SCISSOR_TEST));
+@@ -163,7 +164,7 @@ impl StagingRenderer {
+                     ck!(gl.active_texture(gl::TEXTURE0));
+                     ck!(gl.bind_texture(GL_TEXTURE_EXTERNAL_OES, Some(self.surface_texture)));
+                     ck!(gl.bind_sampler(0, None));
+-                    if self.isolated_vertex_array.get().is_some() {
++                    if self.isolated_vertex_array.get().is_some() || present {
+                         ck!(gl.tex_parameter_i32(GL_TEXTURE_EXTERNAL_OES, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32));
+                         ck!(gl.tex_parameter_i32(GL_TEXTURE_EXTERNAL_OES, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32));
+                         ck!(gl.tex_parameter_i32(GL_TEXTURE_EXTERNAL_OES, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32));
+@@ -211,9 +212,20 @@ impl StagingRenderer {
+         gl.active_texture(gl::TEXTURE0);
+         gl.bind_texture(GL_TEXTURE_EXTERNAL_OES, Some(self.surface_texture));
+         (self.context.image_target_texture_2d)(GL_TEXTURE_EXTERNAL_OES, image);
+-        self.draw_copy(true);
++        self.draw_copy(true, false);
+         crate::check_error(gl, "software staging EGLImage draw");
+     }
++
++    #[cfg(all(test, target_os = "linux"))]
++    pub(super) unsafe fn render_present_egl_image_for_test(&self, image: super::egl::EGLImage) {
++        self.context.make_current();
++        let gl = &self.context.gl_context;
++        gl.active_texture(gl::TEXTURE0);
++        gl.bind_texture(GL_TEXTURE_EXTERNAL_OES, Some(self.surface_texture));
++        (self.context.image_target_texture_2d)(GL_TEXTURE_EXTERNAL_OES, image);
++        self.draw_copy(true, true);
++    }
++
+ }
+ 
+ impl Drop for StagingRenderer {
+diff --git a/alvr/graphics/src/stream.rs b/alvr/graphics/src/stream.rs
+index 5015670f73d75b16702c89febb3c89ae278b769b..e710d4e3c9d59598d2d7467b9b43de612be11c73 100644
+--- a/alvr/graphics/src/stream.rs
++++ b/alvr/graphics/src/stream.rs
+@@ -385,7 +385,7 @@ impl StreamRenderer {
+             if let Some(config) = &self.direct_eye_config {
+                 // Re-create only on stream/decoder initialization; errors fall back.
+                 match DirectEyeRenderer::new(Rc::clone(&self.context), config, flip_y,
+-                    asynchronous, copy_wait_us, raw_srgb_requested, image_cache_requested, ffe.as_ref()) {
++                    asynchronous, copy_wait_us, raw_srgb_requested, image_cache_requested, ffe.as_ref(), self.presentation_geometry.0) {
+                     Ok(renderer) => {
+                         self.direct_eye_renderer = Some(renderer);
+                         self.direct_eye_enabled = true;
+diff --git a/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp b/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp
+index d1edf7cba81e684fef5d02671c90fb24d3244376..7cb04cafcd54ba18f03b9fa84e637b3ad3404a88 100644
+--- a/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp
++++ b/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp
+@@ -140,7 +140,12 @@ void VideoEncoderPyroWave::Initialize() {
+     Warn("[PYROWAVE] native encoder RDO density applied: %.9g px/deg, Nyquist %.9g cycles/deg, %s\n",
+          rdoDensity.pixels_per_degree,
+          rdoDensity.nyquist_cycles_per_degree,
+-         rdoDensity.legacy_equivalent ? "legacy 96 DPI @ 1m" : encoderInfo.rdo_pixels_per_degree > 0.0f ? "ALVR session RDO setting" : "PYROWAVE_RDO_PX_PER_DEG");
++         (std::getenv("PYROWAVE_HEADSET_CSF") && std::strcmp(std::getenv("PYROWAVE_HEADSET_CSF"), "1") == 0) ? "headset CSF height/99" : rdoDensity.legacy_equivalent ? "legacy 96 DPI @ 1m" : encoderInfo.rdo_pixels_per_degree > 0.0f ? "ALVR session RDO setting" : "PYROWAVE_RDO_PX_PER_DEG");
++    const char* headsetCsfRequest = std::getenv("PYROWAVE_HEADSET_CSF");
++    const bool headsetCsf = headsetCsfRequest && std::strcmp(headsetCsfRequest, "1") == 0;
++    Warn("[Q3PW_HEADSET_CSF] requested=%d active=%d nyquist=%.9g lf_boost=%g chroma_csf=%g discard_weight=%d source=%s\n",
++         headsetCsf, headsetCsf, rdoDensity.nyquist_cycles_per_degree, headsetCsf ? 6.0 : 1.0,
++         headsetCsf ? 1.6 : 0.6, headsetCsf, headsetCsf ? "height/99_overrides_rdo" : "existing_rdo");
+     Info("[PYROWAVE] wavelet %s\n", WaveletName());
+ 
+     // What H.264 carries as SPS/PPS, PyroWave carries here: the client's DecoderConfig payload.

@@ -6,6 +6,10 @@
 // exported between us and the codec), decodes into three plain R8 planes, and converts them into
 // one of a ring of RGBA8 AHardwareBuffer-backed images. Every call is synchronous: when
 // pyroclient_decode returns, the buffer is finished on the GPU and safe to import.
+// Opt-in haar32/cdf53v2 mode 5 instead returns width x height/2 RGBA8 storage:
+// luma 2x2 quads in the left half, Cb/Cr in RG in the right half. The matching
+// ALVR presentation shader and frame-dump reader convert it to RGB. Other
+// consumers must recognize this layout before sampling; see DECODER-V2-PORT.md.
 //
 // Everything here was proven first in tools/pyrowave_android (55 dB against the PC reference);
 // the three silent failure modes recorded there are handled: our own command buffer and submit,

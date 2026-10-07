@@ -249,6 +249,14 @@ class BenchTests(unittest.TestCase):
                                ('3', True), ('4', False), ('01', False), ('2x', False)):
             state['property:debug.q3pw.fast53']['value'] = value
             self.assertEqual(experiment_effective(state)['enabled']['fast53'], enabled)
+        for family in ('cdf53v2', 'haar32'):
+            for value, enabled in (('', False), ('0', False), ('1', True), ('4', True),
+                                   ('5', True), ('6', False), ('01', False), ('5x', False)):
+                state['property:debug.q3pw.' + family]['value'] = value
+                self.assertEqual(experiment_effective(state)['enabled'][family], enabled)
+        for value, expected in (('', 4), ('2', 2), ('4', 4), ('02', 4), ('3', 4)):
+            state['property:debug.q3pw.packed_levels']['value'] = value
+            self.assertEqual(experiment_effective(state)['requested_packed_levels'], expected)
 
     def test_effective_wavelet_prefers_haar_over_cdf53(self):
         from tools.quest3.bench import effective_pyrowave_config
