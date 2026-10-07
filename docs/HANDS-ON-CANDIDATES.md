@@ -34,6 +34,34 @@ so they aren't retried by accident.
   partial-decode + critical-packet UDP transport if UDP loss is the problem; (3) fast 5/3 decode;
   (4) owner's worn check of the winners.
 
+## Owner hands-on, 2026-10-07 ~17:45–18:00 (worn, candidate 7f85e87, Metro Awakening fence)
+| Cell | Owner (verbatim) | Measured |
+|---|---|---|
+| (SteamVR menu, `hq-haar1000-fabrm-metro`) | "What I am noticing in the steamVR menu though: Lines and other details still flickering. It also feels like we are at a lower res than godlike" | – |
+| hq-haar1000-fabrm-metro (Metro fence) | "im there, for me compression is clearly visible" | capture stopped: battery 50 °C |
+
+- **Metro was not reaching the stream**: the system OpenXR runtime is Virtual Desktop's
+  (`HKLM\SOFTWARE\Khronos\OpenXR\1\ActiveRuntime` = `virtualdesktop-openxr.json`), so Metro (UE5/OpenXR)
+  started on VD and exited (this morning's Metro attempt most likely failed the same way). Fixed without
+  touching the registry: launch `MetroAwakening\Impact.exe` with `XR_RUNTIME_JSON=...\SteamVR\steamxr_win64.json`
+  (per process) plus `SteamAppId/SteamGameId=2669410`, detached; SteamVR then loaded Metro's OpenXR
+  bindings (`steam.app.2669410`). VD stays the system runtime. (Scratchpad helper `launch_metro_steamvr.py`;
+  recreate from this description.)
+- **Resolution check (owner's question)**: the crop is real and correct. Server `[FOV-CROP] active=true
+  tangents=h0.8540/v0.8500 stream=3072x3232->2624x2752`; the client scales the same tangents into the
+  projection layer it submits (stable-baseline-alvr.patch, `stream_input_loop`), so the image is shown at
+  its true angular size, not stretched. Same geometry as VD's Godlike (≈2624x2776 over the same 85 % tangent
+  span, docs/ARTIFACT-QUALITY-PLAN.md §1).
+- **Flicker on thin lines in menus**: most likely intra-only requantization (every frame coded anew, so thin
+  high-contrast lines vary frame to frame; H.264 reuses static content). Levers: higher rate, the compositor
+  super-sampling layer flag (`debug.q3pw.layer_filter=supersample_hq`), a more efficient wavelet.
+- **Health stop at battery 50 °C** within ~10 min of worn Metro play: the headset was on the charger while
+  worn (charging + high-rate decode). Restore exit 0; SteamVR/Metro closed; Guardian unaffected. Next time:
+  unplug during worn tests; the sweep script now waits for ≤44 °C when a cell would start at ≥47 °C.
+- **Conclusion**: at Haar 1000 the owner sees clearly visible compression in Metro (natural textures), even
+  though the chart is near-transparent. This confirms the offline finding that Haar is ~2x less efficient
+  than CDF on natural content: the remaining lever is CDF 5/3 at 90 Hz (fast53 v2/v3 building now).
+
 ## Pre-hands-on tuning (2026-10-07 17:13–17:35, unworn, candidate pair 7f85e87, sweep `abrtune2`)
 Fast ABR parameters are runtime settings, so they were tuned without a new build. Cells `-fabr[gsm]`:
 default ×0.6/+0.05/1.0-frame threshold; g ×0.8/+0.02/1.0; s ×0.85/+0.02/1.5; m ×0.7/+0.03/0.75.
