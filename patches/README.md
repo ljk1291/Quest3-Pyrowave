@@ -1,8 +1,19 @@
 # Patches
 
+## `fast-abr.patch`: opt-in per-frame TCP PyroWave budget
+
+Additive overlay last, after `client-output-queue.patch`, SHA-256 pinned in
+`sources.lock.json`. `video.pyrowave.fast_abr` defaults disabled. When enabled
+for effective PyroWave/TCP, atomic queue/send feedback controls each frame's byte
+budget below ALVR's bitrate ceiling, enforces a verified bounded stream send buffer,
+and marks independent frames for immediate recovery after channel overflow.
+Stock codecs and disabled behavior are preserved. See [FAST-ABR](../docs/FAST-ABR.md)
+for settings, marker/counter definitions, CI coverage, planner cells and risks.
+Upstream credits remain unchanged.
+
 ## `client-output-queue.patch`: opt-in decoded output FIFO
 
-Additive overlay last, after `frame-loss-diagnostics.patch`, SHA-256 pinned in
+Additive overlay after `frame-loss-diagnostics.patch`, before `fast-abr.patch`, SHA-256 pinned in
 `sources.lock.json`. TCP PyroWave `debug.q3pw.output_queue=2` or `3` enables FIFO
 selection, counted drop-oldest overflow and bounded source-age catch-up. Unset/1
 preserves the existing slot. The native ring grows only with effective depth;

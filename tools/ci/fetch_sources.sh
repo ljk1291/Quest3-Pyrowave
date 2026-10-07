@@ -94,6 +94,12 @@ actual_output_queue_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.s
 [ "$actual_output_queue_patch" = "$expected_output_queue_patch" ] || { echo "Client output queue patch hash differs" >&2; exit 1; }
 apply_patch "$dest/ALVR-20.13.0" "$repo/patches/client-output-queue.patch"
 
+# Default-off per-frame TCP PyroWave budget control, after the complete ALVR stack.
+expected_fast_abr_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value fast_abr_patch_sha256)
+actual_fast_abr_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/fast-abr.patch")
+[ "$actual_fast_abr_patch" = "$expected_fast_abr_patch" ] || { echo "Fast ABR patch hash differs" >&2; exit 1; }
+apply_patch "$dest/ALVR-20.13.0" "$repo/patches/fast-abr.patch"
+
 checkout "$PYROWAVE_URL" "$dest/pyrowave" "$PYROWAVE_BASE"
 # pyrowave's checkout_granite.sh pins a newer Granite (9d44761), which spiked encoder p99 to 14 ms;
 # the measurements used 842d9d5, cloned here with all of its submodules.

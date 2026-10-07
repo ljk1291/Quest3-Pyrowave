@@ -75,6 +75,10 @@
     "client_output_queue": {
       "path": "patches/client-output-queue.patch",
       "sha256": "7117623a8d8e1eb20dd1c89947831d57b69b1f2b4c56c319466674af22a7ef8f"
+    },
+    "fast_abr": {
+      "path": "patches/fast-abr.patch",
+      "sha256": "2cc81b2e50fbf79e585840599bf4a717e949b5914bb5331fdbf701308f71b3ad"
     }
   },
   "rust": "1.97.1",

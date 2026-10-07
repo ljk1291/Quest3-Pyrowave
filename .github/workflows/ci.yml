@@ -52,6 +52,10 @@ jobs:
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
           rustup run "$RUST_TOOLCHAIN" rustc --edition=2021 --test "$XRWIRED_INPUTS/research/ALVR-20.13.0/alvr/client_openxr/src/layer_filter.rs" -o /tmp/layer-filter-policy
           /tmp/layer-filter-policy
+      - name: Per-frame PyroWave TCP budget controller (CPU only)
+        run: |
+          rustup run "$RUST_TOOLCHAIN" rustc --edition=2021 --test "$XRWIRED_INPUTS/research/ALVR-20.13.0/alvr/server_core/src/fast_abr.rs" -o /tmp/fast-abr
+          /tmp/fast-abr
       - name: Frame dump path and sampling configuration (CPU only)
         run: |
           g++ -std=c++17 -Wall -Wextra -Werror tools/frame_dump_config_test.cpp -I "$XRWIRED_INPUTS/research/ALVR-20.13.0/alvr/server_openvr/cpp/platform/win32" -o /tmp/frame-dump-config

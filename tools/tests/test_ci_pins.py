@@ -26,6 +26,22 @@ def test_output_queue_overlay_hash_and_order():
     assert result.stdout.strip() == pin['sha256']
 
 
+def test_fast_abr_overlay_hash_order_and_cpu_gate():
+    pin = LOCK['patches']['fast_abr']
+    assert pin['path'] == 'patches/fast-abr.patch'
+    assert hashlib.sha256((REPO / pin['path']).read_bytes()).hexdigest() == pin['sha256']
+    script = (REPO / 'tools/ci/fetch_sources.sh').read_text()
+    assert script.index('apply_patch "$dest/ALVR-20.13.0" "$repo/patches/client-output-queue.patch"') < script.index(
+        '--value fast_abr_patch_sha256') < script.index(
+        'apply_patch "$dest/ALVR-20.13.0" "$repo/patches/fast-abr.patch"')
+    result = subprocess.run([sys.executable, 'tools/ci/source_lock.py', '--value',
+                             'fast_abr_patch_sha256'],
+                            cwd=REPO, capture_output=True, text=True, check=True)
+    assert result.stdout.strip() == pin['sha256']
+    cpu_job = (REPO / '.github/workflows/ci.yml').read_text().split('  client:')[0]
+    assert 'rustc --edition=2021 --test "$XRWIRED_INPUTS/research/ALVR-20.13.0/alvr/server_core/src/fast_abr.rs"' in cpu_job
+
+
 def test_frame_dump_overlay_hash_and_order():
     pin = LOCK['patches']['frame_dump']
     assert pin['path'] == 'patches/frame-dump.patch'
