@@ -5,6 +5,35 @@ Configurations that passed automatic screening and are worth the owner's in-head
 evidence that put it here, and what to look at. Rejected options are listed at the end
 so they aren't retried by accident.
 
+## Headset RDO weighting, settings only (2026-10-07 23:32–23:50, unworn, dump `csf2`, a928435)
+New cell suffix `-csf` (`ws/hq_profiles.py`): `video.pyrowave.rdo_pixels_per_degree` = **27.8** (= upstream's headset
+CSF Nyquist 0.5·2752/99 = 13.9 cycles/deg at our crop) instead of 65.28 (the stock 96 dpi monitor at 1 m). This part
+of upstream's encoder change needs no build; the LF boost, chroma 1.6 and discard weight are in the `codex/decoder-v2`
+port (`PYROWAVE_HEADSET_CSF=1`). FOV crop, Haar, TCP, swaying chart, 8–9 exact lossless pairs per cell.
+Sheets: results/local/session-25/compare-csf/.
+
+| Cell | PSNR-Y full | Edge PSNR | HF error | Temporal static p99 | Blockiness 8/16/32 | Region mean \|err\| gratings / lines-text / gratings-right |
+|---|---|---|---|---|---|---|
+| Haar 1000 monitor | 58.4 | 49.7 | 0.172 | 2.94 | .036 / .048 / .058 | 0.42 / 0.43 / 0.39 |
+| **Haar 1000 headset** | 59.8 | 54.7 | 0.075 | **1.21** | .017 / .023 / .020 | 0.32 / 0.33 / 0.29 |
+| Haar 1250 monitor | 59.9 | 54.4 | 0.086 | 1.51 | .011 / .014 / .019 | 0.42 / 0.38 / 0.37 |
+| **Haar 1250 headset** | **62.7** | **56.4** | **0.046** | **1.18** | **.008 / .007 / .010** | **0.27 / 0.28 / 0.27** |
+
+- **Headset weighting is better on every metric at both rates.** At 1000 Mbps it halves blockiness and cuts the
+  static-area temporal p99 from 2.94 to 1.21 codes. That is the frame-to-frame shimmer proxy, matching the owner's
+  "flashing". Haar 1000 headset ≈ Haar 1250 monitor; Haar 1250 headset is the cleanest PyroWave image so far.
+- Planner's look (lines-text x16): with the monitor weighting, the thin horizontal lines and the grating light up in
+  the difference (brightness errors on lines). With the headset weighting they nearly vanish. Haar 1000 headset still
+  shows faint square patches around "+" and the text.
+- **Astra** (task-muyn6jtn-l3opjo, gpt-6-astra, read-only, native scale; 0–3 blocks / strokes / stripes / ringing):
+  1000 M 0/1/1/0, **1000 H 1/1/0/0**, 1250 M 0/1/1/0, **1250 H 0/0–1/0/0** on all three sheets. Ranking on every sheet:
+  **1250 H > 1000 H > 1250 M ≥ 1000 M**; "1000 H ≥ 1250 M overall: yes". Trade-off: the headset weighting slightly
+  raises faint square-patch structure at 1000 (borderline 0/1). It improves strokes and removes stripe errors.
+  Upstream's LF boost (levels ≥3 x6, in the `codex/decoder-v2` port) targets exactly those blocks: test
+  `PYROWAVE_HEADSET_CSF=1` next.
+- **Candidate C8 for the owner's Metro look: `hq-haar1250-fabrc-csf-metro`** (or `hq-haar1000-fabrc-csf-metro`), on the
+  installed a928435. Look at fine texture shimmer and thin lines in menus vs C6 (`hq-haar1250-fabrc-metro`).
+
 ## Upstream JMS1717 `.62` as-is, live over Wi-Fi at 90 Hz (2026-10-07 19:52–20:00, unworn, sweep `upstream62`)
 Their CI pair b8e905c (APK `20.13.0-quest3.pyro.62`, package io.github.jms1717.quest3pyrowave, installed beside ours;
 RECORD_AUDIO granted as for ours so no dialog blocks an unworn launch), their server staged in
