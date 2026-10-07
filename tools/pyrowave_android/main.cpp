@@ -23,12 +23,19 @@
 #include "ycbcr_to_rgba_spv.h"
 #include "haar_fused_spv.h"
 #include "idwt97_fused_spv.h"
+#include "../pyroclient/fast53.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
 #include <chrono>
+#include <algorithm>
+#include <cmath>
+#include <cerrno>
+#include <string>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #define VK_CHECK(x)                                                                                \
     do {                                                                                           \
@@ -93,9 +100,127 @@ struct Plane {
     int width = 0, height = 0;
 };
 
+int comparison_iterations(const char *text) {
+    char *end = nullptr;
+    errno = 0;
+    const long value = strtol(text, &end, 10);
+    return !errno && end != text && !*end && value >= 1 && value <= 1000 ? int(value) : 0;
+}
+
+// Run each arm in a fresh process: identical library/device initialization and
+// bounded resource lifetime, using the existing GPU timestamps and R8 readback.
+int compare_fast53(int argc, char **argv) {
+    if (argc != 5 && argc != 6) {
+        fprintf(stderr, "usage: %s --compare-fast53 <cdf53.wave> <haar.wave> <output-prefix> [iterations=30]\n", argv[0]);
+        return 1;
+    }
+    const char *iterations = argc == 6 ? argv[5] : "30";
+    if (!comparison_iterations(iterations)) {
+        fprintf(stderr, "iterations must be 1..1000\n");
+        return 1;
+    }
+    WaveFile cdf53, haar;
+    if (!cdf53.load(argv[2]) || !haar.load(argv[3])) return 1;
+    if (cdf53.width != 5248 || cdf53.height != 2752 || cdf53.chroma != 0 || cdf53.format != 0 ||
+        haar.width != cdf53.width || haar.height != cdf53.height || haar.chroma != cdf53.chroma ||
+        haar.format != cdf53.format || haar.full_range != cdf53.full_range) {
+        fprintf(stderr, "comparison requires matching stereo 5248x2752 8-bit C420 streams (2624x2752 per eye)\n");
+        return 1;
+    }
+    const char *labels[] = {"apron53", "fast53", "haar"};
+    std::string outputs[3];
+    double mean_ms[3] = {};
+    for (int arm = 0; arm < 3; arm++) {
+        outputs[arm] = std::string(argv[4]) + "." + labels[arm] + ".y4m";
+        printf("[Q3PW_FAST53_CHECK] arm=%s geometry=5248x2752 chroma=420 first_frame=1 warmup=5 samples=%s\n",
+               labels[arm], iterations);
+        fflush(nullptr);
+        pid_t child = fork();
+        if (child < 0) { perror("fork"); return 1; }
+        if (child == 0) {
+            execlp(argv[0], argv[0], arm == 2 ? argv[3] : argv[2], outputs[arm].c_str(),
+                   "--fast53-worker", arm == 2 ? "haar" : "53", arm == 1 ? "1" : "0", iterations,
+                   static_cast<char *>(nullptr));
+            perror("exec pyrowave_android");
+            _exit(1);
+        }
+        int status = 0;
+        pid_t waited;
+        do { waited = waitpid(child, &status, 0); } while (waited < 0 && errno == EINTR);
+        if (waited < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+            fprintf(stderr, "comparison arm %s failed\n", labels[arm]);
+            return 1;
+        }
+        const std::string timing_path = outputs[arm] + ".timing";
+        FILE *timing = fopen(timing_path.c_str(), "r");
+        if (!timing) { perror("timing readback"); return 1; }
+        const bool valid = fscanf(timing, "%lf", &mean_ms[arm]) == 1 &&
+                           std::isfinite(mean_ms[arm]) && mean_ms[arm] > 0;
+        fclose(timing);
+        if (!valid) { fprintf(stderr, "invalid GPU timing\n"); return 1; }
+    }
+
+    FILE *reference = fopen(outputs[0].c_str(), "rb");
+    FILE *candidate = fopen(outputs[1].c_str(), "rb");
+    if (!reference || !candidate) {
+        if (reference) fclose(reference);
+        if (candidate) fclose(candidate);
+        fprintf(stderr, "cannot open comparison readbacks\n");
+        return 1;
+    }
+    bool valid = true, parity = true;
+    char ref_header[512], fast_header[512];
+    for (int line = 0; line < 2; line++) {
+        if (!fgets(ref_header, sizeof(ref_header), reference) ||
+            !fgets(fast_header, sizeof(fast_header), candidate) || strcmp(ref_header, fast_header)) valid = false;
+    }
+    const char *planes[] = {"Y", "Cb", "Cr"};
+    for (int plane = 0; plane < 3 && valid; plane++) {
+        const size_t count = size_t(cdf53.width) * cdf53.height / (plane ? 4 : 1);
+        std::vector<uint8_t> ref(count), fast(count);
+        valid = fread(ref.data(), 1, count, reference) == count &&
+                fread(fast.data(), 1, count, candidate) == count;
+        if (!valid) break;
+        unsigned maximum = 0;
+        uint64_t sum = 0;
+        for (size_t i = 0; i < count; i++) {
+            const unsigned difference = unsigned(std::abs(int(ref[i]) - int(fast[i])));
+            maximum = std::max(maximum, difference);
+            sum += difference;
+        }
+        parity = parity && maximum <= 1;
+        printf("[Q3PW_FAST53_DIFF] plane=%s max=%u mean=%.9f code_values samples=%zu gate=%s\n",
+               planes[plane], maximum, double(sum) / double(count), count, maximum <= 1 ? "pass" : "fail");
+    }
+    valid = valid && fgetc(reference) == EOF && fgetc(candidate) == EOF &&
+            !ferror(reference) && !ferror(candidate);
+    fclose(reference);
+    fclose(candidate);
+    const double ratio = mean_ms[1] / mean_ms[2];
+    printf("[Q3PW_FAST53_TIMING] apron53_ms=%.6f fast53_ms=%.6f haar_ms=%.6f fast53_over_haar=%.6f target_1_3=%s scope=standalone_decode\n",
+           mean_ms[0], mean_ms[1], mean_ms[2], ratio, ratio <= 1.3 ? "pass" : "fail");
+    printf("[Q3PW_FAST53_CHECK] parity=%s timing=%s live_vr=unverified\n",
+           valid && parity ? "pass" : "fail", ratio <= 1.3 ? "pass" : "fail");
+    return !valid || !parity ? 2 : ratio > 1.3 ? 3 : 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "--compare-fast53")) return compare_fast53(argc, argv);
+    const bool comparison_worker = argc == 7 && !strcmp(argv[3], "--fast53-worker");
+    if (comparison_worker) {
+        if ((strcmp(argv[4], "53") && strcmp(argv[4], "haar")) ||
+            (strcmp(argv[5], "0") && strcmp(argv[5], "1")) || !comparison_iterations(argv[6])) return 1;
+        // Process-local overrides only. Never set an Android system property.
+        if (setenv("PYROWAVE_WAVELET", argv[4], 1) || setenv("PYROWAVE_FAST53", argv[5], 1) ||
+            setenv("PYROWAVE_ITERATIONS", argv[6], 1) || setenv("PYROWAVE_FORCE_COMPUTE", "1", 1) ||
+            setenv("PYROWAVE_AHB", "0", 1) || setenv("PYROWAVE_FUSED_HAAR", "0", 1) ||
+            setenv("PYROWAVE_BATCH_DEQUANT", "0", 1) || unsetenv("PYROWAVE_FORCE_FRAGMENT") ||
+            unsetenv("PYROWAVE_FUSED") || unsetenv("PYROWAVE_FUSED97")) {
+            perror("comparison environment"); return 1;
+        }
+    }
     if (argc < 3) {
         fprintf(stderr, "usage: %s <in.wave> <out.y4m>\n", argv[0]);
         return 1;
@@ -403,10 +528,15 @@ int main(int argc, char **argv) {
            getenv("PYROWAVE_PRECISION") ? getenv("PYROWAVE_PRECISION") : "(default 1)");
     pyrowave_decoder decoder = nullptr;
     PW_CHECK(pyrowave_decoder_create(&decoderInfo, &decoder));
+    const auto fast53 = choose_fast53(getenv("PYROWAVE_FAST53"),
+                                     decoderInfo.wavelet == PYROWAVE_WAVELET_CDF53, fragmentPath);
+    if (fast53.active) PW_CHECK(pyrowave_decoder_set_fast53_enabled(decoder, 1));
+    printf("[Q3PW_FAST53] requested=%d active=%d reason=%s\n", fast53.requested, fast53.active, fast53.reason);
 
     PW_CHECK(pyrowave_decoder_push_packet(decoder, wave.frame.data(), wave.frame.size()));
     const bool ready = pyrowave_decoder_decode_is_ready(decoder, false);
     printf("decode_is_ready(complete) = %s\n", ready ? "yes" : "no");
+    if (comparison_worker && !ready) return 1;
 
     pyrowave_gpu_buffers buffers = {};
     for (int i = 0; i < 3; i++) {
@@ -416,6 +546,11 @@ int main(int argc, char **argv) {
         // are the decoder's own targets and it derives chroma size from the subsampling mode.
         v.width = (uint32_t)wave.width;
         v.height = (uint32_t)wave.height;
+        if (comparison_worker) {
+            // Match the live client's actual per-plane view extents.
+            v.width = (uint32_t)planes[i].width;
+            v.height = (uint32_t)planes[i].height;
+        }
         v.image_format = planeFormat;
         v.view_format = planeFormat;
         v.mip_level = 0;
@@ -756,6 +891,12 @@ int main(int argc, char **argv) {
     VkPhysicalDeviceProperties gpuProps;
     vkGetPhysicalDeviceProperties(gpu, &gpuProps);
     const double nsPerTick = gpuProps.limits.timestampPeriod;
+    if (comparison_worker && !families[graphicsFamily].timestampValidBits) {
+        fprintf(stderr, "GPU queue has no timestamp support\n"); return 1;
+    }
+    const uint32_t timestamp_bits = families[graphicsFamily].timestampValidBits;
+    const uint64_t timestamp_mask = comparison_worker && timestamp_bits < 64 ?
+                                    (uint64_t(1) << timestamp_bits) - 1 : UINT64_MAX;
 
     int iterations = 1;
     if (const char *n = getenv("PYROWAVE_ITERATIONS")) iterations = atoi(n);
@@ -765,7 +906,8 @@ int main(int argc, char **argv) {
     double bestConvertMs = 1e9, totalConvertMs = 0.0;
     double bestWallMs = 1e9, totalWallMs = 0.0;
     double stageTotalMs[8] = {};   // Experiment 4: per fused stage (stage 1 counted from the decode start, i.e. dequant + stage 1)   // Experiment 3: submit -> queue idle, the standalone stand-in for submit->fence
-    for (int iter = 0; iter < iterations; iter++) {
+    const int warmup = comparison_worker ? 5 : 0;
+    for (int iter = 0; iter < iterations + warmup; iter++) {
     if (iter > 0) {
         // Re-push: a decode consumes the queued frame.
         pyrowave_decoder_clear(decoder);
@@ -896,23 +1038,27 @@ int main(int argc, char **argv) {
     VK_CHECK(vkQueueSubmit(queue, 1, &decodeSubmit, VK_NULL_HANDLE));
     VK_CHECK(vkQueueWaitIdle(queue));
     double wallMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - wall0).count();
-    if (wallMs < bestWallMs) bestWallMs = wallMs;
-    totalWallMs += wallMs;
+    if (iter >= warmup) {
+        if (wallMs < bestWallMs) bestWallMs = wallMs;
+        totalWallMs += wallMs;
+    }
 
     uint64_t ticks[3 + 8] = {};
     const uint32_t nq = 3 + (uint32_t)std::min<size_t>(fusedStages.size(), 8);
     VK_CHECK(vkGetQueryPoolResults(device, queryPool, 0, nq, sizeof(ticks), ticks, sizeof(uint64_t),
                                    VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT));
-    for (size_t si = 0; si < fusedStages.size() && si < 8; si++) {
-        uint64_t prev = si == 0 ? ticks[0] : ticks[3 + si - 1];
-        stageTotalMs[si] += double(ticks[3 + si] - prev) * nsPerTick / 1e6;
+    if (iter >= warmup) {
+        for (size_t si = 0; si < fusedStages.size() && si < 8; si++) {
+            uint64_t prev = si == 0 ? ticks[0] : ticks[3 + si - 1];
+            stageTotalMs[si] += double(ticks[3 + si] - prev) * nsPerTick / 1e6;
+        }
+        const double ms = double((ticks[1] - ticks[0]) & timestamp_mask) * nsPerTick / 1e6;
+        const double convertMs = double((ticks[2] - ticks[1]) & timestamp_mask) * nsPerTick / 1e6;
+        totalMs += ms;
+        totalConvertMs += convertMs;
+        if (ms < bestMs) bestMs = ms;
+        if (convertMs < bestConvertMs) bestConvertMs = convertMs;
     }
-    const double ms = double(ticks[1] - ticks[0]) * nsPerTick / 1e6;
-    const double convertMs = double(ticks[2] - ticks[1]) * nsPerTick / 1e6;
-    totalMs += ms;
-    totalConvertMs += convertMs;
-    if (ms < bestMs) bestMs = ms;
-    if (convertMs < bestConvertMs) bestConvertMs = convertMs;
     VK_CHECK(vkResetCommandPool(device, decodePool, 0));
     }
 
@@ -950,6 +1096,7 @@ int main(int argc, char **argv) {
     if (!useAhb) {
         VkCommandPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
         poolInfo.queueFamilyIndex = graphicsFamily;
+        poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
         VK_CHECK(vkCreateCommandPool(device, &poolInfo, nullptr, &pool));
         VkCommandBufferAllocateInfo cmdInfo = {
             VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
@@ -1060,8 +1207,21 @@ int main(int argc, char **argv) {
         }
         AHardwareBuffer_unlock(p.ahb, nullptr);
     }
-    fclose(out);
+    const bool output_failed = ferror(out) != 0;
+    const int close_result = fclose(out);
+    if (comparison_worker && (output_failed || close_result)) {
+        fprintf(stderr, "readback write failed\n"); return 1;
+    }
     printf("wrote %s\n", argv[2]);
+
+    if (comparison_worker) {
+        const std::string path = std::string(argv[2]) + ".timing";
+        FILE *timing = fopen(path.c_str(), "w");
+        if (!timing) { perror("timing output"); return 1; }
+        const bool written = fprintf(timing, "%.9f\n", totalMs / iterations) > 0;
+        const int closed = fclose(timing);
+        if (!written || closed) return 1;
+    }
 
     pyrowave_decoder_destroy(decoder);
     pyrowave_device_destroy(pyro);

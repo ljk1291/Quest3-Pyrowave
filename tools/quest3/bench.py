@@ -25,7 +25,7 @@ EXPERIMENT_PROPERTIES = (
     'debug.q3pw.decode_handoff', 'debug.q3pw.direct_flip_y',
     'debug.q3pw.decode_priority',
     'debug.oculus.forceDisplayScaling', 'debug.oculus.refreshRate',
-    'debug.q3pw.haar_fused','debug.q3pw.dequant_batch','debug.q3pw.convert_compute',
+    'debug.q3pw.haar_fused','debug.q3pw.fast53','debug.q3pw.dequant_batch','debug.q3pw.convert_compute',
     'debug.q3pw.fragment_min_usage','debug.q3pw.optimal_ahb_usage','debug.q3pw.loop_probe',
     'debug.q3pw.runtime_display_time','debug.q3pw.pass_profile','debug.q3pw.hide_performance_overlay','debug.q3pw.staging_isolation','debug.q3pw.staging_init','debug.q3pw.staging_preserve',
     'debug.q3pw.layer_filter',
@@ -368,6 +368,7 @@ def experiment_effective(state):
         'display_scaling':(value('debug.oculus.forceDisplayScaling') == '1'
                            or value('debug.oculus.refreshRate') != ''),
         'haar_fused':value('debug.q3pw.haar_fused')=='1',
+        'fast53':value('debug.q3pw.fast53')=='1',
         'dequant_batch':value('debug.q3pw.dequant_batch')=='1',
         'convert_compute':value('debug.q3pw.convert_compute')=='1',
         'fragment_min_usage':value('debug.q3pw.fragment_min_usage')=='1',

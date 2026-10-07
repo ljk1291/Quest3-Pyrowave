@@ -122,4 +122,11 @@ actual_rdo_session_setting_patch=$($python_cmd -c 'import hashlib, sys; print(ha
 [ "$actual_rdo_session_setting_patch" = "$expected_rdo_session_setting_patch" ] || { echo "PyroWave RDO session-setting patch hash does not match sources.lock.json" >&2; exit 1; }
 apply_patch "$dest/pyrowave" "$repo/patches/pyrowave-rdo-session-setting.patch"
 
+# WO-6: default-off, pair-local CDF 5/3 inverse. Keep last in the PyroWave stack.
+expected_fast53_patch=$($python_cmd "$repo/tools/ci/source_lock.py" --value pyrowave_fast53_patch_sha256)
+actual_fast53_patch=$($python_cmd -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo/patches/pyrowave-fast53.patch")
+[ "$actual_fast53_patch" = "$expected_fast53_patch" ] || { echo "PyroWave fast53 patch hash differs" >&2; exit 1; }
+apply_patch "$dest/pyrowave" "$repo/patches/pyrowave-fast53.patch"
+
+
 echo "sources ready in $dest: ALVR ${ALVR_BASE%${ALVR_BASE#???????}}, pyrowave ${PYROWAVE_BASE%${PYROWAVE_BASE#???????}}, Granite ${GRANITE_COMMIT%${GRANITE_COMMIT#???????}}"
