@@ -5,6 +5,21 @@ Configurations that passed automatic screening and are worth the owner's in-head
 evidence that put it here, and what to look at. Rejected options are listed at the end
 so they aren't retried by accident.
 
+## Owner hands-on, 2026-10-07 ~08:10–08:25 (worn, SteamVR home + head motion; Metro launch cut short)
+| Cell | Fresh/s | Mbps | Network p50/p95/p99 (ms) | Latency p50 | Decode p50 | Owner (verbatim) |
+|---|---|---|---|---|---|---|
+| hq-haar750-metro | 83.0 | 757 | **321 / 416 / 430** | 387 ms | 6.7 | "Already in steamvr I notice that we cant hold 90fps in motion either" |
+| hq-haarfov500-metro | 87.9 | 505 | 10.8 / 46 / 89 | 69 ms | 4.8 | "Still the same issues in motion here, not as bad though" |
+- 750 Mbps saturates the link when the headset is worn and moving (unworn it was 12 ms): rejected for now.
+- At 500 the remaining motion stutter is network delay spikes (p95 46 ms), not decode or compression. Link at
+  the time: Wi-Fi 6, 5580 MHz, 1200 Mbps PHY, RSSI −16 dBm, so not a weak signal. Next: lower bitrate (400),
+  UDP vs TCP, buffering, measured with a moving scene and worn-like motion.
+- The SteamVR dashboard is disabled during harness cells, so the owner could not launch Metro from VR; launch it
+  from the PC (`steam -applaunch 2669410`, Metro Awakening) or allow the dashboard for *-metro cells.
+- Restore: all OK except VD `StreamerSettings.json`, rewritten at 08:10:22, 25 s after the snapshot, while the
+  headset woke and connected. The harness never writes VD files; the content can't be diffed (only the hash is
+  kept). Owner asked to check the VD settings.
+
 ## Compression comparison with motion (2026-10-07 00:20–01:45, owner request, all FOV-cropped)
 Pair f33c0cc (installed). Chart now sways (`stereo_scene.py --sway 64`: sub-pixel bilinear, ±64 px over 1.2 s
 horizontally, ±32 px over 1.7 s vertically, ~3 px/frame peak) so inter-frame codecs must code motion; harness env
