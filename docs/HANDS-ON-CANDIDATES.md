@@ -5,6 +5,107 @@ Configurations that passed automatic screening and are worth the owner's in-head
 evidence that put it here, and what to look at. Rejected options are listed at the end
 so they aren't retried by accident.
 
+## Upstream JMS1717 `.62` as-is, live over Wi-Fi at 90 Hz (2026-10-07 19:52–20:00, unworn, sweep `upstream62`)
+Their CI pair b8e905c (APK `20.13.0-quest3.pyro.62`, package io.github.jms1717.quest3pyrowave, installed beside ours;
+RECORD_AUDIO granted as for ours so no dialog blocks an unworn launch), their server staged in
+ws/server-upstream-jms1717-37643381349 and registered only during the run. Harness: `ws/upstream_profiles.py`
+(`up-<haar|cdf53>-<mbps>-e<size>`) via `hq-sweep.ps1 -Adapter`, with `Q3PW_PACKAGE` and `Q3PW_CLIENT=auto`
+(their client is 7380.client). Their defaults: every debug.q3pw.* property cleared, no FOV crop, render 3072x3232/eye,
+1000 Mbps, TCP, swaying chart, max-GPU-clock setting off. **Their client ran at GPU level 4 (VrApi `GPU=4/4`,
+545–640 MHz), not 7**: QGO's `debug.oculus.gpuLevel=7` does not reach it, so these are their "clock off" numbers.
+
+| Cell (encoded per eye) | Submitted/s | Distinct frames/s (proxy) | GPU decode p50 | Dtf p50 / p95 | Net p50/p99 | Latency p50 | GPU clock |
+|---|---|---|---|---|---|---|---|
+| Haar 2080x2208 | 89.9 | 88.8 | **2.47** | 3.68 / 4.77 | 9.9 / 15.7 | 53 ms | 545 |
+| **CDF 5/3 (V2) 2080x2208** | 89.7 | **89.2** | 4.98 | 5.74 / 6.13 | 9.3 / 13.8 | **39 ms** | 545 |
+| Haar 2624x2752 (full FOV, scaled) | 88.7 | 87.7 | 8.25 | 9.42 / 10.08 | 10.3 / 15.3 | 52 ms | 545 |
+| **CDF 5/3 (V2) 2624x2752** | 88.4 | **87.6** | 8.74 | 9.89 / 10.78 | 10.2 / 15.2 | 52 ms | 599 |
+| Haar 3072x3232 (full Godlike) | 89.1 | 88.2 | 6.66 | 9.66 / 11.39 | 10.4 / 15.4 | 60 ms | 640 |
+| CDF 5/3 3072x3232 | – | – | – | – | – | – | not run (owner started a game; sweep stopped, restored) |
+
+- Our bench can't read their fresh-output counter, so "distinct frames/s" counts distinct tracking target
+  timestamps over the 20 s window. It is a proxy, not verified unique frames. Submission and duplicate counts come
+  from the same report.
+- **Upstream holds ~88–89/s at 90 Hz for CDF 5/3 even at our Godlike pixel count (5248x2752) on a 545–599 MHz GPU**,
+  with network and latency equal to Haar. Our fast53 v1 reaches 72/s on the same pixel count (CDF 5/3 at 90 Hz is
+  solved upstream). The e2624 Haar decode (8.25 ms) is slower than e3072 (6.66) because of the clock (545 vs 640 MHz);
+  the clock varied cell to cell.
+- Caveat: no FOV crop upstream, so 2624x2752 spreads the full FOV over fewer pixels (less detail per degree than our
+  crop). 3072x3232 is VD Godlike's full size.
+- **Owner look in Metro: still to do** (their dashboard, these settings). Registration and SteamVR files were restored
+  (restore exit 0, VD and OpenXR unchanged).
+
+## Candidate a928435 installed and swept (2026-10-07 19:15–19:50, unworn, sweeps `a928` + `a928b`)
+APK `20.13.0-ljk1291.2+a928435a8636` installed with `adb install -r` (same cert; rollback 7f85e87 in
+out/q160-candidate-37589333446). FOV crop 2624x2752, Haar unless named, 90 Hz, queue depth 3, TCP, swaying chart,
+gpuLevel 7. Two samples where two values are given (round 1 / round 2):
+
+| Cell | Fresh/s | Mbps p50 | Net p50/p95/p99 ms | GPU decode | Dtf p50 | Skipped | ABR multiplier mean (min), shrunk/s |
+|---|---|---|---|---|---|---|---|
+| hq-haar2000-fabrc (v2 Capacity) | **88.5 / 87.9** | 1349 / 1247 | 13 / 26–28 / 36 | 6.6 | 8.7–8.8 | **8 / 17** | 0.70 / 0.63 (0.35), ~90 |
+| hq-haar2000-fabrm (v1 m) | 86.1 / 87.7 | 1423 / 1391 | 14–15 / 25–30 / 29–38 | 6.7–7.0 | 9.2–9.3 | 69 / 32 | 0.69 / 0.70 (0.35), ~86 |
+| hq-haar1250-fabrc | 89.8 | 1206 | 10 / 14 / 16 | 7.5 | 9.4 | 1 | 0.92 (0.67), 42 |
+| hq-haar1000-fabrc | 89.7 / 89.1 | 1007 | 10–11 / 13–22 / 17–32 | 7.3–7.4 | 9.2 | 0 / 7 | 1.00 / 0.99 |
+| hq-cdf53-1000-f53 (fast53 v1) | 72.2 | 1008 | 9.5 / 12 / 15 | 11.0 | 13.1 | 339 | – |
+| hq-cdf53-1000-f53v3 | 63.3 | 1009 | 9.5 / 13 / 15 | 12.7 | 15.0 | 511 | – |
+| hq-cdf53fov1000-f53v3 (+ Medium FFE) | 79.1 | 1008 | 9.5 / 13 / 17 | 9.1 | 12.0 | 202 | – |
+
+- **Fast ABR v2 (Capacity) vs v1 m at the over-capacity proxy**: slightly more fresh frames (88.2 vs 86.9 mean) and
+  far fewer client skips (8–17 vs 32–69), at similar network p99 (~36 ms). It still cuts to the 0.35 floor every
+  second at 2000. At 1250 it is more conservative than needed (budget mean 0.92, 1206 vs ~1260 Mbps for v1).
+  Verdict: v2 is a modest win under overload. It is the better default for the owner's worn head-motion check, but
+  not a fix for the saw-tooth.
+- **5/3 live**: fast53 v1 72 fresh/s and v3 63; with FFE 79. None reaches 90; superseded by the upstream Decoder V2 port.
+- Sweep gotcha fixed: the cool-down ran with the previous cell still streaming (battery 47 → 51 °C while
+  "cooling"). `hq-sweep.ps1` now stops the stream first (`session25.py stop`), triggers at ≥52 °C, waits for ≤48 °C,
+  and gives up after 5 min without a new low (on the charger it plateaus at ~51 °C). The first sweep was aborted
+  at that point and restored by hand (harness restore exit 0, guardian_pause back to '', proximity restored).
+- Note for compression: the server log shows our encoder RDO at "65.28 px/deg, Nyquist 32.64 cycles/deg, legacy
+  96 DPI @ 1m" = the monitor CSF. Upstream's headset CSF uses 0.5·2752/99 ≈ 13.9 cycles/deg (≈ 27.8 px/deg) at our
+  crop height. Our existing `rdo_pixels_per_degree` setting can test the main part of it with no new build.
+
+## Upstream Decoder V2 on our device and frame size (2026-10-07 ~19:10, standalone, no install)
+`decoder_ab wavelets 5248 2752 1388889` (their CI build b8e905c, /data/local/tmp/q3pw-ab; synthetic frame at the
+1000 Mbps / 90 Hz cap, their in-process encoder; arms interleaved, 4 blocks x 20 frames; governor moved the
+clock 421–640 MHz between arms although `debug.oculus.gpuLevel`=7):
+
+| Decoder | p50 per frame (summary) | at 599 MHz |
+|---|---|---|
+| stock Haar (= ours) | 7.09 ms | – |
+| Haar haar32 mode 3 / 5 / 6 | 3.30 / 3.28 / 2.70 | 2.81 / 2.77 / 2.29 |
+| stock CDF 5/3 | 13.44 | 12.23 |
+| **CDF 5/3 V2 mode 3 (qp) / 5 / 6** | **4.99 / 4.41 / 3.40** | **3.58 / 3.60 / 3.12–3.40** |
+
+- **V2 mode 5 decodes our 5248x2752 5/3 frame in ~3.6–4.4 ms: ~2.3x faster than our fast53 v1 (8.4 ms, below)
+  and faster than the Haar we ship (5.1 ms standalone).** Their Haar modes are ~2x faster than stock Haar too.
+  Mode 5 also removes the RGBA convert pass (it writes packed YCbCr into the AHB; our convert is 4.9 ms standalone).
+- Bitstream: same PyroWave pin d2997ac; Decoder V2 is decode-only (exact to the stock 5/3 decoder within 1 code
+  value), so it decodes our encoder's 5/3 stream. Their encoder adds rate-allocation changes only (headset CSF
+  `cpd_nyquist = 0.5*height/99`, LF boost x6 on levels 3–4, chroma CSF 1.6, discard-distortion band weight;
+  docs/ENCODER-CSF.md upstream): still bitstream-compatible and **a quality lever for us** (the stock CSF assumes a
+  96 dpi monitor at 1 m and starves fine luma, which is what Metro textures need). Their published 207 Hz
+  2080x2208 live numbers: 5/3 V2 mode 5 at 690 MHz ≈ Haar (192 vs 193.5 fresh/s).
+- Conclusion: porting `patches/pyrowave-cdf53v2.patch` + `pyrowave-haar32.patch` (+ the client mode-5 present path)
+  is the route to 5/3 at 90 Hz with headroom; our fast53 line is superseded. **Port started 2026-10-07 ~19:20**:
+  Astra (gpt-6-astra, xhigh, task-muyddv9s-9chfrk) on branch `codex/decoder-v2` (worktree ws/worktrees/decoder-v2,
+  from a928435). It covers decoders, client props `debug.q3pw.cdf53v2`/`haar32`/`packed_levels` (opt-in), mode 5,
+  the opt-in headset-CSF encoder setting and a `pyrowave_android --compare-v2` tool.
+
+## fast53 v2/v3 standalone check (2026-10-07 ~19:05, candidate a928435 tools, no install)
+`pyrowave_android --compare-fast53 cdf53.wave haar.wave check-v23 30` (5248x2752 C420 chart frame, 750 Mbps
+budget), `PYROWAVE_PRECISION=1`, **`debug.oculus.gpuLevel`=7** (v1's earlier 10.13 ms was at gpuLevel 2):
+
+| Arm | decode mean | ratio to Haar | parity vs apron 5/3 |
+|---|---|---|---|
+| apron 5/3 (stock) | 14.73 ms | 2.87 | – |
+| fast53 v1 | **8.40** (was 10.13 at gpuLevel 2) | 1.64 | max 1 (pass) |
+| fast53 v2 | 19.32 (best 15.75) | 3.77 | max 1 (pass) |
+| fast53 v3 | 9.77 | 1.91 | max 0 (exact) |
+| Haar | 5.13 | 1.00 | – |
+
+- All three are exact, none meets the ≤1.3x Haar gate; v2 and v3 are slower than v1. Convert (GLES bridge) adds
+  4.92 ms on every arm. **Rejected as the 5/3 route**; upstream Decoder V2 (above) replaces it.
+
 ## Research: how others solve compression and motion (planner, 2026-10-07 ~08:50)
 - **Virtual Desktop**: H.264+ up to 500 Mbps on Quest 3; recent releases add NVENC adaptive quantization,
   2-pass and 10-bit fixed foveation. No special motion mechanism: VD's own guidance is that H.264+ at
