@@ -17,8 +17,10 @@ def energy(luma):
 
 
 def retention(truth_energy, output_energy, region, valid, floor=.5):
-    # Filter support is supplied by the caller. Class edges may occupy only a
-    # small part of a block; pool energy only on that class's pixels.
+    # Both Laplacian bands have a combined radius of six. Never let energy
+    # from another class enter either the ratio or its reference-energy floor.
+    region = cv2.erode(region.astype(np.uint8), np.ones((13, 13), np.uint8),
+                       borderType=cv2.BORDER_CONSTANT, borderValue=0).astype(bool)
     pixels = block_sum(region.astype(np.float32))
     safe = block_sum(valid.astype(np.float32)) == 1024
     reference = block_sum(truth_energy*region)
@@ -27,6 +29,15 @@ def retention(truth_energy, output_energy, region, valid, floor=.5):
     ids = np.flatnonzero(eligible)
     values = observed.ravel()[ids]/reference.ravel()[ids]
     return {'ids': ids.tolist(), 'retained': values.tolist()}
+
+
+def correlation(truth, output, region, valid):
+    """Signed truth-correlated detail; energy alone also rewards replacement noise."""
+    def bands(y):
+        low = cv2.GaussianBlur(y, (5, 5), .8)
+        return y-low, low-cv2.GaussianBlur(low, (9, 9), 1.6)
+    a, b = bands(truth), bands(output)
+    return retention(a[0]**2+a[1]**2, a[0]*b[0]+a[1]*b[1], region, valid)
 
 
 def temporal(samples):

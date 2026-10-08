@@ -119,18 +119,11 @@ def test_compositor_end_to_end_and_ranking(tmp_path, scene):
     synthetic_burst(good, scene, .5, 0)
     synthetic_burst(bad, scene, 12, 6)
     reports = [score.score_compositor(p, scene, 'single') for p in (bad, good)]
-    assert all(r['sample_count'] == 6 for r in reports), [r['rejected'] for r in reports]
-    assert reports[0]['aggregate']['sat']['toggle_fraction']['mean'] > .5
-    assert reports[0]['aggregate']['sat']['block_rms_p99']['mean'] > reports[1]['aggregate']['sat']['block_rms_p99']['mean']*3
-    assert reports[0]['aggregate']['mura']['lf8_y_p99']['mean'] > 4
-    text, verdict = score.compare_reports(reports, ['A', 'B'], repetitions=100)
-    assert verdict, text
-    assert 'PASS' in text
-    score.save_report(reports[0], tmp_path/'report')
-    assert (tmp_path/'report/summary.md').exists()
-    reports[1]['comparison_identity'] = {'different': True}
-    with pytest.raises(ValueError, match='not comparable'):
-        score.compare_reports(reports, ['A', 'B'])
+    assert all(r['sample_count'] == 0 for r in reports)
+    assert all(r['diagnostic_sample_count'] == 6 for r in reports), [r['rejected'] for r in reports]
+    assert all('full-eye' in r['unavailable'][0]['reason'] for r in reports)
+    with pytest.raises(ValueError, match='no common validated'):
+        score.compare_reports(reports, ['A', 'B'], repetitions=100)
 
 
 def write_dump(directory, timestamp, stage, planes, rgb=False, bottom=False):
@@ -397,11 +390,10 @@ def test_lossless_capture_scores_zero_modelled_sampling(scene):
 def test_lossless_capture_registration_end_to_end(tmp_path,scene):
     synthetic_burst(tmp_path/'lossless',scene,0,0)
     report=score.score_compositor(tmp_path/'lossless',scene,'single')
-    assert report['sample_count']==6, (report['rejected'],report['unavailable'])
-    # Includes 8-bit rounding, fitted geometry and fitted colour, unlike exact
-    # sampler test. These tolerances are below the 1.5-code toggle threshold.
-    assert report['aggregate']['edge']['flicker_p99']['mean'] < 1.0
-    assert report['aggregate']['mura']['lf8_y_p99']['mean'] < .25
+    assert report['sample_count'] == 0 and report['diagnostic_sample_count'] == 6
+    assert all(s['status'] == 'diagnostic_only' for s in report['registration_shots'])
+    assert 'registration_noise_floor' in report['diagnostic_aggregate']['edge']['flicker_p99']
+
 
 @pytest.mark.skipif(shutil.which('powershell') is None,reason='PowerShell unavailable')
 def test_wrapper_restore_normal_exit_retry_failure_and_kick(tmp_path):
@@ -495,15 +487,10 @@ def test_compositor_uses_recorded_source_raster_after_downscale(tmp_path):
         capture=cv2.warpPerspective(source,known,(656,688),borderValue=(28,28,28))
         cv2.imwrite(str(captures/f'{index}.png'),capture[...,::-1])
     report=score.score_compositor(captures,replay,'single')
-    assert report['sample_count']==2,(report['rejected'],report['unavailable'])
-    points=np.array([[[200,250],[600,250],[200,600],[600,600]]],np.float32)
-    for sample in report['samples']:
-        registration=sample['registration']
-        assert registration['source_size']==[820,860]
-        predicted=cv2.perspectiveTransform(points,np.array(registration['source_to_capture']))
-        expected=cv2.perspectiveTransform(points,known)
-        assert np.sqrt(np.mean((predicted-expected)**2)) < .1
-    assert report['aggregate']['mura']['lf8_y_p99']['mean'] < .25
+    assert report['sample_count'] == 0 and report['diagnostic_sample_count'] == 2
+    for sample in report['diagnostic_samples']:
+        assert sample['registration']['source_size'] == [820, 860]
+        assert not sample['registration']['geometry']['panel']['scores_available']
 
 
 def test_common_phase_weights_ignore_stereo_duplication():
@@ -519,7 +506,125 @@ def test_psnr_partial_perfect_phases_aggregate_in_mse_domain():
         if sample['index'] < 390:
             sample['metrics']['natural']['mse_y']=0.
             sample['metrics']['natural']['psnr_y_db']=None
+            field = sample['spatial']['natural']['mse_y']
+            field['values'] = score.bench_compare.pack(np.zeros(len(score.bench_compare.ids(field))))
     text,_=score.compare_reports([report,report],['a','b'],repetitions=10)
     line=next(line for line in text.splitlines() if 'natural / psnr_y_db' in line)
     assert 'infinity' not in line
     assert f'{score.psnr(12.5):.5g}' in line
+
+
+
+def test_compare_unmatched_worse_right_eye_cannot_pass():
+    import copy
+    a = make_small_report('compositor', range(6), 10)
+    b = make_small_report('compositor', range(6), 0, stereo=False)
+    by_id = {s['sample_id']: s for s in b['samples']}
+    a['samples'] = [copy.deepcopy(by_id[s['sample_id']]) if s['eye'] == 'left' else s for s in a['samples']]
+    blocks = {s['sample_id']: s for s in b['compositor_blocks']}
+    a['compositor_blocks'] = [copy.deepcopy(blocks[s['sample_id']]) if s['eye'] == 'left' else s for s in a['compositor_blocks']]
+    text, verdict = score.compare_reports([a, b], ['A', 'B'], repetitions=30)
+    assert not verdict, text
+    assert 'interval [0, 0]' in text
+
+
+def test_compare_two_original_observations_per_block_cannot_pass():
+    a = make_small_report('compositor', range(4), 10, stereo=False)
+    b = make_small_report('compositor', range(4), 0, stereo=False)
+    for report in (a, b):
+        for n, row in enumerate(report['compositor_blocks']):
+            positions = np.flatnonzero(np.arange(len(row['ids'])) % 2 == n//2)
+            for c in ('cb', 'cr'):
+                row[c] = score.bench_compare.pack(score.unpacked_blocks(row[c], len(row['ids']))[positions])
+            row['ids'] = np.asarray(row['ids'])[positions].tolist()
+    text, verdict = score.compare_reports([a, b], ['A', 'B'], repetitions=50)
+    assert not verdict and '>=4 distinct original capture IDs per contributing block' in text
+
+
+def test_compare_refuses_unmatched_worn_none_motion():
+    a = make_small_report('compositor', range(4), 10)
+    a['scene']['live'] = True
+    a['comparison_identity']['motion'] = 'none'
+    with pytest.raises(ValueError, match='recorded pose deltas'):
+        score.compare_reports([a, a], ['a', 'b'])
+
+
+def test_compare_common_support_excludes_unshared_spatial_error():
+    a = make_small_report('compositor', range(6), 0, stereo=False)
+    b = make_small_report('compositor', range(6), 0, stereo=False)
+    for sa, sb in zip(a['samples'], b['samples']):
+        field = sa['spatial']['mura']['lf8_y_p99']
+        values = score.bench_compare.unpack(field['values']).copy()
+        half = len(values)//2
+        values[:half] = 10
+        field['values'] = score.bench_compare.pack(values)
+        field = sb['spatial']['mura']['lf8_y_p99']
+        field['ids'] = score.bench_compare.ids(field)[half:].tolist()
+        field['values'] = score.bench_compare.pack(score.bench_compare.unpack(field['values'])[half:])
+    text, verdict = score.compare_reports([a, b], ['a', 'b'], repetitions=20)
+    assert not verdict
+    assert 'mura: A - 1.2*B 95% interval [0, 0]' in text
+
+
+def test_compare_edge_flicker_retained_on_selected_captures():
+    a = make_small_report('compositor', range(6), 0, stereo=False)
+    b = make_small_report('compositor', range(6), 0, stereo=False)
+    for n, sample in enumerate(a['samples']):
+        field = sample['spatial']['edge']['flicker_p99']
+        field['values'] = score.bench_compare.pack(np.full(len(score.bench_compare.ids(field)), (-1)**n*5))
+    text, _ = score.compare_reports([a, b], ['a', 'b'], repetitions=10)
+    line = next(line for line in text.splitlines() if 'edge / flicker_p99' in line)
+    assert 'b < a' in line and '5' in line
+
+
+def test_identity_rigid_tolerances_and_exact_hashes():
+    import copy
+    a = make_small_report('offline', range(4))['comparison_identity']
+    b = copy.deepcopy(a)
+    b['eye_to_head'][0][0][3] += 1.490116119e-8
+    assert score.bench_compare.same_identity(a, b)
+    b['eye_to_head'][0][0][3] += 2e-6
+    assert not score.bench_compare.same_identity(a, b)
+    b = copy.deepcopy(a); b['renderer_sha256'] += 'x'
+    assert not score.bench_compare.same_identity(a, b)
+    for angle, expected in ((5e-7, True), (2e-6, False)):
+        b = copy.deepcopy(a)
+        c, s = np.cos(angle), np.sin(angle)
+        b['eye_to_head'][0] = np.array([[c, 0, s, -.032], [0, 1, 0, 0], [-s, 0, c, 0], [0, 0, 0, 1]]).tolist()
+        assert score.bench_compare.same_identity(a, b) == expected
+    b = copy.deepcopy(a)
+    a['projections'][0][0][0] = b['projections'][0][0][0] = 1000.
+    b['eye_to_head'][0][0][3] += 5e-7
+    assert not score.bench_compare.same_identity(a, b)  # projected bound, despite metre tolerance
+
+
+def test_chronological_clusters_after_eye_restriction():
+    a = make_small_report('offline', range(6), 0)
+    a['samples'].reverse()
+    groups, _, _ = score.matched_groups([a, a])
+    assert list(next(iter(groups[0].values()))) == [str(i) for i in range(6)]
+
+
+def test_auto_lens_fallback_after_planar_refinement_failure(tmp_path, scene, monkeypatch):
+    from tools.quest3 import bench_lens_score
+    synthetic_burst(tmp_path/'burst', scene, 0)
+    called = []
+    original = bench_lens_score.score_lens
+    def wrapper(*args, **kwargs):
+        called.append(kwargs.get('planar', False))
+        if not kwargs.get('planar'):
+            return {'fallback_called': True}
+        return original(*args, **kwargs)
+    monkeypatch.setattr(bench_lens_score, 'score_lens', wrapper)
+    monkeypatch.setattr(score, 'refine_source_registration', lambda *args: (_ for _ in ()).throw(ValueError('refinement failed')))
+    report = score.score_compositor(tmp_path/'burst', scene, 'single')
+    assert report == {'fallback_called': True} and called == [True, False]
+
+
+
+@pytest.mark.parametrize('stage', ['offline', 'compositor'])
+def test_compare_can_establish_real_common_support_improvement(stage):
+    a = make_small_report(stage, range(8), 10, stereo=False)
+    b = make_small_report(stage, range(8), 0, stereo=False)
+    text, verdict = score.compare_reports([a, b], ['a', 'b'], repetitions=50)
+    assert verdict, text

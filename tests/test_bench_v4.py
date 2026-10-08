@@ -139,16 +139,13 @@ def test_lens_lossless_barrel_roll_translation(tmp_path, backdrop):
         cv2.imwrite(str(tmp_path/f'{index:03}.png'), capture[..., ::-1])
     write_json(tmp_path/'burst.json', {'shots': [{'file': f'{i:03}.png'} for i in (0, 5, 10, 15)]})
     report = score.score_compositor(tmp_path, scene, 'single', registration='lens')
-    assert report['sample_count'] == 4, (report['rejected'], report['unavailable'])
-    assert report['aggregate']['mura']['lf8_y_p99']['mean'] < .25
-    # Quantized lens sampler plus estimated geometry: <0.5-code RMS with a
-    # <2-code edge p99 tail. The exact-map test separately requires ~zero.
-    assert report['aggregate']['edge']['flicker_p99']['mean'] < 2.
-    assert all(report['aggregate'][name]['mse_y']['mean'] < .25 for name in ('sat', 'mura', 'edge', 'natural'))
-    assert report['aggregate']['natural']['detail_toggle_fraction']['mean'] == 0
-    if scene.backdrop:
-        assert report['aggregate']['backdrop-natural']['mse_y']['mean'] < .25
-        assert report['aggregate']['backdrop-natural']['detail_toggle_fraction']['mean'] == 0
+    # Estimated landmarks and the old colour strip no longer validate a
+    # lossless fixture merely because its global fit looks plausible.
+    assert report['sample_count'] == 0 and report['diagnostic_sample_count'] == 4
+    assert len({tuple(s['lens_coefficients']) for s in report['registration_shots']}) == 1
+    assert all(not s['colour']['scores_available'] for s in report['registration_shots'])
+    assert set(report['registration_controls']) == {'0.25', '0.5'}
+    json.dumps(report, allow_nan=False)
 
 
 def test_offline_four_budget_plan_no_gpu(tmp_path, monkeypatch, capsys):
@@ -247,3 +244,155 @@ def test_truth_analysis_static_and_filter_reference(tmp_path, mode):
     background = render_region(scene, scene.homography(0, 'left', 'backdrop'), [0, 0, *scene.size], mode)
     valid = score.erode(scene.backdrop_visibility(0), 3)
     np.testing.assert_array_equal(rendered[valid], background[valid])
+
+
+
+def test_frozen_lens_reduces_thin_column_and_rejects_folds():
+    yy, xx = np.mgrid[50:650:40, 50:75:8]
+    points = np.stack((xx, yy), -1).reshape(-1, 2).astype(float)
+    observed = points+np.random.default_rng(2).normal(0, .2, points.shape)
+    maps, diagnostics = reg.fit_burst([(points, observed)], (700, 720))
+    assert diagnostics[0]['lens_parameters'] == 0
+    assert np.all(maps[0].lens.coefficients == 0)
+    folded = reg.Lens((700, 720), [-.5])
+    with pytest.raises(ValueError, match='injectivity'):
+        folded.distort(folded.undistort(points))
+
+
+def test_spatial_holdouts_and_local_tail_validation():
+    lens = reg.Lens((400, 400))
+    mapping = reg.PlaneMap(lens, np.array([[.005, 0, -1], [0, .005, -1], [0, 0, 1.]]))
+    yy, xx = np.mgrid[10:400:20, 10:400:20]
+    points = np.stack((xx, yy), -1).reshape(-1, 2).astype(float)
+    held = reg.spatial_split(points, (400, 400))
+    assert held.any() and (~held).any()
+    target = mapping.forward(points)
+    good = reg.validate_plane(mapping, points[held], target[held], np.ones((400, 400), bool))
+    assert good['scores_available']
+    json.dumps(good, allow_nan=False)
+    target[(points[:, 0] > 300) & (points[:, 1] > 300), 0] += .4
+    bad = reg.validate_plane(mapping, points[held], target[held], np.ones((400, 400), bool))
+    assert bad['held_out_median_px'] < .1 and not bad['scores_available']
+    assert any(row['p95_px'] > .25 for row in bad['local'])
+    narrow = reg.validate_plane(mapping, points[held & (points[:, 0] < 100)], target[held & (points[:, 0] < 100)], np.ones((400, 400), bool))
+    assert not narrow['scores_available']
+    # Interpolation with only three points/cell can understate the pooled p95.
+    sparse = np.array([[x+dx, y+20] for y in range(0, 400, 100)
+                       for x in range(0, 400, 100) for dx in (10, 30, 50)], float)
+    observed = mapping.forward(sparse)
+    observed[2::3, 0] += .26
+    pooled = reg.validate_plane(mapping, sparse, observed, np.ones((400, 400), bool))
+    assert all(c['valid'] for c in pooled['local'])
+    assert pooled['held_out_p95_px'] > .25 and not pooled['scores_available']
+
+
+def test_detail_full_class_filter_support_and_signed_correlation():
+    rng = np.random.default_rng(7)
+    truth = rng.uniform(20, 180, (192, 192)).astype(np.float32)
+    region = np.zeros(truth.shape, bool); region[32:160, 32:160] = True
+    truth[region] = 80
+    output = truth.copy(); output[~region] = 80
+    valid = np.ones_like(region)
+    retained = detail.retention(detail.energy(truth), detail.energy(output), region, valid)
+    assert retained['ids'] == []  # flat inside; exterior texture cannot meet the floor
+    truth = rng.uniform(20, 180, truth.shape).astype(np.float32)
+    reverse = 200-truth
+    energy = detail.retention(detail.energy(truth), detail.energy(reverse), valid, valid)
+    correlated = detail.correlation(truth, reverse, valid, valid)
+    np.testing.assert_allclose(energy['retained'], 1, atol=1e-6)
+    np.testing.assert_allclose(correlated['retained'], -1, atol=1e-6)
+
+
+def colour_observations(model):
+    from tools.quest3 import bench_colour
+    patches = bench_colour.layout((1000, 1000))
+    observed = bench_colour.apply(np.array([p['rgb'] for p in patches]), model, np.array([p['uv'] for p in patches]))
+    return [{**p, 'observed': value.tolist()} for p, value in zip(patches, observed)]
+
+
+@pytest.mark.parametrize('radial', [False, True])
+def test_full_eye_colour_spatial_selection_and_validation(radial):
+    from tools.quest3 import bench_colour
+    model = {'domain': 'linear-eye', 'gain': [1.03, .96, 1.07], 'offset': [.001, .002, .001],
+             'radial': [[.2, .15, .1], [.05, .03, .02]] if radial else np.zeros((2, 3)).tolist()}
+    observations = colour_observations(model)
+    fitted, info = bench_colour.fit(observations)
+    assert info['scores_available'] and info['radial_selected'] == radial
+    assert info['held_out_rmse_codes'] < .001
+    np.testing.assert_allclose(fitted['gain'], model['gain'], atol=1e-6)
+    # Final validation cells were never used for model selection or fitting.
+    for row in observations:
+        if (row['cell'][0]+2*row['cell'][1]) % 5 == 0:
+            row['observed'] = (np.array(row['observed'])+5).tolist()
+    changed, info = bench_colour.fit(observations)
+    assert changed == fitted and not info['scores_available']
+
+
+def test_full_eye_colour_rejects_strip_and_missing_dark_neutrals():
+    from tools.quest3 import bench_colour
+    observations = colour_observations({'domain': 'linear-eye', 'gain': [1., 1., 1.], 'offset': [0., 0., 0.], 'radial': [[0., 0., 0.]]*2})
+    with pytest.raises(ValueError, match='25 spatial cells'):
+        bench_colour.fit([o for o in observations if o['cell'][0] == 0])
+    with pytest.raises(ValueError, match='dark neutrals'):
+        bench_colour.fit([o for o in observations if o['patch'] != 0])
+
+
+def test_perturbed_lossless_controls_report_noise_not_codec_error():
+    from tools.quest3 import bench_noise
+    scene = BenchScene(size=(656, 688), motion='static')
+    truth = scene.panel_frame(0).astype(np.float32)
+    controls = {}
+    for step in (.25, .5):
+        acc = score.ScoreAccumulator(scene, 'compositor', record_spatial=False)
+        for n in range(6):
+            acc.add(score.rgb_planes(truth), score.rgb_planes(bench_noise.shift(truth, step if n % 2 else 0)), n, panel=True)
+        controls[str(step)] = acc.finish()
+    report = controls['0.25']
+    bench_noise.annotate(report, controls)
+    row = report['aggregate']['sat']['block_rms_p99']
+    assert row['registration_noise_floor'] > 0
+    assert row['registration_interpretation'] == 'within registration noise'
+    assert not bench_noise.qualified(controls['0.5']['aggregate'])
+
+
+def test_failed_sample_does_not_clear_other_validated_samples(tmp_path, monkeypatch):
+    from tools.quest3 import bench_lens_score as lens_score, bench_colour, bench_noise
+    scene = BenchScene(size=(384, 416), motion='static')
+    shots = [{'file': f'{i}.png'} for i in range(4)]
+    monkeypatch.setattr(cv2, 'findTransformECC', lambda *args, **kwargs: pytest.fail('intensity geometry fitting is forbidden'))
+    monkeypatch.setattr(lens_score, '_shots', lambda directory: shots)
+    monkeypatch.setattr(lens_score, 'read_capture', lambda directory, shot, side: scene.render_frame(int(shot['file'][0])))
+    monkeypatch.setattr(reg, 'barcode_index', lambda capture, mapping, scene, shot: (int(shot['file'][0]), {}))
+    monkeypatch.setattr(reg, 'validate_plane', lambda *args: {'scores_available': True})
+    identity = {'domain': 'linear-srgb', 'matrix': np.vstack((np.eye(3), np.zeros(3))).tolist()}
+    monkeypatch.setattr(bench_colour, 'load_burst', lambda path: ({'single': (identity, {'scores_available': True})}, 'same-calibration'))
+    checks = iter((True, False, True, True))
+    monkeypatch.setattr(bench_colour, 'validate_sample', lambda *args: {'scores_available': next(checks)})
+    monkeypatch.setattr(bench_noise, 'qualified', lambda *args: True)
+    report = lens_score.score_lens(tmp_path, scene, 'single', calibration='fixture')
+    assert report['sample_count'] == 3 and report['diagnostic_sample_count'] == 1
+    assert report['registration_controls']['0.25']['sat']['block_rms_p99']['n'] == 3
+    assert report['diagnostic_registration_controls']['0.25']['sat']['block_rms_p99']['n'] == 1
+    assert {s['sample_id'] for s in report['samples']} == {'0.png', '2.png', '3.png'}
+    assert {s['sample_id'] for s in report['compositor_blocks']} == {'0.png', '2.png', '3.png'}
+    assert len({tuple(s['lens_coefficients']) for s in report['registration_shots']}) == 1
+
+
+
+def test_full_eye_calibration_burst_loader(tmp_path):
+    from tools.quest3 import bench_colour
+    size = (1000, 1000)
+    image = np.full((1000, 1000, 3), 28, np.uint8)
+    polygons = []
+    for patch in bench_colour.layout(size):
+        x, y, w, h = patch['box']
+        polygon = np.array([[x, y], [x+w, y], [x+w, y+h], [x, y+h]])
+        cv2.fillConvexPoly(image, np.rint(polygon).astype(np.int32), patch['rgb'])
+        polygons.append(polygon.tolist())
+    cv2.imwrite(str(tmp_path/'eye.png'), image[..., ::-1])
+    write_json(tmp_path/'calibration.json', {'schema': 1, 'layout': 'full-eye-5x5-v1', 'size': list(size),
+               'eyes': {'left': [{'file': 'eye.png', 'polygons': polygons}]}})
+    models, identity = bench_colour.load_burst(tmp_path)
+    assert models['left'][1]['scores_available'] and len(identity) == 64
+    again, same = bench_colour.load_burst(tmp_path)
+    assert again == models and same == identity

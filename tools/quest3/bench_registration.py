@@ -75,6 +75,7 @@ class Lens:
 
     def distort(self, ideal):
         # Newton inversion, analytic Jacobian. Return invalid maps for folds.
+        self.check_injective()
         q = np.asarray(ideal, np.float64)
         p = q.copy()
         k1, k2, k3, p1, p2 = self.coefficients[:5]
@@ -98,6 +99,35 @@ class Lens:
         bad = np.linalg.norm(self.undistort(result)-q, axis=-1) > 1e-5
         result[bad] = -1e4
         return result
+
+    def check_injective(self):
+        """Require a positive-definite Brown Jacobian over the capture rectangle.
+
+        The Jacobian is symmetric; uniform positive definiteness implies strict
+        monotonicity (and hence injectivity) on this convex domain. A conservative
+        derivative bound covers the space between grid points, not just samples.
+        """
+        key = tuple(self.coefficients)
+        if getattr(self, '_checked', None) == key:
+            return
+        k1, k2, k3, p1, p2, sx, sy = key
+        yy, xx = np.mgrid[0:129, 0:129].astype(float)
+        x = (xx/128*self.size[0]-self.centre[0])/self.scale-sx
+        y = (yy/128*self.size[1]-self.centre[1])/self.scale-sy
+        r = x*x+y*y
+        a = 1+r*(k1+r*(k2+r*k3)); b = k1+r*(2*k2+3*r*k3)
+        jx = a+2*x*x*b+2*p1*y+6*p2*x
+        jy = a+2*y*y*b+6*p1*y+2*p2*x
+        cross = 2*x*y*b+2*p1*x+2*p2*y
+        smallest = (jx+jy-np.hypot(jx-jy, 2*cross))/2
+        radius = np.sqrt(r.max())
+        # Norm bound for the derivative of the radial/tangential Jacobian.
+        derivative = (6*abs(k1)*radius + 20*abs(k2)*radius**3 +
+                      42*abs(k3)*radius**5 + 12*(abs(p1)+abs(p2)))
+        gap = np.hypot(*self.size)/(256*self.scale)
+        if not np.isfinite(smallest).all() or smallest.min()-derivative*gap <= 1e-4:
+            raise ValueError('folded or unidentifiable lens: injectivity not established')
+        self._checked = key
 
 
 class PlaneMap:
@@ -203,7 +233,25 @@ def refine_plane(mapping, source, target, threshold=2.):
 
 def fit_burst(pairs, size, initial=None, iterations=50):
     """One lens per eye, an independent homography for every supplied plane."""
-    lens = Lens(size, initial)
+    targets = np.concatenate([b for _, b in pairs]).astype(np.float32)
+    span = np.ptp(targets, axis=0)/size
+    hull = cv2.contourArea(cv2.convexHull(targets))/np.prod(size)
+    # A marker column cannot identify radial, tangential and optical-centre
+    # terms. Coverage is decided before optimizing, using training landmarks.
+    count = 7 if hull >= .12 and min(span) >= .35 else 2 if hull >= .04 and min(span) >= .2 else 0
+    while True:
+        try:
+            return _fit_burst(pairs, size, initial, iterations, count, hull)
+        except (ValueError, np.linalg.LinAlgError):
+            if count == 0:
+                raise
+            count = 2 if count == 7 else 0
+
+
+def _fit_burst(pairs, size, initial, iterations, count, hull):
+    lens = Lens(size)
+    if initial is not None:
+        lens.coefficients[:count] = np.asarray(initial)[:count]
     normalized, matrices, norms = [], [], []
     for source, target in pairs:
         centre = np.mean(source, axis=0)
@@ -217,18 +265,69 @@ def fit_burst(pairs, size, initial=None, iterations=50):
     def errors(params):
         residuals = []
         for n, (source, target) in enumerate(normalized):
-            h = np.r_[params[7+n*8:7+(n+1)*8], 1].reshape(3, 3)
-            residuals.append((project(source, h)-lens.undistort(target, params[:7])).ravel())
+            h = np.r_[params[count+n*8:count+(n+1)*8], 1].reshape(3, 3)
+            coefficients = np.pad(params[:count], (0, 7-count))
+            residuals.append((project(source, h)-lens.undistort(target, coefficients)).ravel())
         return np.concatenate(residuals)*lens.scale
-    result = least_squares(errors, np.r_[lens.coefficients, np.concatenate(matrices)], iterations, robust=2.)
-    lens.coefficients = result[:7]
-    maps = [PlaneMap(lens, np.r_[result[7+n*8:7+(n+1)*8], 1].reshape(3, 3) @ norm) for n, norm in enumerate(norms)]
+    result = least_squares(errors, np.r_[lens.coefficients[:count], np.concatenate(matrices)], iterations, robust=2.)
+    # Remove the homography nuisance directions before testing lens rank.
+    r = errors(result)
+    jacobian = []
+    for n in range(len(result)):
+        step = 1e-5*max(1, abs(result[n]))
+        candidate = result.copy(); candidate[n] += step
+        jacobian.append((errors(candidate)-r)/step)
+    j = np.array(jacobian).T
+    condition = 1.
+    if count:
+        residual_j = j[:, :count]-j[:, count:] @ np.linalg.lstsq(j[:, count:], j[:, :count], rcond=None)[0]
+        singular = np.linalg.svd(residual_j, compute_uv=False)
+        condition = float(singular[0]/max(singular[-1], 1e-15))
+        if condition > 1e5 or singular[-1] < .01:
+            raise ValueError('lens training landmarks do not identify model')
+    lens.coefficients = np.pad(result[:count], (0, 7-count))
+    lens.check_injective()
+    maps = [PlaneMap(lens, np.r_[result[count+n*8:count+(n+1)*8], 1].reshape(3, 3) @ norm) for n, norm in enumerate(norms)]
     diagnostics = []
     for mapping, (source, target) in zip(maps, pairs):
         e = np.linalg.norm(mapping.forward(source)-target, axis=1)
         diagnostics.append({'corner_fit_rms_capture_px': float(np.sqrt(np.mean(e*e))),
-                            'corner_max_capture_px': float(e.max()), 'landmarks': len(e)})
+                            'corner_max_capture_px': float(e.max()), 'landmarks': len(e),
+                            'lens_parameters': count, 'lens_condition': condition, 'training_hull_fraction': float(hull)})
     return maps, diagnostics
+
+
+def spatial_split(source, size):
+    """Reserve fixed spatial cells before any model fitting or selection."""
+    cells = np.floor(np.asarray(source)/np.asarray(size)*12).astype(int)
+    return (cells[:, 0]+2*cells[:, 1]) % 3 == 0
+
+
+def validate_plane(mapping, source, target, footprint):
+    """Independent holdouts, including local tails in every scored 4x4 cell."""
+    source, target = np.asarray(source), np.asarray(target)
+    size = np.array(footprint.shape[::-1])
+    inside = np.all((source >= 0) & (source < size-1), axis=1)
+    source, target = source[inside], target[inside]
+    positions = np.rint(source).astype(int)
+    inside = footprint[positions[:, 1], positions[:, 0]]
+    source, target = source[inside], target[inside]
+    error = np.linalg.norm(mapping.forward(source)-target, axis=1)
+    cells = np.clip((np.asarray(source)/size*4).astype(int), 0, 3)
+    yy, xx = np.nonzero(footprint)
+    required = set(map(tuple, np.c_[xx*4//size[0], yy*4//size[1]]))
+    local = []
+    for cell in sorted(required):
+        values = error[np.all(cells == cell, axis=1)]
+        median = float(np.median(values)) if len(values) else None
+        p95 = float(np.percentile(values, 95)) if len(values) else None
+        local.append({'cell': [int(v) for v in cell], 'n': len(values), 'median_px': median, 'p95_px': p95,
+                      'valid': len(values) >= 3 and median <= .1 and p95 <= .25})
+    median = float(np.median(error)) if len(error) else None
+    p95 = float(np.percentile(error, 95)) if len(error) else None
+    return {'held_out_median_px': median, 'held_out_p95_px': p95,
+            'local': local, 'scores_available': bool(local) and median is not None and
+            median <= .1 and p95 <= .25 and all(c['valid'] for c in local)}
 
 
 def barcode_index(capture, mapping, scene, shot):

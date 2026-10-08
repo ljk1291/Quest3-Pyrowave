@@ -15,7 +15,7 @@ import numpy as np
 if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.quest3.bench_scene import BenchScene, LEGEND, PERIOD, decode_barcode, write_json, resize_homography, plane_mask
-from tools.quest3 import bench_detail
+from tools.quest3 import bench_detail, bench_compare
 
 KR, KB = .2126, .0722
 DEFINITIONS = {
@@ -26,13 +26,13 @@ DEFINITIONS = {
     'mura': 'abs LP residual in panel coordinates, sigmas 8/24 panel texels; explicit Gaussian radius 3*sigma and mask erosion including pullback interpolation support; temporal abs difference or sparse population std',
     'dark': 'truth Y<64 and Sobel magnitude of sigma-2-smoothed truth <4; all chroma footprint pixels eligible',
     'edge': 'edge-class pixels near Sobel magnitude >40, dilated 1px; temporal signed residual difference or compositor std',
-    'detail': '32x32 content luma blocks; output/truth energy ratio of Gaussian Laplacian bands sigma .8 and 1.6; >=32 class pixels, truth energy >=0.5 code^2/pixel, full valid block plus filter halo; ratios above 1 retained as alias/noise excess; population temporal std; hysteresis toggle if <0.5 and >0.8 occur in either order; sparse captures are not a flicker frequency',
+    'detail': '32x32 content luma blocks; output/truth energy ratio of Gaussian Laplacian bands sigma .8 and 1.6; >=32 class pixels, truth energy >=0.5 code^2/pixel, full valid block and six-pixel class/support halo; signed truth-correlated detail reported separately; ratios above 1 retained as alias/noise excess; population temporal std; hysteresis toggle if <0.5 and >0.8 occur in either order; sparse captures are not a flicker frequency',
     'psnr': '10log10(255^2/mean clustered MSE); JSON null plus infinite=true for MSE=0, null plus n=0 for unavailable',
     'ssim': 'Y, Gaussian 11x11 sigma1.5, population covariance, C1=6.5025 C2=58.5225; mask eroded 5 pixels',
     'aggregate': 'both eyes clustered by capture/timestamp before any sample count/bootstrap; PSNR derived from MSE including zeros',
-    'registration': 'planar: ArUco/ECC; lens: burst-shared inverse Brown radial/tangential/centre fit, per-shot neutral-marker refinement, independent backdrop homography and held-out SIFT check; forward truth sampling then residual pullback',
-    'colour': 'linear-light 3x3 gamut/saturation plus offset and sRGB encoding (encoded-affine candidate for legacy transforms); leave-one-patch-out selection/validation; unavailable above 0.5-code validation RMSE; report output-code chroma amplification separately',
-    'compare': 'common stationary-segment / directional 30-frame phase weights; >=80% shared capture coverage in every run; >=4 unique metric observations total and >=2/phase; stratified moving-block capture-cluster bootstrap',
+    'registration': 'landmark-only frozen per-eye lens with coverage/rank reduction and injectivity check; per-shot homographies; spatial holdouts reserved before fitting, <=0.1 px median and <=0.25 px p95 in every scored footprint cell; forward truth then residual pullback',
+    'colour': 'independent full-eye burst: frozen per-channel linear-sRGB gain/offset, optional spatially validated radial gain; held-out RMSE <=1 and p95 <=2 codes; old strip fits are frozen diagnostics only; amplification remains in output-code residuals',
+    'compare': 'common eyes, phases and complete-case spatial support; >=4 original captures per contributing block/phase before chronological cluster resampling; worn motion=none refused pending recorded-pose distribution matching',
     'compositor_limit': 'sparse sampled variation, not 90Hz flicker; lens model is landmark-validated, not a calibrated optical truth; actual GL LOD, upstream downsampling and real colour/filter order remain model limits',
 }
 
@@ -160,23 +160,18 @@ def fit_homography(capture, scene, refine=True):
         raise ValueError('fewer than three benchmark fiducials visible')
     source = np.concatenate([a for a, _ in pairs]).astype(np.float32)
     target = np.concatenate([b for _, b in pairs]).astype(np.float32)
+    if not refine:
+        # The scoring path reserves cells. The standalone diagnostic helper
+        # may use all corners; neither mode fits marker intensity residuals.
+        from tools.quest3.bench_registration import spatial_split
+        training = ~spatial_split(source, scene.panel_size)
+        source, target = source[training], target[training]
+    if len(source) < 4:
+        raise ValueError('insufficient fiducial training landmarks after spatial holdouts')
     h, inliers = cv2.findHomography(source, target, cv2.RANSAC, 1.5)
-    if h is None or inliers.sum() < 10:
+    if h is None or inliers.sum() < 4:
         raise ValueError('fiducial homography failed')
     ecc = None
-    if refine:
-        mask = np.zeros(scene.static.shape[:2], np.uint8)
-        for f in scene.fiducials:
-            points = np.rint(f['corners']).astype(np.int32)
-            cv2.fillConvexPoly(mask, points, 255)
-        mask = cv2.dilate(mask, np.ones((9, 9), np.uint8))
-        capture_mask = cv2.warpPerspective(mask, h, (gray.shape[1], gray.shape[0]), flags=cv2.INTER_NEAREST)
-        template = cv2.cvtColor(scene.static[..., :3], cv2.COLOR_RGB2GRAY)
-        try:
-            ecc, h = cv2.findTransformECC(template, gray, h.astype(np.float32), cv2.MOTION_HOMOGRAPHY,
-                                         (cv2.TERM_CRITERIA_COUNT | cv2.TERM_CRITERIA_EPS, 80, 1e-7), capture_mask, 5)
-        except cv2.error as exc:
-            raise ValueError('fiducial ECC refinement failed') from exc
     projected = cv2.perspectiveTransform(source[None], h)[0]
     error = np.linalg.norm(projected-target, axis=1)
     return h, {'markers': len(pairs), 'corner_fit_rms_capture_px': float(np.sqrt(np.mean(error[inliers.ravel() != 0]**2))),
@@ -208,6 +203,11 @@ def apply_colour(rgb, transform):
     # Array support for explicit encoded-RGB synthetic fixtures / legacy models.
     if not isinstance(transform, dict):
         return np.clip(rgb.astype(np.float32) @ transform[:3] + transform[3], 0, 255)
+    if transform['domain'] == 'linear-eye':
+        from tools.quest3 import bench_colour
+        yy, xx = np.mgrid[:rgb.shape[0], :rgb.shape[1]]
+        uv = np.stack(((xx+.5)/rgb.shape[1], (yy+.5)/rgb.shape[0]), -1)
+        return bench_colour.apply(rgb, transform, uv)
     matrix = np.asarray(transform['matrix'])
     if transform['domain'] == 'linear-srgb':
         return srgb_encode(srgb_decode(rgb) @ matrix[:3] + matrix[3]).astype(np.float32)
@@ -392,8 +392,9 @@ def clustered_values(samples, name, metric):
 
 
 class _PlaneScore:
-    def __init__(self, scene, stage):
+    def __init__(self, scene, stage, record_spatial=True):
         self.scene, self.stage = scene, stage
+        self.record_spatial = record_spatial
         self.samples, self.previous, self.moments = [], {}, {}
         self.block_samples = []
         self.detail_samples = {name: [] for name in ('sat', 'mura', 'edge', 'natural')}
@@ -426,6 +427,7 @@ class _PlaneScore:
         sample_id = str(index) if sample_id is None else str(sample_id)
         masks = {}
         metrics = {}
+        spatial = {}
         smap = ssim_map(truth[0], output[0])
         detail_truth, detail_output = bench_detail.energy(truth[0]), bench_detail.energy(output[0])
         detail_valid = erode(valid, max(6, support_radius))
@@ -447,6 +449,10 @@ class _PlaneScore:
             self.detail_samples[name].append({**detail, 'eye': eye, 'sample_id': sample_id, 'index': index})
             row['detail_retained_mean'] = float(np.mean(detail['retained'])) if detail['retained'] else None
             row['detail_blocks'] = len(detail['ids'])
+            correlated = bench_detail.correlation(truth[0], output[0], region, detail_valid)
+            row['detail_correlated_mean'] = float(np.mean(correlated['retained'])) if correlated['retained'] else None
+            self.detail_samples[name][-1]['correlated'] = correlated['retained']
+            spatial[name] = {'mse_y': bench_compare.field(residual[0]**2, mask)} if self.record_spatial else {}
             metrics[name] = row
         del smap
         prior = self.previous.get(eye)
@@ -457,6 +463,11 @@ class _PlaneScore:
         sat_mask = masks['sat'][1]
         metrics['sat'].update(block_metrics(diff[1], diff[2], sat_mask & prior['masks']['sat'][1]) if temporal else
                               {'block_rms_mean': None, 'block_rms_p99': None, 'toggle_fraction': None, 'blocks': 0})
+        if temporal and self.record_spatial:
+            eligible = block_mean((sat_mask & prior['masks']['sat'][1]).astype(np.float32)) == 1
+            rms = np.sqrt(block_mean((diff[1]**2+diff[2]**2)*.5))
+            spatial['sat']['block_rms_p99'] = bench_compare.field(rms, eligible)
+            spatial['sat']['toggle_fraction'] = bench_compare.field((rms > 1.5).astype(float), eligible)
         if self.stage == 'compositor':
             eligible = block_mean(sat_mask.astype(np.float32)) == 1
             block_ids = np.flatnonzero(eligible)
@@ -478,6 +489,8 @@ class _PlaneScore:
                         mask = chroma_mask(mask)
                     key = f'lf{sigma}_{channel}{suffix}'
                     add_stats(metrics['mura'], key, lp, mask)
+                    if self.record_spatial and key in ('lf8_y', 'lf24_y_dark'):
+                        spatial['mura'][key+'_p99'] = bench_compare.field(np.abs(lp), mask)
                     if self.stage == 'compositor':
                         self._moment((eye, 'mura', key+'_temporal'), lp, mask)
                     elif temporal:
@@ -500,7 +513,11 @@ class _PlaneScore:
         else:
             add_stats(metrics['edge'], 'flicker', diff[0] if temporal else aligned[0],
                       edge & prior['edge'] if temporal else np.zeros_like(edge))
-        self.samples.append({'index': index, 'eye': eye, 'sample_id': sample_id, 'consecutive': temporal,
+        if self.record_spatial:
+            spatial['edge']['flicker_p99'] = bench_compare.field(
+                aligned[0] if self.stage == 'compositor' else np.abs(diff[0]) if temporal else aligned[0],
+                edge if self.stage == 'compositor' else edge & prior['edge'] if temporal else np.zeros_like(edge))
+        self.samples.append({'spatial': spatial, 'index': index, 'eye': eye, 'sample_id': sample_id, 'consecutive': temporal,
                              'segment': self.scene.trajectory[index % PERIOD]['segment'], 'metrics': metrics, **(extra or {})})
         if self.stage != 'compositor':
             self.previous[eye] = {'e': aligned, 'masks': masks, 'index': index, 'edge': edge, 'lp': current_lp}
@@ -555,8 +572,8 @@ class _PlaneScore:
 
 class ScoreAccumulator(_PlaneScore):
     """Score each plane in its own fixed coordinates; retain v2 panel metrics."""
-    def __init__(self, scene, stage):
-        super().__init__(scene,stage)
+    def __init__(self, scene, stage, record_spatial=True):
+        super().__init__(scene,stage,record_spatial)
         self.background = None
         if scene.backdrop:
             from types import SimpleNamespace
@@ -565,7 +582,7 @@ class ScoreAccumulator(_PlaneScore):
                 size=scene.size, class_masks=b.masks, support_mask=b.masks['natural'],
                 trajectory=scene.trajectory, metadata=scene.metadata,
                 homography=lambda index,eye:scene.homography(index,eye,'backdrop'))
-            self.background = _PlaneScore(view,stage)
+            self.background = _PlaneScore(view,stage,record_spatial)
 
     def add(self, truth, output, index, valid=None, eye='left', sample_id=None, extra=None,
             panel=False, homography=None, support_radius=2, frame_transform=None):
@@ -598,6 +615,7 @@ class ScoreAccumulator(_PlaneScore):
             result['aggregate'].update({rename(k):v for k,v in report['aggregate'].items()})
             for sample,background in zip(result['samples'],report['samples']):
                 sample['metrics'].update({rename(k):v for k,v in background['metrics'].items()})
+                sample['spatial'].update({rename(k):v for k,v in background['spatial'].items()})
             result['backdrop_compositor_blocks'] = report['compositor_blocks']
             result['detail_samples'].update({rename(k): v for k, v in report['detail_samples'].items()})
             result['definitions'] = {**DEFINITIONS, 'backdrop': 'separate fixed plane grid, overlapping automatic natural subclasses; panel silhouette dilated 3 eye pixels before pullback, then normal support erosion; mirrored extension included'}
@@ -655,99 +673,19 @@ def compositor_blocks(samples):
 
 
 def refine_source_registration(capture, scene, index, eye, panel_to_capture):
-    """Refine against the recorded source raster, including its panel filter.
-
-    ECC initializes the source->capture map; a small coordinate descent matches
-    the actual forward INTER_LINEAR sampler on marker pixels (no inverse-blurred
-    reference). This also removes ECC's systematic interpolation bias.
-    """
+    """Landmark-only homography with a zero (frozen planar) lens."""
+    from tools.quest3 import bench_registration as reg
     source = scene.render_frame(index, eye)
-    panel_to_source = scene.homography(index, eye)
-    transform = panel_to_capture @ np.linalg.inv(panel_to_source)
-    transform /= transform[2,2]  # ECC requires h33=1, while render logs preserve physical clip-W
-    mask = np.zeros(scene.panel_labels.shape, np.uint8)
-    for marker in scene.fiducials:
-        cv2.fillConvexPoly(mask, np.rint(marker['corners']).astype(np.int32), 255)
-    mask = cv2.dilate(mask, np.ones((7,7),np.uint8))
-    capture_mask = cv2.warpPerspective(mask, panel_to_capture, capture.shape[1::-1], flags=cv2.INTER_NEAREST)
-    reference = cv2.cvtColor(source, cv2.COLOR_RGB2GRAY).astype(np.float32)
-    gray = cv2.cvtColor(capture, cv2.COLOR_RGB2GRAY).astype(np.float32)
-    try:
-        _, transform = cv2.findTransformECC(reference, gray, transform.astype(np.float32), cv2.MOTION_HOMOGRAPHY,
-            (cv2.TERM_CRITERIA_COUNT | cv2.TERM_CRITERIA_EPS, 60, 1e-7), capture_mask, 3)
-    except cv2.error as exc:
-        raise ValueError('recorded-source ECC failed') from exc
-    yy,xx = np.nonzero(capture_mask)
-    stride = max(1, len(xx)//12000)
-    xx,yy = xx[::stride].astype(np.float32), yy[::stride].astype(np.float32)
-    target = gray[yy.astype(int),xx.astype(int)]
-    # Normalize coordinates: each parameter step is approximately a capture pixel.
-    w,h = capture.shape[1],capture.shape[0]
-    norm = np.array([[w,0,w/2],[0,h,h/2],[0,0,1.]])
-    inverse = np.linalg.inv(transform) @ norm
-    inverse /= inverse[2,2]
-    points = np.stack(((xx-w/2)/w,(yy-h/2)/h,np.ones_like(xx)))
-    quantized = False
-    def errors(matrix):
-        q = matrix @ points
-        u,v = q[0]/q[2],q[1]/q[2]
-        if quantized:
-            sampled = cv2.remap(reference,u.astype(np.float32)[:,None],v.astype(np.float32)[:,None],cv2.INTER_LINEAR).ravel()
-        else:
-            # Smooth objective for joint optimization; 1/32-pixel OpenCV steps
-            # otherwise create false minima near the optimum.
-            u = np.clip(u,0,reference.shape[1]-1.001)
-            v = np.clip(v,0,reference.shape[0]-1.001)
-            ix,iy = np.floor(u).astype(int),np.floor(v).astype(int)
-            fx,fy = u-ix,v-iy
-            sampled = ((1-fy)*((1-fx)*reference[iy,ix]+fx*reference[iy,ix+1]) +
-                       fy*((1-fx)*reference[iy+1,ix]+fx*reference[iy+1,ix+1]))
-        # Neutral markers survive gamut stretch; fit only their overall gain/offset.
-        centered = sampled-sampled.mean()
-        gain = np.dot(centered,target-target.mean())/max(np.dot(centered,centered),1e-12)
-        return centered*gain+target.mean()-target
-    def cost(matrix):
-        return float(np.mean(errors(matrix)**2))
-    parameters = ((0,0),(0,1),(0,2),(1,0),(1,1),(1,2),(2,0),(2,1))
-    units = [1.]*6+[1/max(scene.size)]*2
-    best = cost(inverse)
-    # Joint refinement resolves coupled scale/perspective/translation error that
-    # coordinate descent alone can leave behind on high-contrast thin lines.
-    for epsilon in (.08,.03,.015):
-        for _ in range(8):
-            residual = errors(inverse)
-            columns = []
-            for (row,col),unit in zip(parameters,units):
-                plus,minus = inverse.copy(),inverse.copy()
-                plus[row,col] += epsilon*unit; minus[row,col] -= epsilon*unit
-                columns.append((errors(plus)-errors(minus))/(2*epsilon))
-            jacobian = np.stack(columns,axis=1)
-            delta = np.linalg.lstsq(jacobian,-residual,rcond=None)[0]
-            improved = False
-            for fraction in (1.,.5,.25):
-                candidate = inverse.copy()
-                for (row,col),unit,change in zip(parameters,units,delta):
-                    candidate[row,col] += fraction*unit*change
-                value = cost(candidate)
-                if value < best:
-                    inverse,best,improved = candidate,value,True
-                    break
-            if not improved: break
-    quantized = True
-    best = cost(inverse)
-    for step in (.04,.01,.003,.001):
-        for _ in range(3):
-            changed = False
-            for row,col in ((0,0),(0,1),(0,2),(1,0),(1,1),(1,2),(2,0),(2,1)):
-                scale = step if row < 2 else step/max(scene.size)
-                for sign in (-1,1):
-                    candidate = inverse.copy(); candidate[row,col] += sign*scale
-                    value = cost(candidate)
-                    if value < best:
-                        inverse,best,changed = candidate,value,True
-            if not changed: break
-    transform = norm @ np.linalg.inv(inverse)
-    return source, transform, {'forward_marker_rmse_codes': math.sqrt(best)}
+    lens = reg.Lens(capture.shape[1::-1])
+    norm = np.array([[1/lens.scale, 0, -lens.centre[0]/lens.scale],
+                     [0, 1/lens.scale, -lens.centre[1]/lens.scale], [0, 0, 1.]])
+    mapping = reg.PlaneMap(lens, norm @ panel_to_capture @ np.linalg.inv(scene.homography(index, eye)))
+    a, b = reg.matches(reg.features(source), reg.features(capture), mapping)
+    held = reg.spatial_split(a, scene.size)
+    mapping, _, _ = reg.refine_plane(mapping, a[~held], b[~held])
+    transform = np.linalg.inv(norm) @ mapping.homography
+    return source, transform, {'source_to_capture': transform.tolist(), 'source_size': list(scene.size),
+                               'geometry': reg.validate_plane(mapping, a[held], b[held], np.ones(source.shape[:2], bool))}
 
 
 def capture_residual(capture, source, source_to_capture, colour, panel_to_capture, panel_size):
@@ -767,61 +705,12 @@ def capture_residual(capture, source, source_to_capture, colour, panel_to_captur
     return reference, pulled, erode(valid,2)
 
 
-def score_compositor(directory, scene, eye='left', registration='auto'):
-    if registration == 'lens':
-        from tools.quest3.bench_lens_score import score_lens
-        return score_lens(directory, scene, eye)
-    directory = Path(directory)
-    burst = directory/'burst.json'
-    shots = json.loads(burst.read_text(encoding='utf-8-sig'))['shots'] if burst.exists() else [{'file': p.name} for p in sorted(directory.glob('*.png'))]
-    score = ScoreAccumulator(scene, 'compositor')
-    rejected, unavailable = [], []
-    for shot in shots:
-        path = directory/shot['file']
-        if path.suffix == '.rgba':
-            capture = np.fromfile(path,np.uint8).reshape(shot['height'],shot['width'],4)[...,:3]
-        else:
-            bgr = cv2.imread(str(path))
-            if bgr is None:
-                rejected.append({'file':path.name,'reason':'unreadable image'}); continue
-            capture = bgr[...,::-1]
-        for side in ('left','right') if eye == 'both' else (eye,):
-            part = capture if side == 'single' else capture[:,:capture.shape[1]//2] if side == 'left' else capture[:,capture.shape[1]//2:]
-            try:
-                h, registration = fit_homography(part, scene, refine=False)
-                aligned = cv2.warpPerspective(part, np.linalg.inv(h), scene.panel_size, flags=cv2.INTER_LINEAR)
-                index = decode_barcode(aligned, scene.barcode_box)
-                source, transform, refinement = refine_source_registration(part,scene,index,side,h)
-                h = transform @ scene.homography(index,side)
-                aligned = cv2.warpPerspective(part,np.linalg.inv(h),scene.panel_size,flags=cv2.INTER_LINEAR)
-                valid = cv2.warpPerspective(np.ones(part.shape[:2],np.float32),np.linalg.inv(h),scene.panel_size,flags=cv2.INTER_LINEAR) > .999
-                colour, diagnostics = fit_colour(aligned, scene, erode(valid,2))
-                if not diagnostics['scores_available']:
-                    unavailable.append({'file':path.name,'eye':side,'colour':diagnostics,'reason':'held-out colour model error exceeds measurement tolerance'})
-                    continue
-                registration.update(refinement, panel_to_capture=h.tolist(), source_to_capture=transform.tolist(), source_size=list(scene.size))
-                if scene.backdrop:
-                    reference = cv2.warpPerspective(apply_colour(source,colour),transform,part.shape[1::-1],flags=cv2.INTER_LINEAR,borderValue=(28,28,28))
-                    valid = cv2.warpPerspective(np.ones(source.shape[:2],np.float32),transform,part.shape[1::-1],flags=cv2.INTER_LINEAR) > .999
-                    score.add(rgb_planes(reference),rgb_planes(part),index,erode(valid,2),side,shot['file'],
-                              {'registration':registration,'colour':diagnostics},homography=h,frame_transform=transform)
-                else:
-                    reference,residual,valid = capture_residual(part,source,transform,colour,h,scene.panel_size)
-                    score.add(rgb_planes(reference),rgb_planes(reference+residual),index,valid,side,shot['file'],
-                              {'registration':registration,'colour':diagnostics},panel=True,support_radius=pullback_support(h,scene.panel_size))
-            except ValueError as exc:
-                rejected.append({'file':path.name,'eye':side,'reason':str(exc)})
-    # Retain the audited planar path for undistorted captures. If its corner
-    # model fails, retry the whole burst with a shared per-eye lens model.
-    if registration == 'auto' and not score.samples and rejected:
-        from tools.quest3.bench_lens_score import score_lens
-        return score_lens(directory, scene, eye)
-    result = score.finish()
-    colour_groups = {}
-    for sample in score.samples:
-        colour_groups.setdefault(sample['sample_id'],[]).append(sample['colour']['colour_amplification_chroma'])
-    result.update(rejected=rejected, unavailable=unavailable,
-                  colour_amplification_chroma=distribution([float(np.mean(v)) for v in colour_groups.values()]))
+def score_compositor(directory, scene, eye='left', registration='auto', calibration=None):
+    from tools.quest3.bench_lens_score import score_lens
+    requested_mode = registration
+    result = score_lens(directory, scene, eye, calibration=calibration, planar=requested_mode != 'lens')
+    if requested_mode == 'auto' and not result['sample_count'] and not result.get('diagnostic_sample_count') and result['rejected']:
+        return score_lens(directory, scene, eye, calibration=calibration)
     return result
 
 
@@ -883,30 +772,33 @@ TABLE_METRICS = [('sat', 'toggle_fraction'), ('sat', 'block_rms_p99'), ('mura', 
 
 
 def summary_markdown(report):
-    lines = [f"Stage: **{report['stage']}**; {report['sample_count']} accepted eye samples; {len(report.get('rejected', []))} rejected.", '',
-             '| Class | Metric | Mean | Sample std | 95% CI |', '|---|---|---:|---:|---|']
+    lines = [f"Stage: **{report['stage']}**; {report['sample_count']} validated eye samples; "
+             f"{report.get('diagnostic_sample_count', 0)} diagnostic; {len(report.get('rejected', []))} rejected.", '']
     fmt = lambda v: 'n/a' if v is None else f'{v:.5g}'
-    for name, metric in TABLE_METRICS:
-        row = report['aggregate'][name].get(metric, {})
-        ci = row.get('ci95')
-        lines.append(f"| {name} | {metric} | {'infinity' if row.get('infinite') else fmt(row.get('mean'))} | {fmt(row.get('std'))} | {', '.join(map(fmt, ci)) if ci else 'n/a'} |")
-    for name,metric in [('sat-natural','block_rms_p99'),('mura-natural','lf8_y_p99'),('edge-natural','flicker_p99'),('backdrop-natural','psnr_y_db')]:
-        if name in report['aggregate']:
-            row = report['aggregate'][name].get(metric,{})
-            lines.append(f"| {name} | {metric} | {'infinity' if row.get('infinite') else fmt(row.get('mean'))} | {fmt(row.get('std'))} | n/a |")
-    gain = report.get('colour_amplification_chroma', {})
-    for name, fields in report['aggregate'].items():
-        for metric in ('detail_retained_mean', 'detail_std_p99', 'detail_toggle_fraction'):
-            lines.append(f"| {name} | {metric} | {fmt(fields.get(metric, {}).get('mean'))} | n/a | n/a |")
-    lines += ['', f"Colour amplification (output-code chroma gain): {fmt(gain.get('mean'))}. Colour-model-unavailable eye samples: {len(report.get('unavailable', []))}.", '', report['acceptance'], '', 'Sparse compositor samples measure sampled variation, not sustained VR rate or 90 Hz flicker.',
-              'Colour matrices, registration diagnostics, definitions, rejected samples and all per-frame metrics are in summary.json.']
-    if report.get('diagnostic_aggregate'):
-        lines += ['', '**Conditional diagnostics only: colour model failed validation.**', '',
-                  '| Class | Y RMSE (codes) | Detail retained | Detail std p99 | Detail toggle fraction |', '|---|---:|---:|---:|---:|']
-        for name, fields in report['diagnostic_aggregate'].items():
-            mse = fields.get('mse_y', {}).get('mean')
-            row = [math.sqrt(mse) if mse is not None else None] + [fields.get(k, {}).get('mean') for k in ('detail_retained_mean', 'detail_std_p99', 'detail_toggle_fraction')]
-            lines.append(f"| {name} | "+' | '.join(map(fmt, row))+' |')
+    metrics = list(TABLE_METRICS)
+    metrics += [('sat-natural','block_rms_p99'), ('mura-natural','lf8_y_p99'),
+                ('edge-natural','flicker_p99'), ('backdrop-natural','psnr_y_db')]
+    for aggregate_key, title in (('aggregate', 'Validated'), ('diagnostic_aggregate', 'Conditional diagnostics only')):
+        aggregate = report.get(aggregate_key)
+        if not aggregate:
+            continue
+        lines += [f'**{title}**', '', '| Class | Metric | Mean | Registration-noise floor | Interpretation |',
+                  '|---|---|---:|---:|---|']
+        selected = metrics+[(name, metric) for name in aggregate for metric in
+                            ('detail_retained_mean', 'detail_correlated_mean', 'detail_std_p99', 'detail_toggle_fraction')]
+        for name, metric in selected:
+            if name not in aggregate:
+                continue
+            row = aggregate[name].get(metric, {})
+            value = 'infinity' if row.get('infinite') else fmt(row.get('mean'))
+            floor = fmt(row.get('registration_noise_floor'))
+            if row.get('registration_noise_domain'):
+                floor += ' ('+row['registration_noise_domain']+')'
+            lines.append(f"| {name} | {metric} | {value} | {floor} | {row.get('registration_interpretation', 'n/a')} |")
+        lines.append('')
+    lines += [report['acceptance'], '',
+              'Sparse compositor samples measure sampled variation, not sustained VR rate or 90 Hz flicker.',
+              'Geometry/colour validation, frozen models and per-metric perturbation controls are in summary.json.']
     return '\n'.join(lines)+'\n'
 
 
@@ -924,56 +816,46 @@ def phase_key(sample):
 
 
 def matched_groups(reports, minimum_coverage=.8):
-    grouped = []
-    for report in reports:
-        phases = {}
-        for sample in report['samples']:
-            phases.setdefault(phase_key(sample), {}).setdefault(sample['sample_id'], []).append(sample)
-        grouped.append(phases)
-    common = set(grouped[0]).intersection(*(set(g) for g in grouped[1:]))
-    coverage = [sum(len(g[k]) for k in common)/max(1,sum(map(len,g.values()))) for g in grouped]
-    if not common or min(coverage) < minimum_coverage:
-        raise ValueError('not comparable: insufficient shared trajectory phases (requires 80% of captures in every run)')
-    weights = {key:min(len(g[key]) for g in grouped) for key in sorted(common)}
-    total = sum(weights.values())
-    return grouped, {k:v/total for k,v in weights.items()}, coverage
+    return bench_compare.matched_groups(reports, phase_key, minimum_coverage)
 
 
-def comparison_value(report, groups, name, metric):
-    samples = [s for group in groups for s in group]
-    if metric.startswith('detail_') and metric != 'detail_retained_mean':
-        ids = {s['sample_id'] for s in samples}
-        return bench_detail.temporal([s for s in report.get('detail_samples', {}).get(name, []) if s['sample_id'] in ids]).get(metric)
-    if report['stage'] == 'compositor' and name in ('sat','sat-natural') and metric in ('block_rms_p99','toggle_fraction'):
-        # Keep duplicated bootstrap draws, with both eyes in each capture cluster.
-        by_id = {}
-        for sample in report['backdrop_compositor_blocks' if name == 'sat-natural' else 'compositor_blocks']:
-            by_id.setdefault(sample['sample_id'], []).append(sample)
-        return compositor_blocks([b for group in groups for b in by_id.get(group[0]['sample_id'], [])])[metric]
-    # Groups already represent bootstrap observations. Do not re-deduplicate
-    # repeated draws by original timestamp.
-    values = []
-    for group in groups:
-        a = [s['metrics'][name].get(metric) for s in group]
-        a = [v for v in a if v is not None]
-        if a: values.append(float(np.mean(a)))
-    return float(np.mean(values)) if values else None
+def comparison_value(report, groups, name, metric, support=None):
+    if support is None:
+        rows = bench_compare.observations(report, groups, name, metric)
+        support = {eye: set.intersection(*(set(bench_compare.ids(row)) for e, _, row in rows if e == eye))
+                   for eye in {e for e, _, _ in rows}}
+    unique = list({g[0]['sample_id']: g for g in groups}.values())
+    return bench_compare.PreparedMetric(report, unique, name, metric, support)(groups)
 
 
 def compare_reports(reports, names, margin=.2, repetitions=500):
-    if len(reports) < 2 or not np.isfinite(margin) or margin < 0:
+    if len(reports) < 2 or len(names) != len(reports) or repetitions < 1 or not np.isfinite(margin) or margin < 0:
         raise ValueError('compare requires two runs and a finite nonnegative margin')
-    if any(r['comparison_identity'] != reports[0]['comparison_identity'] or r['stage'] != reports[0]['stage'] for r in reports[1:]):
+    if any(not bench_compare.same_identity(r['comparison_identity'], reports[0]['comparison_identity']) or r['stage'] != reports[0]['stage'] for r in reports[1:]):
         raise ValueError('different assets/scene/stage: runs are not comparable')
     grouped,weights,coverage = matched_groups(reports)
+    if reports[0]['stage'] == 'compositor' and any(r.get('colour_calibration_id') != reports[0].get('colour_calibration_id') for r in reports[1:]):
+        raise ValueError('not comparable: colour parameters must use the same frozen per-eye calibration')
+    supports = {}
+    def support(name, metric, key):
+        token = (name, metric, key)
+        if token not in supports:
+            supports[token] = bench_compare.common_support(reports, grouped, key, name, metric)
+        return supports[token]
     lines = [f'Shared phase coverage: {coverage}; common phase weights: {weights}.', '',
              '| Class / metric | Ranking (best first) | Values |','|---|---|---|']
     def weighted(values):
         if any(v is None for v in values): return None
         return float(sum(v*w for v,w in zip(values,weights.values())))
+    prepared_metrics = {}
+    def prepared(report, phases, name, metric, key):
+        token = (id(report), name, metric, key)
+        if token not in prepared_metrics:
+            prepared_metrics[token] = bench_compare.PreparedMetric(report, list(phases[key].values()), name, metric, support(name,metric,key))
+        return prepared_metrics[token]
     table_metrics = list(TABLE_METRICS)
     table_metrics += [(name, metric) for name in reports[0]['aggregate']
-                      for metric in ('detail_retained_mean', 'detail_std_p99', 'detail_toggle_fraction')]
+                      for metric in ('detail_retained_mean', 'detail_correlated_mean', 'detail_std_p99', 'detail_toggle_fraction')]
     if all('backdrop-natural' in r['aggregate'] for r in reports):
         table_metrics += [('sat-natural','block_rms_p99'),('mura-natural','lf8_y_p99'),
                           ('edge-natural','flicker_p99'),('backdrop-natural','psnr_y_db')]
@@ -981,22 +863,25 @@ def compare_reports(reports, names, margin=.2, repetitions=500):
         entries = []
         for report,label,phases in zip(reports,names,grouped):
             measured = 'mse_'+metric[5:-3] if metric.startswith('psnr_') else metric
-            value = weighted([comparison_value(report,list(phases[k].values()),name,measured) for k in weights])
+            value = weighted([prepared(report,phases,name,measured,k)(list(phases[k].values())) for k in weights])
             if value is not None:
                 if metric.startswith('psnr_'):
                     value = math.inf if value == 0 else psnr(value)
                 entries.append((value,label))
-        # Retention is diagnostic (excess energy can be aliasing/noise); rank
-        # closeness to 1, not unbounded extra energy as better detail.
-        entries.sort(key=lambda item: abs(item[0]-1) if metric == 'detail_retained_mean' else item[0],
-                     reverse=metric.startswith('psnr'))
+        # Energy retention is diagnostic; signed correlation separately detects
+        # contrast reversals and replacement noise.
+        if metric != 'detail_retained_mean':
+            entries.sort(key=lambda item: item[0], reverse=metric.startswith('psnr') or metric == 'detail_correlated_mean')
         if entries:
             best = entries[0][0]
             def fmt(v):
                 if math.isinf(v): return 'infinity (MSE=0)'
                 if metric.startswith('psnr'): return f'{v:.5g} ({v-best:+.3g} dB)'
                 return f'{v:.5g} ({v/best:.3g}x)' if best else f'{v:.5g}'
-            lines.append(f"| {name} / {metric} | {' < '.join(label for _,label in entries)} | {', '.join(fmt(v) for v,_ in entries)} |")
+            ranking = ' < '.join(label for _,label in entries) if metric != 'detail_retained_mean' else ', '.join(label for _,label in entries)+' (energy diagnostic)'
+            lines.append(f"| {name} / {metric} | {ranking} | {', '.join(fmt(v) for v,_ in entries)} |")
+        else:
+            lines.append(f'| {name} / {metric} | unavailable | insufficient common spatial observations; re-score older reports |')
     rng = np.random.default_rng(913)
     checks = []
     for name,metric in (('sat','block_rms_p99'),('mura','lf8_y_p99')):
@@ -1004,18 +889,17 @@ def compare_reports(reports, names, margin=.2, repetitions=500):
         for report,phases in zip(reports[:2],grouped[:2]):
             selected = {}
             for key in weights:
-                selected[key] = [group for group in phases[key].values() if
-                    (report['stage'] == 'compositor' and name == 'sat') or
-                    any(s['metrics'][name].get(metric) is not None for s in group)]
-            if sum(map(len,selected.values())) < 4 or any(len(v) < 2 for v in selected.values()):
+                selected[key] = bench_compare.eligible_groups(report, list(phases[key].values()), name, metric)
+                if not any(support(name,metric,key).values()):
+                    selected[key] = []
+            if sum(map(len,selected.values())) < 4 or any(len(v) < 4 for v in selected.values()):
                 draws.append(None); continue
             values = []
             for _ in range(repetitions):
-                values.append(weighted([comparison_value(report,
-                    [groups[j] for j in bootstrap_indices(len(groups),rng)],name,metric) for groups in selected.values()]))
+                values.append(weighted([prepared(report,phases,name,metric,key)([groups[j] for j in bootstrap_indices(len(groups),rng)]) for key,groups in selected.items()]))
             draws.append(None if any(v is None for v in values) else np.asarray(values))
         if any(a is None for a in draws):
-            checks.append(False); lines.append(f'\n{name}: insufficient unique capture/temporal observations or phase coverage.'); continue
+            checks.append(False); lines.append(f'\n{name}: insufficient common spatial support: requires >=4 distinct original capture IDs per contributing block and phase before resampling.'); continue
         lo,hi = np.percentile(draws[0]-(1+margin)*draws[1],[2.5,97.5])
         checks.append(lo > 0)
         lines.append(f'\n{name}: A - {1+margin:g}*B 95% interval [{lo:.4g}, {hi:.4g}] codes ({repetitions} phase-stratified moving-block capture-cluster resamples).')
@@ -1039,6 +923,7 @@ def main(argv=None):
     score.add_argument('--size', type=int, nargs=2, help='scoring stream-eye size; default 2624x2752 for live dumps')
     score.add_argument('--start', type=int, default=0)
     score.add_argument('--stereo', action='store_true')
+    score.add_argument('--calibration', type=Path, help='independent full-eye calibration burst; reuse the same burst for A/B')
     score.add_argument('--registration', choices=('auto', 'planar', 'lens'), default='auto')
     compare = sub.add_parser('compare')
     compare.add_argument('runs', nargs='+', type=Path)
@@ -1055,7 +940,7 @@ def main(argv=None):
     if args.stage == 'compositor':
         if not args.input:
             parser.error('--input burst directory required')
-        report = score_compositor(args.input, scene, args.eye, args.registration)
+        report = score_compositor(args.input, scene, args.eye, args.registration, args.calibration)
     elif args.stage == 'offline':
         if not args.input:
             parser.error('--input decoded y4m/raw-dump directory required')
