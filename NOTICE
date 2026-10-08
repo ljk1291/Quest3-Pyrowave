@@ -24,3 +24,13 @@ include third-party code, which stays under its own license:
   Copyright (c) The Khronos Group Inc., unmodified.
 
 The Apache License 2.0 text is at https://www.apache.org/licenses/LICENSE-2.0.
+
+ljk1291/Quest3-Pyrowave
+
+This fork is based on JMS1717/Quest3-Pyrowave at commit
+18d43ceae4ceb808a85acc127375727bd698bd67 (MIT; Copyright (c) 2026 JMS1717 - Quest3-Pyrowave
+changes). The exact upstream MIT notice is also retained in licenses/JMS1717-Quest3-Pyrowave/LICENSE.
+The fork's own changes are under the same MIT License (LICENSE). Its overlay patches
+(patches/fork-identity-alvr.patch and the overlays listed in patches/README.md) modify ALVR and
+keep the ALVR copyrights above; an overlay that adapts other upstream code names its source
+commit in patches/README.md.

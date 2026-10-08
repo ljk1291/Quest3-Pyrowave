@@ -1,5 +1,118 @@
 # Patches
 
+Third-party trees are not kept in git. `tools/ci/fetch_sources.sh <dest>` checks out the commits
+pinned in [sources.lock.json](../sources.lock.json) and applies the patches below, in order. This
+fork (ljk1291/Quest3-Pyrowave) is based on upstream JMS1717/Quest3-Pyrowave at
+`18d43ceae4ceb808a85acc127375727bd698bd67` (`.65`) and changes upstream's trees only through
+**overlays**: additive patches applied after upstream's complete stack, each SHA-256 pinned.
+
+## The build stack
+
+`<dest>/ALVR-20.13.0`: `alvr-org/ALVR` at `7eda092` (v20.13.0), with its submodules.
+
+| # | Step | From | Pin |
+|---|---|---|---|
+| 1 | `alvr-20.13.0-server-instrumentation.patch` | upstream | upstream history |
+| 2 | `quest3-alvr.patch` (cumulative Quest 3 tree, version `20.13.0-quest3.pyro.65`) | upstream | upstream history |
+| 3 | nine `cp` lines: `tools/foveation/light.glsl`, `tools/latency/latency_stamp.h`, `tools/fences/{native_ready,ready_wait,ready_frames,latest_wait}.rs`, `tools/quest3/{cadence_probe,producer_opportunity,producer_prerecord}.rs` | upstream | upstream history |
+| 4 | `fork-identity-alvr.patch` | fork | `sources.lock.json` |
+| 5 | `fast-abr.patch` | fork, in progress | reserved |
+| 6 | `frame-dump.patch` | fork, in progress | reserved |
+| 7 | `frame-loss-diagnostics.patch` | fork, in progress | reserved |
+| 8 | `client-output-queue.patch` | fork, in progress | reserved |
+
+`<dest>/pyrowave`: `Themaister/pyrowave` at `d2997ac`, Granite `842d9d5` with its submodules, then
+upstream's `pyrowave-cdf53-haar-experiments2-3.patch`, `quest3-pyrowave.patch`,
+`pyrowave-prerecord-api.patch`, `pyrowave-fuse-color.patch`, `pyrowave-fused-dequant-haar.patch`,
+`pyrowave-haar32.patch` and `pyrowave-cdf53v2.patch`. The fork has no PyroWave overlay yet; one
+would follow the same rules after `pyrowave-cdf53v2.patch`.
+
+`Q3PW_PYROWAVE_ONLY=1` skips ALVR and its overlays. `Q3PW_BASE_REPOS=<dir>`
+(`tools/local/fast_build.py`) applies the same patches and overlays to a local copy.
+
+## Fork overlays
+
+- **One list.** The `overlay "$dest/ALVR-20.13.0" patches/<name>.patch` lines in
+  `tools/ci/fetch_sources.sh` set the order. Rows 5-8 are commented insertion points; uncomment
+  one only together with its pin.
+- **One pin each.** `python3 tools/ci/source_lock.py pin patches/<name>.patch` writes the patch's
+  SHA-256 into `sources.lock.json` under `"overlays"`; upstream's pins are untouched.
+- **Checked before anything is applied.** `overlay()` verifies the pin, runs
+  `git apply --check --binary`, then applies. `python3 tools/ci/source_lock.py` (CI's tests job
+  and `tests/test_fork_overlays.py`) fails when an applied overlay is unpinned, a pin is not
+  applied, a hash differs, a patch has CR line endings or a BOM, or the fetch script's base
+  commits differ from the lock.
+- **Default off.** Runtime behaviour an overlay adds is opt-in with a log marker
+  ([AGENTS.md](../AGENTS.md)).
+
+**Making or regenerating an overlay.** No compiler is needed for this part.
+
+1. Reconstruct ALVR the way `fetch_sources.sh` does, shallow, under the ignored `ws/sources/`:
+   `git init`; `core.autocrlf false`; `fetch --depth 1` the pinned commit; `checkout FETCH_HEAD`;
+   `submodule update --init --recursive --depth 1`; apply rows 1-2, run the row 3 `cp` lines and
+   every overlay before yours.
+2. `git add -A` and `git commit` that tree as the base, then make the edits.
+3. `git diff --full-index --binary --output=<repo>/patches/<name>.patch` (`--output`, so
+   PowerShell cannot re-encode it). For new files, `git add -N` them first.
+4. Prove it on a clean base: `git checkout -- .` then `git apply --check --binary`. Keep LF and no
+   BOM. Pin it and uncomment its line.
+
+CI is the only compiler, so read every changed line and keep hunks small.
+
+### `fork-identity-alvr.patch`
+
+Built against upstream `18d43ce`'s complete ALVR tree (rows 1-3). It changes:
+
+- the workspace version `20.13.0-quest3.pyro.65` to `20.13.0-ljk1291.3` in `Cargo.toml` and all
+  22 workspace entries of `Cargo.lock`;
+- the Android package to `io.github.ljk1291.quest3pyrowave` and the label to
+  "Quest3 PyroWave Baseline", so the fork's APK installs beside upstream's;
+- the `connection.wired_client_type` default to that package, so wired autolaunch starts the
+  fork's client on a fresh session;
+- `alvr/common/src/version.rs`: a test that the protocol ID is `20-ljk1291.3`, that the previous
+  fork build (`20.13.0-ljk1291.2`) and upstream's `20.13.0-quest3.pyro.65` are refused, and that
+  CI's `+<commit>` build metadata does not change compatibility.
+
+**Version and settings compatibility.** Upstream `.65` leaves ALVR's `version.rs` as it is: the
+protocol ID is `<major>-<pre-release>`, so a client and a server connect only when their
+pre-release tags match exactly. The fork keeps that rule, and `ljk1291.3` is a new tag because
+`.65` changed packets and settings since `ljk1291.2`. CI stamps `+<commit>`, which changes the
+displayed version but not the protocol. Settings follow ALVR's own path unchanged:
+
+- **Fresh `session.json`.** The streamer writes the fork's defaults at startup (upstream `.65`
+  persists them before the driver reads the file), with `server_version` set to this build.
+- **Existing `session.json` from `ljk1291.2` or upstream `.65`.** `SessionConfig::merge_from_json`
+  keeps every setting whose name and type still match and takes defaults for the rest. The
+  dashboard compares `server_version` exactly, so on first start it clears the trusted clients
+  and reopens the setup wizard. A file copied from upstream `.65` keeps
+  `wired_client_type = io.github.jms1717.quest3pyrowave`; set the fork's package or start fresh.
+- **Headset.** The client resets its stored config when the protocol ID changes, so the first
+  launch after upgrading from `ljk1291.2` gets a new random `NNNN.client` hostname.
+
+## Building
+
+```
+gh workflow run ci.yml --ref codex/upstream-rebase -f cpu_only=false
+```
+
+A push on `main` or `codex/**`, or a dispatch with `cpu_only=true`, runs only the CPU jobs
+(`tests`, `fuse_color_exact`, `dequant_haar_gate`, `publication_tests`). A dispatch with
+`cpu_only=false` also runs `client` and `streamer`, then `matching-pair`. Artifacts:
+
+- `Quest3-Pyrowave-Android`: `Quest3-Pyrowave-stable.apk`, `APK-CERTIFICATE.txt`,
+  `BUILD-METADATA.json`, `LICENSES.zip`, `libc++_shared.so`, `libpyroclient.so`,
+  `libpyrowave-shared.so`, upstream's probes, `SHA256SUMS.txt`.
+- `Quest3-Pyrowave-Windows`: `Quest3-Pyrowave-Windows.zip`, `BUILD-METADATA.json`,
+  `SHA256SUMS.txt`.
+
+Stage a pair as `out/<name>-<run-id>/android` and `out/<name>-<run-id>/windows` with
+`gh run download <run-id> -n <artifact> -D <dir>`; `ws/session25.py` reads
+`windows/Quest3-Pyrowave-Windows.zip` and its SHA-256.
+
+## Upstream patch reference
+
+The rest of this file is upstream's patch reference, unchanged.
+
 Local modifications to third-party clones, kept as patches so the clones themselves (2–4 GB each)
 stay out of this history. Each one applies to a public upstream commit, so patch + base fully
 reconstructs the tree.
