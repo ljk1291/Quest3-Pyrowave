@@ -15,7 +15,7 @@ profiles, troubleshooting. Everything there applies here unless this page says o
 |---|---|
 | Upstream commit | `18d43ceae4ceb808a85acc127375727bd698bd67` (`.65`, protocol `20.13.0-quest3.pyro.65`) |
 | Pinned sources | ALVR `7eda092`, PyroWave `d2997ac`, Granite `842d9d5` ([sources.lock.json](sources.lock.json)) |
-| Fork identity | [fork.json](fork.json): version `20.13.0-ljk1291.3`, package `io.github.ljk1291.quest3pyrowave` |
+| Fork identity | [fork.json](fork.json): version `20.13.0-ljk1291.4`, package `io.github.ljk1291.quest3pyrowave` |
 
 ## What the fork adds
 
@@ -32,7 +32,7 @@ stack, each pinned by SHA-256. [patches/README.md](patches/README.md) lists the 
 | `fork-baseline.patch`: fork baseline, applied last: fresh-output counter (`selected_output_submissions`), PyroWave full-range fix (`ALVR_Q3PW_PYROWAVE_FULL_RANGE=0` opts out; `[Q3PW_RANGE]`, `[Q3PW_COLOUR]`), FOV crop (`video.fov_crop.enabled`, `.content.horizontal_tangent_multiplier` / `vertical_tangent_multiplier`; `[FOV-CROP]`), shutdown order, NVENC preflight (`ALVR_NVENC_DIMENSION_PREFLIGHT=1`); extends the bincode telemetry packet, so never mix with builds without it ([docs/FORK-BASELINE.md](docs/FORK-BASELINE.md)) | in this branch (not yet built on `.65`) |
 
 The build side adds the overlay pins (`tools/ci/source_lock.py`), a build identity stamped into
-both binaries (`20.13.0-ljk1291.3+<commit>`), `BUILD-METADATA.json` for each artifact and a CI check
+both binaries (`20.13.0-ljk1291.4+<commit>`), `BUILD-METADATA.json` for each artifact and a CI check
 that the Android and Windows builds match. New runtime behaviour stays opt-in with a log marker.
 
 ## Building
@@ -53,7 +53,7 @@ The Android artifact holds `Quest3-Pyrowave-stable.apk` (signed with the fork's 
 only: the client and server refuse a different fork version. `tools/local/fast_build.py` also
 works ([docs/LOCAL-BUILD.md](docs/LOCAL-BUILD.md)) where a toolchain exists.
 
-## Upgrading from `20.13.0-ljk1291.2`
+## Upgrading from `20.13.0-ljk1291.2` or `.3`
 
 - The headset client resets its stored config when the protocol changes, so it comes up with a
   new random `NNNN.client` hostname; trust it in the dashboard.

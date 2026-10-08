@@ -7,7 +7,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_adb"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_common",
   "alvr_filesystem",
@@ -16,7 +16,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_audio"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_common",
   "alvr_session",
@@ -25,7 +25,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_client_core"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_audio",
   "alvr_common",
@@ -34,7 +34,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_client_mock"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_client_core",
   "alvr_common",
@@ -43,7 +43,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_client_openxr"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_client_core",
   "alvr_common",
@@ -52,7 +52,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_common"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "anyhow",
   "backtrace",
@@ -61,7 +61,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_dashboard"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_adb",
   "alvr_common",
@@ -70,7 +70,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_events"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_common",
   "alvr_packets",
@@ -79,7 +79,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_filesystem"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "dirs",
   "once_cell",
@@ -88,7 +88,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_graphics"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_common",
   "alvr_session",
@@ -97,7 +97,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_gui_common"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_common",
   "egui",
@@ -106,7 +106,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_launcher"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_adb",
   "alvr_common",
@@ -115,7 +115,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_packets"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_common",
   "alvr_session",
@@ -124,7 +124,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_server_core"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_adb",
   "alvr_audio",
@@ -133,7 +133,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_server_io"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_common",
   "alvr_events",
@@ -142,7 +142,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_server_openvr"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_common",
   "alvr_filesystem",
@@ -151,7 +151,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_session"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_common",
   "alvr_filesystem",
@@ -160,7 +160,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_sockets"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_common",
   "alvr_session",
@@ -169,7 +169,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_system_info"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_common",
   "jni",
@@ -178,7 +178,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_vrcompositor_wrapper"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_common",
   "alvr_filesystem",
@@ -187,7 +187,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_vulkan_layer"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_common",
   "alvr_filesystem",
@@ -196,7 +196,7 @@ index f5dfee88cf9296c1d93315f224ffeb927ee89ab5..0cb222659486aac2fb1e6f5a5caf639c
  [[package]]
  name = "alvr_xtask"
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  dependencies = [
   "alvr_filesystem",
   "pico-args",
@@ -209,7 +209,7 @@ index c6d1bd9e7caaf974cd3dd93c6f47c180c57525a0..f51c22aae69cc075b331090b224b30f2
  [workspace.package]
  # Pre-release tag: a different protocol ID, so stock ALVR 20.x clients and servers are refused
 -version = "20.13.0-quest3.pyro.65"
-+version = "20.13.0-ljk1291.3"
++version = "20.13.0-ljk1291.4"
  edition = "2021"
  rust-version = "1.82"
  authors = ["alvr-org"]
@@ -239,7 +239,7 @@ diff --git a/alvr/common/src/version.rs b/alvr/common/src/version.rs
 index ce5ecd001d9552aa6d0e7467457e1d4b02045800..51c3174b5f76a6db6e70b03b3c3864dd1590c648 100644
 --- a/alvr/common/src/version.rs
 +++ b/alvr/common/src/version.rs
-@@ -48,3 +48,24 @@ pub fn is_version_compatible(other_version: &Version) -> bool {
+@@ -48,3 +48,28 @@ pub fn is_version_compatible(other_version: &Version) -> bool {
  
      protocol_id_u64() == hash_string(&protocol_string)
  }
@@ -252,11 +252,15 @@ index ce5ecd001d9552aa6d0e7467457e1d4b02045800..51c3174b5f76a6db6e70b03b3c3864dd
 +    fn fork_protocol_rejects_previous_schemas() {
 +        // The fork's pre-release tag is its protocol: the previous fork build and upstream's own
 +        // build carry other packet and settings schemas, so neither may connect to this one.
-+        for previous_schema in ["20.13.0-ljk1291.2", "20.13.0-quest3.pyro.65"] {
++        for previous_schema in [
++            "20.13.0-ljk1291.3",
++            "20.13.0-ljk1291.2",
++            "20.13.0-quest3.pyro.65",
++        ] {
 +            let previous_schema = Version::parse(previous_schema).unwrap();
 +            assert!(!is_version_compatible(&previous_schema));
 +        }
-+        assert_eq!(protocol_id(), "20-ljk1291.3");
++        assert_eq!(protocol_id(), "20-ljk1291.4");
 +        assert!(is_version_compatible(&ALVR_VERSION));
 +        // CI stamps "+<commit>" build metadata; it identifies a build without changing protocol.
 +        let mut stamped = ALVR_VERSION.clone();

@@ -171,8 +171,9 @@ Before accepting the integrated build, CI must prove:
    must carry identities and preserve this same post-release definition.
 
 The telemetry fields extend a bincode control packet: JSON negotiation's missing-field defaults
-do **not** establish mixed-version binary compatibility. Use a matching pair and let the planner
-handle protocol/version integration. The fork's bench parser must also be carried forward
+do **not** establish mixed-version binary compatibility. Builds with and without this overlay must
+never be paired; the fork protocol is therefore `20.13.0-ljk1291.4` (earlier builds advertised
+`ljk1291.3`). The fork's bench parser must also be carried forward
 separately; upstream `.65`'s bench does not compute `fresh_selected_output_rate_fps` by itself.
 Live FOV/frustum agreement, crop reconnect, colour correctness, shutdown, performance and optical
 claims remain unverified on this port. None of the explicitly excluded experimental groups was included.

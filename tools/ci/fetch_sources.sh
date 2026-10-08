@@ -56,7 +56,7 @@ cp "$repo/tools/quest3/producer_opportunity.rs" "$dest/ALVR-20.13.0/alvr/client_
 cp "$repo/tools/quest3/producer_prerecord.rs" "$dest/ALVR-20.13.0/alvr/client_core/src/video_decoder/producer_prerecord.rs"
 # ljk1291 fork overlays on the complete upstream ALVR tree above, in this order. Each needs its
 # pin: python3 tools/ci/source_lock.py pin patches/<name>.patch
-overlay "$dest/ALVR-20.13.0" patches/fork-identity-alvr.patch   # version 20.13.0-ljk1291.3, own package id
+overlay "$dest/ALVR-20.13.0" patches/fork-identity-alvr.patch   # version 20.13.0-ljk1291.4, own package id
 overlay "$dest/ALVR-20.13.0" patches/fast-abr.patch   # opt-in video.pyrowave.fast_abr (default off)
 overlay "$dest/ALVR-20.13.0" patches/frame-dump.patch   # opt-in lossless frame dumps (client)
 overlay "$dest/ALVR-20.13.0" patches/frame-loss-diagnostics.patch   # opt-in frame-loss accounting

@@ -77,8 +77,10 @@ would follow the same rules after `pyrowave-cdf53v2.patch`.
   changes `get_frame` to return a `SelectedFrame` on the path `client-output-queue.patch`
   reworks, so the two were merged by hand; CI compiles the result first.
 - **Caution: no mixed pairs.** `fork-baseline.patch` extends the bincode `HeadsetTelemetry`
-  packet, so a build with it and a build without it must never be used as a pair, even though
-  both advertise `20.13.0-ljk1291.3`.
+  packet, so a build with it and a build without it must never be used as a pair. That is why
+  the fork protocol is `20.13.0-ljk1291.4`: the earlier `ljk1291.3` builds (without it) are
+  refused, and the version test pins `20-ljk1291.4` and rejects `ljk1291.3`, `ljk1291.2` and
+  `quest3.pyro.65`.
 
 **Making or regenerating an overlay.** No compiler is needed for this part.
 
@@ -98,31 +100,32 @@ CI is the only compiler, so read every changed line and keep hunks small.
 
 Built against upstream `18d43ce`'s complete ALVR tree (rows 1-3). It changes:
 
-- the workspace version `20.13.0-quest3.pyro.65` to `20.13.0-ljk1291.3` in `Cargo.toml` and all
+- the workspace version `20.13.0-quest3.pyro.65` to `20.13.0-ljk1291.4` in `Cargo.toml` and all
   22 workspace entries of `Cargo.lock`;
 - the Android package to `io.github.ljk1291.quest3pyrowave` and the label to
   "Quest3 PyroWave Baseline", so the fork's APK installs beside upstream's;
 - the `connection.wired_client_type` default to that package, so wired autolaunch starts the
   fork's client on a fresh session;
-- `alvr/common/src/version.rs`: a test that the protocol ID is `20-ljk1291.3`, that the previous
-  fork build (`20.13.0-ljk1291.2`) and upstream's `20.13.0-quest3.pyro.65` are refused, and that
+- `alvr/common/src/version.rs`: a test that the protocol ID is `20-ljk1291.4`, that the previous
+  fork builds (`20.13.0-ljk1291.3`, `.2`) and upstream's `20.13.0-quest3.pyro.65` are refused, and that
   CI's `+<commit>` build metadata does not change compatibility.
 
 **Version and settings compatibility.** Upstream `.65` leaves ALVR's `version.rs` as it is: the
 protocol ID is `<major>-<pre-release>`, so a client and a server connect only when their
-pre-release tags match exactly. The fork keeps that rule, and `ljk1291.3` is a new tag because
-`.65` changed packets and settings since `ljk1291.2`. CI stamps `+<commit>`, which changes the
+pre-release tags match exactly. The fork keeps that rule, and `ljk1291.4` is a new tag because
+`.65` changed packets and settings since `ljk1291.2`, and the baseline overlay extends the bincode
+telemetry packet since `ljk1291.3`. CI stamps `+<commit>`, which changes the
 displayed version but not the protocol. Settings follow ALVR's own path unchanged:
 
 - **Fresh `session.json`.** The streamer writes the fork's defaults at startup (upstream `.65`
   persists them before the driver reads the file), with `server_version` set to this build.
-- **Existing `session.json` from `ljk1291.2` or upstream `.65`.** `SessionConfig::merge_from_json`
+- **Existing `session.json` from `ljk1291.2`, `.3` or upstream `.65`.** `SessionConfig::merge_from_json`
   keeps every setting whose name and type still match and takes defaults for the rest. The
   dashboard compares `server_version` exactly, so on first start it clears the trusted clients
   and reopens the setup wizard. A file copied from upstream `.65` keeps
   `wired_client_type = io.github.jms1717.quest3pyrowave`; set the fork's package or start fresh.
 - **Headset.** The client resets its stored config when the protocol ID changes, so the first
-  launch after upgrading from `ljk1291.2` gets a new random `NNNN.client` hostname.
+  launch after upgrading from `ljk1291.2` or `.3` gets a new random `NNNN.client` hostname.
 
 ## Building
 
