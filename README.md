@@ -26,9 +26,9 @@ stack, each pinned by SHA-256. [patches/README.md](patches/README.md) lists the 
 |---|---|
 | `fork-identity-alvr.patch`: own version, protocol and Android package (label "Quest3 PyroWave Baseline"), so it installs beside upstream's app and only pairs with a server of the same fork version | in this branch |
 | `fast-abr.patch`: opt-in `video.pyrowave.fast_abr` (default off): per-frame PyroWave budget below ALVR's ceiling over TCP, bounded send buffer, Aimd/Capacity modes, inactive on UDP, markers `[Q3PW_FAST_ABR]` ([docs/FAST-ABR.md](docs/FAST-ABR.md)) | in this branch (not yet built on `.65`) |
-| `frame-dump.patch`: opt-in lossless frame dumps for quality scoring | in progress |
-| `frame-loss-diagnostics.patch`: opt-in frame-loss accounting | in progress |
-| `client-output-queue.patch`: opt-in decoded output FIFO | in progress |
+| `frame-dump.patch`: opt-in lossless frame dumps for quality scoring, incl. the packed `post_decode` stage (`ALVR_Q3PW_FRAME_DUMP`, `debug.q3pw.frame_dump`; [docs/FRAME-DUMP.md](docs/FRAME-DUMP.md)) | in this branch (not yet built on `.65`) |
+| `frame-loss-diagnostics.patch`: opt-in frame-loss counters upstream lacks (`ALVR_FRAME_LOSS`, `debug.q3pw.frame_loss`; [docs/FRAME-LOSS-DIAGNOSIS.md](docs/FRAME-LOSS-DIAGNOSIS.md)) | in this branch (not yet built on `.65`) |
+| `client-output-queue.patch`: opt-in decoded output FIFO (`debug.q3pw.output_queue=2\|3`; covers TCP, wired and UDP; marker `[Q3PW_OUTPUT_QUEUE]`; needs the matching `tools/pyroclient`; [docs/OUTPUT-QUEUE.md](docs/OUTPUT-QUEUE.md)) | in this branch (not yet built on `.65`) |
 
 The build side adds the overlay pins (`tools/ci/source_lock.py`), a build identity stamped into
 both binaries (`20.13.0-ljk1291.3+<commit>`), `BUILD-METADATA.json` for each artifact and a CI check

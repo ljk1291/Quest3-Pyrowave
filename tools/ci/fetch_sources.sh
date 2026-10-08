@@ -57,11 +57,10 @@ cp "$repo/tools/quest3/producer_prerecord.rs" "$dest/ALVR-20.13.0/alvr/client_co
 # ljk1291 fork overlays on the complete upstream ALVR tree above, in this order. Each needs its
 # pin: python3 tools/ci/source_lock.py pin patches/<name>.patch
 overlay "$dest/ALVR-20.13.0" patches/fork-identity-alvr.patch   # version 20.13.0-ljk1291.3, own package id
-# Insertion points for the overlays being rebased onto this upstream: uncomment each with its pin.
 overlay "$dest/ALVR-20.13.0" patches/fast-abr.patch   # opt-in video.pyrowave.fast_abr (default off)
-# overlay "$dest/ALVR-20.13.0" patches/frame-dump.patch
-# overlay "$dest/ALVR-20.13.0" patches/frame-loss-diagnostics.patch
-# overlay "$dest/ALVR-20.13.0" patches/client-output-queue.patch
+overlay "$dest/ALVR-20.13.0" patches/frame-dump.patch   # opt-in lossless frame dumps (client)
+overlay "$dest/ALVR-20.13.0" patches/frame-loss-diagnostics.patch   # opt-in frame-loss accounting
+overlay "$dest/ALVR-20.13.0" patches/client-output-queue.patch   # opt-in decoded output FIFO (client)
 fi
 
 checkout https://github.com/Themaister/pyrowave "$dest/pyrowave" "$PYROWAVE_BASE"
