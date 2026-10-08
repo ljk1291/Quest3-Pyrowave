@@ -13,9 +13,9 @@ these checks, which protect something real:
    session, Quest debug properties) and restore it afterwards; restore must be idempotent.
 2. Leave Virtual Desktop untouched (registration, service, settings); verify by comparison.
 3. Stop and restore on device health: Android thermal status >= 3, battery temperature
-   >= 60 C (owner decision 2026-10-07; was 50 C — ADB stays on the USB cable, so the headset
-   charges during tests), or battery < 10 %. Charging is not required. Prefer cooling pauses
-   between cells (e.g. wait for <= 44 C when a cell would start at >= 47 C).
+   >= 55 C (owner decision 2026-10-08; was 60 C, before that 50 C), or battery < 10 %.
+   Start a run only at >= 40 % and < 50 C. Charging is not required. Prefer cooling pauses
+   between cells (hq-sweep: at >= 48 C stop the stream and wait for <= 45 C).
 4. Don't start a run while the owner is using the PC for VR or gaming.
 5. Report feature markers, but never block on them. Record telemetry and any owner
    judgement verbatim.
