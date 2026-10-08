@@ -5,6 +5,171 @@ Configurations that passed automatic screening and are worth the owner's in-head
 evidence that put it here, and what to look at. Rejected options are listed at the end
 so they aren't retried by accident.
 
+## Bench scene v3, owner's worn A/B of encoder weighting (2026-10-08 22:45–23:00, WORN, R4)
+Scene: v3 cards panel at 1.5 m in front of the world-locked Metro main-menu backdrop (exact worn encoder-input frame),
+`--bench-motion none` (owner's own head motion), R4 pair, cell `hq-cdf53-1000-v2-csf-q2` (C10: CDF 5/3 Decoder V2,
+1000 Mbps, FIFO 2), 90 encoded frames/s, 27-41 °C, 75 %, 60 °C stop.
+- **A = C10 with our weighting** (rebase density-only env: CPD 13.9, chroma 0.6, no discard weight, no LF boost).
+  Owner (verbatim): *"I still see blocky compression."* (asked for screencaps: results/local/session-25/
+  bench-v3-worn-A-burst-224836, 10 lossless shots, residual jitter 0.22 px; reference-free: saturated chroma std p99
+  5.9, 2.7 % of saturated blocks toggling).
+- **B = same cell with upstream weighting** (`Q3PW_REBASE_CSF=upstream`: full headset CSF, chroma 1.6, weighted
+  discard, LF boost). Owner (verbatim): *"The blockiness is better, but there are still some artifacts, but im not sure
+  what they are."* (also: *"The rendering is broken, the scene is showing off to the left"*: the panel anchors to the
+  head yaw at scene start; the owner was turned during the switch. Fixed by restarting only the scene, 22:55; a
+  recentre option is needed.) Screencaps bench-v3-worn-B2-burst-225829 (head moved up to 15 px; not comparable with the
+  reference-free tool).
+- Owner on B's remaining artifacts (verbatim): *"If you look at the background metro menu you can see the artifacts
+  there. There is a shimmer, smearing/softnesss, aliasing or areas that look like they are flickering from low res to
+  high res"*. "Low res <-> high res" = per-block detail (luma) toggling under motion, the luma counterpart of the chroma
+  toggling; no current metric measures it directly. Part of the shimmer/softness may be the scene renderer
+  (bilinear/mip resampling of a flat Metro image under head motion), not the codec: to be separated offline (truth-only
+  temporal analysis) and with exact codec-stage dumps.
+- **C = upstream weighting at 2000 Mbps** (new cell `hq-cdf53-2000-v2-csf-q2`): owner *"Im seeing mostly blackbars
+  here, what is the latency?"*: 68 fresh/s (10 s capture; ALVR stats gave no frames, so no latency figure), decode
+  4.5 ms: frames don't arrive at 2000 with this scene. **D = 1500 Mbps** (`hq-cdf53-1500-v2-csf-q2`): 72 fresh/s, then
+  the owner saw nothing (*"im not seeing anything in the headset"*); vrserver.txt stopped logging at 23:13:14 while ALVR
+  still reported Streaming (server stall). So >1000 Mbps is not usable live with this full-load scene (earlier 1500/2000
+  results used the light chart, where the encoder stops early). Whether B's residual artifacts are codec-made must be
+  answered offline (no network limit) and with codec-stage dumps.
+- **So v3 reproduces the owner's Metro observation**: blocky compression visible with our weighting, better with
+  upstream's, residual artifacts on both, same direction and roughly the same size as the offline v3 result below.
+- Scorer gap: the ground-truth compositor scorer rejected all real screencaps ("fiducial homography failed"): Quest
+  screencaps are lens-warped (barrel), not pre-warp as assumed. Needs a distortion model / piecewise registration
+  before compositor-stage numbers exist.
+
+## Bench scene v3 offline: ours-C9 vs upstream weighting (2026-10-08 ~22:10, offline, PC only)
+v3 = the v2 cards panel in front of a world-locked full-view backdrop made from an exact Metro main-menu encoder-input
+frame (worn dump 22:01, results/local/bench-metro-worn, private). Encoder-load proxy per eye (CPU, single-level
+coefficient entropy): v2 0.70 MB, **v3 2.45 MB, real Metro 2.57 MB**; the 1000 Mbps / 90 Hz budget is ~0.69 MB per eye,
+so v2 fitted (owner: no compression) and Metro/v3 do not. Offline encode/decode, Decoder V2 9c126c6 Windows tools,
+CDF 5/3, 1000 Mbps fixed budget, 24 frames of jitter motion (`bench_offline.py`, results/local/bench-offline-v3):
+`ours-c9` = density-only CSF 27.8 px/deg (chroma 0.6, no discard weight, LF x1); `upstream-like` = same encoder with
+`PYROWAVE_HEADSET_CSF=1` (chroma 1.6, weighted discard, LF x6). (Upstream `.62` ships no Windows encoder.)
+
+| Class / metric (lower = better) | upstream-like | ours-c9 |
+|---|---:|---:|
+| sat strip: block toggle fraction | 0.002 | **0.41 (208x)** |
+| sat strip: block RMS change p99 (codes) | 1.20 | **7.37 (6.2x)** |
+| mura LF8 Y p99 | 0.104 | **0.242 (2.3x)** |
+| mura LF24 dark p99 | 0.049 | 0.086 (1.8x) |
+| natural sat block RMS p99 / natural mura LF8 p99 | 0.96 / 0.32 | 1.25 / 0.41 (1.3x) |
+| edge flicker p99 (synthetic / natural) | 9.52 / 5.73 | **7.32 / 4.37 (ours 1.3x better)** |
+| PSNR-Y natural / backdrop (dB) | 45.2 / 46.3 | **47.9 / 48.9** |
+
+- `compare` verdict PASS: ours-C9 weighting worse than upstream weighting on colour toggling and mura by >20 %
+  (bootstrap 95 % intervals of A-1.2B: sat [5.15, 6.76], mura [0.106, 0.126] codes). This matches the owner's worn
+  C9-vs-`.62` verdict (colour flicker and mura worse on ours) at the codec stage. The trade: ours spends the bits on luma
+  detail (+2.5-2.8 dB, less edge flicker), so the owner's "aliasing" on ours is probably not codec-made (upstream renders
+  3072x3232 and downsamples; ours renders the crop natively).
+- Calibration vs the real Metro frame at the same budget: real Metro errors are 2-4x higher than v3's backdrop (e.g.
+  ours sat Cb MSE 12.0 vs 3.8), so v3 is still somewhat easier than Metro, but the C9/upstream ratio is the same on both
+  (sat Cb MSE 3.6x on Metro, 3.4x on v3). A repeated single dump has no motion, so Metro's temporal metrics read 0.
+- Not yet: the owner's worn look at v3 (does it show Metro's artifacts?), live compositor-stage runs (R4, upstream
+  `.62`, C9, QGO Rec.2020 on/off).
+
+## Bench scene v2, owner's worn look (2026-10-08 20:22–20:24, WORN, R4 `hq-cdf53-1000-v2`)
+Deterministic bench scene (ws/BENCH-SCENE.md; `stereo_scene --bench`, layout `cards`, `--bench-motion none`): a
+world-locked stereo panel (1.5 m, 65° wide: 10 Steam covers, orange/red/green/blue strip, dark low-contrast patch,
+thin lines/text, ArUco/barcode/colour-patch border) on a flat dark background. R4 pair, cell `hq-cdf53-1000-v2`
+(rebase density-only env: chroma 0.6, no LF boost, CPD 32.64), CDF 5/3, 1000 Mbps, 90 Hz. 34 %, 45–50 °C, 60 °C
+stop (owner: "dont worry about the temp"). v1 (19:19, head-locked mono image) drew: *"The sceen is offset in each eye,
+and also it is stuck to my view"*, fixed in v2.
+Owner (verbatim, v2): *"I dont really see any of the blocky compression here at all"*, *"No mura like compression and
+very little aliasing/flickering"*.
+- So v2 does NOT reproduce Metro's artifacts: most of each eye image is flat dark, and 1000 Mbps codes the small
+  detailed panel almost losslessly. Next (v3): fill the whole field of view with detailed natural content (a
+  world-locked backdrop from exact Metro menu encoder-input frames) with the panel in front, so the encoder is
+  budget-limited as in Metro. Until it reproduces the owner's artifacts, the scene is not used to rank builds.
+- Earlier attempts at 20:07–20:17 collided with a concurrent C10 worn sweep (shared session25 state); not seen.
+
+## C10: the rebased fork on upstream `.65` (2026-10-08 14:30–18:25, unworn, automatic)
+Owner decision: rebase onto upstream `.65` (18d43ce) instead of porting its UI. Branch `codex/upstream-rebase`
+(34f8fae, protocol `20.13.0-ljk1291.4`, same package id) = upstream + six overlays: fork identity, fast ABR,
+frame dump, frame-loss counters, client output FIFO, and the "fork baseline" keepers (fresh-output counter,
+PyroWave full-range fix with `ALVR_Q3PW_PYROWAVE_FULL_RANGE=0` opt-out, FOV crop, shutdown order, NVENC preflight).
+Dropped as redundant: our Decoder V2/haar32/CSF port, fast53, presentation filters, direct-eye/WO-8 foveation,
+WO-7 RDO (density-only `-csf` is now four encoder env vars). Astra review: no P1. Builds R0–R3 (`out/upstream-rebase-r*`),
+R4 = final pair. Harness: `ws/REBASE-HARNESS.md`.
+
+**Candidate C10 = `hq-cdf53-1000-v2-csf-q2`** on the R4 pair: CDF 5/3 Decoder V2 mode 5, FOV crop (5248x2752),
+density-only CSF (`PYROWAVE_CPD_NYQUIST=13.9`), output FIFO depth 2, 1000 Mbps TCP, 90 Hz, no fast ABR.
+
+| Build / cell (1000 Mbps, 90 Hz, Wi-Fi 160 MHz, chart `--sway 64`) | Fresh/s | Superseded/s | GPU decode / dtf p50 | Latency p50 (ALVR est.) |
+|---|---|---|---|---|
+| R0 = upstream .65 + identity, `hq-cdf53-1000-v2` (full FOV, no FIFO) | 77.5 (probe) | 13.3 | 5.8 / 6.6 | 53 |
+| R2 same cell + FIFO depth 3 | 90.0 (probe) | 0.1 | 4.3 / 6.5 | 58 |
+| R2 `-csf` / `-fabrc-csf`, 2 rounds | 89.9, 89.3 / 89.8, 89.8 | ≤0.7 | 4.4–6.0 / 6.3–7.0 | 69, 93 / 84, 75 |
+| R2 Haar 1000, 2 rounds | 80.6, 80.4 | 0.1 | 8.6 / 11.6 | 96, 75 |
+| R3 (+ crop, + our counter) `-csf-q1` (no FIFO) | 89.2 | 0.8 | 4.5 / 5.7 | 71 |
+| R3 `-csf` (FIFO 3) | 89.7 | 0.2 | 5.1 / 5.9 | 62.5 |
+| **R3 `-csf-q2` (FIFO 2) = C10** | **89.8** | 0.2 | 3.7 / 5.4 | **59.4** |
+| R3 `-fabrc-csf` | 89.4 | 0.3 | 3.4 / 4.9 | 65 (**741 Mbps** p50: Capacity cut the budget) |
+| **R4 (final pair, protocol `.4`, INSTALLED 18:43) `-csf-q2` = C10** | **89.5** | 0.6 | 4.3 / 5.6 | 61.7 |
+
+- The output FIFO works on upstream exactly as on our stack (77.5 → 90 fresh/s uncropped); with the crop even FIFO-off
+  reaches 89.2, so depth 2 is the latency-optimal setting. Our `selected_output_submissions` counter and upstream's
+  `Q3PW_FRESH taken` agree within 0.1/s in steady state.
+- ALVR's latency estimate swings ~25 ms between identical connections (69 vs 93 ms for the same cell); treat single-cell
+  latency differences under that as noise. Haar is decode-bound at ~80/s as before (its 175 ms network p95 once was a one-off).
+- Fast ABR Capacity on this link cuts bitrate (741 of 1000 Mbps) without a fresh-rate gain: leave it off.
+- Upstream labels Haar as "wavelet=CDF 9/7" in the client's config summary (`PyroWaveConfig::summary()` prints 9/7
+  for anything not 5/3); the `pyroclient: wavelet Haar` line is authoritative.
+- **For the owner's worn look (R4 pair):** Metro fence + head motion on C10; then the dashboard thumbnails (the
+  chroma toggle seen on C9) with `ALVR_Q3PW_PYROWAVE_FULL_RANGE=0` as the A/B arm for colour; and upstream's new UI:
+  click both thumbsticks = overlay Compact/Full/Hidden, hold both ~0.7 s = in-headset settings menu.
+- Open (Astra P2, inherited from upstream): a stalled Wi-Fi TCP writer can block disconnect/driver shutdown; follow-up overlay.
+
+## Capture/detection task: where the owner's artifacts appear (2026-10-08 11:30–12:31, unworn, ours 9c126c6 + upstream `.62`)
+Goal (ws/HANDOFF-CAPTURE.md): make the owner's worn artifacts (chroma blocks toggling on saturated thumbnails, mura,
+edge flicker) detectable. Owner (verbatim, during the session): *"I am not seeing the compression that I would see still
+in thse screenshots. THAT is the fix we need, we need to see that compression, otherwise we cant fix it"*; on holding
+still: *"Im not sure if I am completely still, but I am not moving my head from side to side and the artifacting still
+happens."*; lens camera: *"I have tried, but was unable to get a clear image"*; *"AS I told you previously, the
+artifacts are also visible on the dashboard"*. Owner decisions: testing allowed down to 10 % battery; *"you can change
+any settings"* (QGO).
+
+| Capture (ours C9 = `hq-cdf53-1000-v2-fabrc-csf`, SteamVR Library) | Chroma temporal std on saturated px, p99 (codes) | Saturated blocks toggling | Looks compressed? |
+|---|---|---|---|
+| Decoded vs encoder input, dump, static Library (`hcsfdump`) | — | 0 % (old metric) | No: mean error 0.3 codes (display domain), Cb/Cr PSNR ~50 dB |
+| Presented eye image (client dump, 2624x2752, Metro running behind the dashboard, 7 settled frames, registered) | **1.9** | **0 %** | No: only thin edge outlines from tracking jitter |
+| Quest compositor output (lossless screencap burst, 20 shots, registered) | **6.8** | **7–9 %** | Map shows **blocky rectangles inside thumbnails** + blotchy contours in the dark background; single stills still look clean |
+
+- **Finding: our decoded and presented eye images are clean; the blocky toggling appears after our client, in the Quest
+  compositor path.** Caveat: the dump and the screencap burst were different runs (dashboard over Metro vs over the void).
+- **Prime suspect: Quest Games Optimizer overrides held globally on the headset**: `debug.oculus.foveation.level=2`
+  (fixed foveated rendering → reduced-resolution tiles), `debug.oculus.textureWidth/Height=2800/2933` (forced eye-buffer
+  size, our image is 2624x2752 → extra resample), `debug.oculus.colorspace.overrideColorspace=Rec.2020`. QGO's profile
+  did not reach the upstream package earlier (GPU level 4 there), consistent with upstream looking much better. The
+  QGO-off A/B (`ws/scripts/qgo-ab.ps1`) was stopped by the 10 % battery stop before streaming; values restored exactly.
+- **QGO A/B, same headset pose (13:05 off / 13:16 on, ours C9, SteamVR Library, 16-shot bursts, registered; QGO's
+  accessibility service off so it could not re-apply; values restored exactly):**
+
+  | Matched thumbnails (Outer Wilds + Lone Echo) | QGO overrides off | QGO on (same pose) | QGO on, 11:37 (other pose) |
+  |---|---|---|---|
+  | Residual jitter after registration | 0.07 px | 0.08 px | 0.25 px |
+  | Chroma std on saturated px, p99 | **3.7** | **6.2** | 7.4 |
+  | Saturated blocks toggling | 0 % | 0.6 % | 10.5 % |
+  | Luma std p99 / edge flicker mean / LF p99 | 3.37 / 2.37 / 0.046 | 3.36 / 2.38 / 0.071 | 5.98 / 4.32 / 0.094 |
+  | Saturated pixel fraction | 3.3 % | 5.8 % | 6.3 % |
+
+  Luma and edge flicker are identical with QGO on/off; only chroma on saturated colours rises (~1.7x), together with
+  more saturated pixels: that is QGO's **Rec.2020 colour override** stretching saturation (and the chroma error with
+  it), not foveation tiles. **The big driver is headset motion**: the same build/QGO state with 3x more tracking
+  jitter gives ~2x luma/edge flicker and 10 % toggling. This corrects the dump-vs-screencap conclusion above (that
+  comparison was also confounded by motion: 0.12 vs 0.23 px). Worn heads move far more than an unworn headset, so
+  next: dumps/bursts under controlled motion (`stereo_scene --image --jitter`, larger amplitudes) to rank encoders.
+- Upstream `.62` burst (`burst-up`) is **not comparable**: different dashboard placement, controller lasers sweeping,
+  performance overlay, hover highlight. A controlled stimulus exists for this (`stereo_scene --image --jitter`,
+  `ws/scripts/make_stimulus.py`); ours C9 with it at 0.3 px jitter: 1.6 % saturated toggles.
+- Screencap correction: the "Library" in unworn captures IS SteamVR's dashboard through our stream (it lists Oculus PC
+  apps), not Meta's shell.
+- New tools: `ws/scripts/hmd_burst.py` (lossless screencap bursts), `hmd_flicker.py` (reference-free temporal maps;
+  Astra: sampled deviation only, not 90 Hz flicker; registration residual inflates edges), `flicker_view.py`,
+  `dump_view.py`, `codec_view.py` (source | decoded | error x8 with display gamma), `metro-dump.ps1` + fixed
+  `metro_dump.py` (still no server dump when Metro starts first: open), `hq-sweep.ps1 -Burst N` (+ single-cell fix).
+  Views: results/local/capture-detect/{view,maps*}.
+
 ## Decoder V2 live: CDF 5/3 at 90 Hz (2026-10-08 01:17–01:26, unworn, sweep `v2live`, 9c126c6 installed)
 FOV crop 2624x2752/eye (5248x2752 stereo), 90 Hz, queue depth 3, TCP, swaying chart, gpuLevel 7, 160 MHz (2401 Mbps,
 RSSI −4), battery 42–44 °C. One sample per cell. Markers confirmed per cell: `[Q3PW_CDF53V2] requested=5 active=5`,
