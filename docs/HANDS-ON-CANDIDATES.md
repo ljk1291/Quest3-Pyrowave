@@ -5,6 +5,111 @@ Configurations that passed automatic screening and are worth the owner's in-head
 evidence that put it here, and what to look at. Rejected options are listed at the end
 so they aren't retried by accident.
 
+## Decoder V2 live: CDF 5/3 at 90 Hz (2026-10-08 01:17–01:26, unworn, sweep `v2live`, 9c126c6 installed)
+FOV crop 2624x2752/eye (5248x2752 stereo), 90 Hz, queue depth 3, TCP, swaying chart, gpuLevel 7, 160 MHz (2401 Mbps,
+RSSI −4), battery 42–44 °C. One sample per cell. Markers confirmed per cell: `[Q3PW_CDF53V2] requested=5 active=5`,
+`[Q3PW_PRESENT_YCBCR] active=1` (v2 cells), `[Q3PW_HAAR32] requested=5 active=5` (h32). Server CSF marker: requested=0
+(density-only `-csf`, no `PYROWAVE_HEADSET_CSF`). Restore exit 0.
+
+| Cell | Fresh/s | Mbps p50 | Net p50/p95/p99 | GPU decode p50 | Dtf p50 | Latency p50 | Skipped |
+|---|---|---|---|---|---|---|---|
+| hq-haar1250-fabrc-csf (control, stock Haar) | 89.6 | 1255 | 11.6 / 15.8 / 20.0 | 7.0 | 8.9 | 88.7 | 5 |
+| **hq-cdf53-1000-v2** (mode 5) | **89.9** | 1008 | 9.7 / 12.2 / 14.2 | **3.4** | **5.0** | **66.5** | 0 |
+| hq-cdf53-1000-v2m4 (mode 4) | 89.6 | 1009 | 9.1 / 12.2 / 15.4 | 4.1 | 6.4 | 70.7 | 0 |
+| **hq-cdf53-1000-v2-fabrc-csf** | **89.9** | 1008 | 10.6 / 18.0 / 24.3 | 4.3 | 5.5 | 71.5 | 0 |
+| **hq-cdf53-1250-v2-fabrc-csf** | **89.7** | 1232 | 11.2 / 14.9 / 22.1 | 4.5 | 5.4 | 65.1 | 0 |
+| hq-haar1250-h32-fabrc-csf (haar32 mode 5) | 90.0 | 1261 | 12.4 / 17.5 / 22.0 | 3.8 | 4.6 | 66.0 | 0 |
+
+- **CDF 5/3 now sustains ~90 fresh/s live at our Godlike-crop size** (fast53 v1 managed 72). Decode-to-fence halves
+  (8.9 → 5.0–5.5 ms) and the estimated pipeline latency drops ~20 ms vs the stock-Haar control. Mode 5 beats mode 4
+  by 1.4 ms dtf (no separate convert). This removes the only blocker for 5/3, which offline needs ~1.7x fewer bytes
+  than Haar on natural content and degrades to blur instead of square blocks.
+- haar32 mode 5 also halves Haar's decode cost (7.0 → 3.8 ms) for the same bitstream.
+- Unworn, 20 s per cell, one round: runtime-accepted 90 Hz and sustained in this live window; worn/head motion and
+  Metro still to do. Quality (dumps, Library thumbnails) below.
+
+## Candidate C9 for the owner's worn Metro look: CDF 5/3 at 90 Hz (2026-10-08 ~02:20)
+**`hq-cdf53-1000-v2-fabrc-csf-metro`** (and `hq-cdf53-1250-v2-fabrc-csf-metro`) on the installed Decoder V2 build
+9c126c6, vs C8 `hq-haar1250-fabrc-csf-metro` on the same build. Run e.g.
+`hq-sweep.ps1 -Pair decoder-v2-37690049712 -Cells hq-cdf53-1000-v2-fabrc-csf-metro` (owner launches Metro).
+Evidence: 90.0 fresh/s live with Metro running, ~20 ms lower latency than Haar, 6–7x less block structure, ~30 % less
+static-view flicker (sections below). Look for: fine-texture shimmer and thin lines while moving the head; blur vs
+Haar's square patches; ringing (halos) at hard edges such as HUD text. Not yet: full `PYROWAVE_HEADSET_CSF=1`.
+
+## Decoder V2 with Metro running, in-headset Library recordings (2026-10-08 01:55–02:10, unworn, sweep `v2metro`)
+New `hq-sweep.ps1 -LaunchMetro`: per `-metro` cell it starts Metro on our stream (launch_metro_steamvr.py), waits 75 s,
+takes 2 x 5 s `screenrecord` (100 Mbps, 4128x2208) + a screencap, runs the 20 s capture under the game's load, then
+closes Metro. Unworn, the SteamVR Library dashboard stays in front of Metro (Metro shows as "now playing"), so the
+recordings are the owner's suggested judge: static game thumbnails in the final display buffer. Two rounds, interleaved.
+**Health stop at 02:09** (battery ≥ 60 °C during the last capture, after ~50 min of near-continuous streaming at
+≥1 Gbps while fast-charging; the charger then stopped, status discharging, 57 °C at 02:12). The sweep's cool-down
+only triggers at ≥52 °C between cells, and a cell itself took the battery from <52 to 60 °C. Restore exit 0,
+guardian_pause restored, SteamVR and Metro closed.
+
+| Cell | Fresh/s | Mbps p50 | Net p50/p95/p99 | GPU decode | Dtf p50 | Latency p50 | Shimmer: flicker px / tstd textured |
+|---|---|---|---|---|---|---|---|
+| Haar 1250 headset-RDO (r1) | 89.7 | 1186 | 11.6 / 13.5 / 16.8 | 6.8 | 8.7 | 74.0 | 0.16 % / 0.40–0.43 |
+| CDF 5/3 V2 1250 (r1, r2) | 90.0 / 89.9 | 1012 | 9.2–9.9 / 12.3 / 13.5–14.9 | 3.3–3.5 | 4.4–4.9 | **55.6** | **0.11–0.12 %** / 0.41 |
+| CDF 5/3 V2 1000 (r1) | 90.0 | 1009 | 10.1 / 12.9 / 16.2 | 4.2 | 5.1 | **51.7** | **0.09–0.12 %** / 0.40–0.41 |
+
+(all with fast ABR v2 Capacity and RDO 27.8; shimmer = `ws/scripts/shimmer.py`, 240 frames per clip, static pixels
+~91 %; Haar round 2 not reached)
+- **With Metro running, CDF 5/3 V2 holds 90.0 fresh/s and cuts estimated latency by ~20 ms** (52–56 vs 74 ms).
+- On the static Library view, measured flicker is tiny for all cells and ~30 % lower for 5/3 (0.09–0.12 % vs 0.16 % of
+  static pixels above 1.5 codes temporal std). The screenrecord encoder's own noise is part of this floor, so it is a
+  ranking, not an absolute. Unworn static views show little codec shimmer at ≥1000 Mbps; the owner's flicker is likely
+  bound to head motion and to Metro's own detail (next: worn check).
+- The 1250 5/3 cell sent only ~1012 Mbps on this view (Haar 1186): likely 5/3 reaching the coefficient floor of this
+  easy content below the cap (PyroWave stops when everything is coded). Not yet verified from the encoder log.
+- Recordings and screencaps: results/local/session-25/metro-rec-v2metro-20261008-015454/.
+- After the stop the Quest reported **AC powered: false** (charger no longer detected) and drained ~2 %/min awake on
+  the Guardian dialog (39 → 31 %); put to sleep at 02:17 (`KEYCODE_SLEEP`), 56 °C. Testing paused: needs the charger.
+
+## Decoder V2 dumps: chart and SteamVR Library thumbnails (2026-10-08 01:26–01:52, unworn, dump `v2dump`)
+Same pair and settings as `v2live`; lossless exact pairs (server encoder input yuv420p vs client post-decode RGBA).
+`-metro` cells now dump with no chart: SteamVR shows the Library dashboard (game thumbnails over the grey void; the
+owner's suggestion as a natural-image flicker target). Restore exit 0. Scorer: frame_score.py (fov-dump tree).
+
+| Cell | Pairs | PSNR-Y | Edge PSNR | HF err | Temporal static p99 | Blockiness 8/16/32 | Y err mean / MAE / max | ≥1 code |
+|---|---|---|---|---|---|---|---|---|
+| Chart Haar 1250 headset-RDO | 7 | 62.6 | 55.4 | 0.060 | 0.79 | .011 / .018 / .029 | +0.13 / 0.16 / 1 | 0.0 % |
+| Chart CDF 5/3 V2 1000 | 7 | 59.8 | 52.6 | 0.141 | 1.30 | .005 / .007 / .007 | +0.27 / 0.30 / 17 | 0.3 % |
+| Chart CDF 5/3 V2 1250 | 7 | 58.0 | 52.1 | 0.119 | 1.37 | .005 / .004 / −.001 | +0.26 / 0.28 / 7 | 0.1 % |
+| Library Haar 1250 | 7 | 56.6 | 51.8 | 0.553 | 1.82 | .194 / .194 / .196 | −0.03 / 0.10 / 5 | 0.8 % |
+| Library CDF 5/3 V2 1000 | 6 | 55.4 | 50.6 | 0.643 | 1.76 | .034 / .034 / .033 | −0.16 / 0.25 / 20 | 2.4 % |
+| Library CDF 5/3 V2 1250 | 6 | 56.5 | 52.5 | 0.537 | 1.54 | .028 / .028 / .028 | −0.15 / 0.23 / 10 | 1.5 % |
+
+(all with fast ABR v2 Capacity and RDO 27.8 px/deg; "Y err" = client RGB→Y minus server Y, 8-bit codes, one pair)
+- **Every cell is near-lossless on these targets** (MAE 0.1–0.3 codes): the chart and the dim Library thumbnails are
+  too easy at ≥1000 Mbps to rank the codecs. The PSNR gap is mostly a constant 0.15–0.27-code bias from mode 5's
+  YCbCr→RGB done in the present/dump shader (different rounding than the separate convert), not visible loss.
+- What does separate them: **CDF 5/3 has 6–7x less block structure** (Library .03 vs .19; Haar's 8/16/32 grid is the
+  "square patch" artifact), and 1250 5/3 has the lowest Library shimmer (1.54 vs 1.82). Haar keeps hard synthetic edges
+  exact while 5/3 shows rare local outliers (max 7–20 codes, ringing at chart edges).
+- The owner's visible compression is in Metro, much harder content than either target. Next: Metro itself (in-headset
+  `screenrecord` of the menu, `ws/scripts/shimmer.py`), and full `PYROWAVE_HEADSET_CSF=1`.
+
+## Decoder V2 port standalone on the Quest (2026-10-08 ~01:15, CI 37690049712 tools, before install)
+`pyrowave_android --compare-v2 cdf53.wave haar.wave <prefix> 30` (5248x2752 C420 chart frame, 750 Mbps budget),
+`PYROWAVE_PRECISION=1`, `debug.oculus.gpuLevel`=7, battery 42–44 °C, 12 fresh processes per run, 5 warm-ups,
+30 samples. Decode GPU time only (excludes readback; the old path's separate convert, ~4.9 ms, is not in "stock"):
+
+| Arm | mean ms, packed levels 4 | mean ms, packed levels 2 | Parity vs own stock (max / mean Y) |
+|---|---|---|---|
+| CDF 5/3 stock (apron) | 16.48 (best 12.09) | 13.32 (best 12.09) | – |
+| CDF 5/3 V2 mode 1 / 2 | 7.02 / 6.16 | 6.95 / 6.16 | 1 / 0.005 pass |
+| **CDF 5/3 V2 mode 3 / 4 / 5** | **3.72 / 3.80 / 4.01** | 4.22 / 4.24 / 4.24 | 1 / 0.005 pass |
+| Haar stock (= what we ship) | 6.65 | 6.14 | – |
+| haar32 mode 1 / 2 | 5.66 / 4.48 | 5.30 / 4.51 | 1 / 0.004 pass |
+| haar32 mode 3 / 4 / 5 | 3.34 / 3.81 / 4.14 | 3.66 / 3.90 / 5.42 | 1 / 0.004 pass |
+
+- **All 20 accelerated arms pass the parity gate (max 1 code value on Y, Cb, Cr).** Exit 0 both runs.
+- **CDF 5/3 V2 mode 5: 4.0 ms, 3.3–4x faster than stock 5/3 and faster than the stock Haar we ship (6.1–6.6 ms)**,
+  and mode 5 also removes the separate RGBA convert in the live client. Matches upstream's 3.6–4.4 ms at this size.
+  Packed levels 4 (default) is as fast or faster than 2. Standalone budget only; live 90 Hz below.
+- APK `20.13.0-ljk1291.2+9c126c69a0ba` then installed with `adb install -r` (same cert; rollback a928435 in
+  out/q160-candidate-37649808169, 7f85e87 in out/q160-candidate-37589333446).
+
 ## Headset RDO weighting, settings only (2026-10-07 23:32–23:50, unworn, dump `csf2`, a928435)
 New cell suffix `-csf` (`ws/hq_profiles.py`): `video.pyrowave.rdo_pixels_per_degree` = **27.8** (= upstream's headset
 CSF Nyquist 0.5·2752/99 = 13.9 cycles/deg at our crop) instead of 65.28 (the stock 96 dpi monitor at 1 m). This part
