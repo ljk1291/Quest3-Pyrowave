@@ -14,9 +14,18 @@ these checks, which protect something real:
 2. Leave Virtual Desktop untouched (registration, service, settings); verify by comparison.
 3. Stop and restore on device health: Android thermal status >= 3, battery temperature
    >= 55 C (owner decision 2026-10-08; was 60 C, before that 50 C), or battery < 10 %.
-   Start a run only at >= 40 % and < 50 C. Charging is not required. Prefer cooling pauses
+   Start a run only at < 50 C; any battery level above the 10 % stop is fine (owner,
+   2026-10-08 ~11:35: "I allow you to do testing down to 10% battery"; was >= 40 %). Charging is not required. Prefer cooling pauses
    between cells (hq-sweep: at >= 48 C stop the stream and wait for <= 45 C).
-4. Don't start a run while the owner is using the PC for VR or gaming.
+4. Don't start a run while the owner is using the PC for VR or gaming. Between tests, leave the
+   headset in battery saving mode after EVERY run (owner rule 2026-10-08: "open the home
+   environment, set the res to the lowest possible res and 72hz refresh rate and dim the screen
+   to the lowest setting"). `ws/scripts/quest-save.ps1`: clients stopped, proximity back to the
+   sensor, eye buffers 512x548, 72 Hz, minimum brightness, Meta Home opened, left awake so
+   wireless adb stays up; originals saved and put back by `session25.py snapshot()` before every
+   run (resolution/refresh) and by `quest-save.ps1 -Restore` before anyone wears it. `-Sleep` only
+   when no tests are planned, since asleep its Wi-Fi drops. hq-sweep/hq-dump/metro-dump/bench-run
+   call it at the end unless `-NoSave`; new run scripts must too.
 5. Report feature markers, but never block on them. Record telemetry and any owner
    judgement verbatim.
 
