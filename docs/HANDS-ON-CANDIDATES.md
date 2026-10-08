@@ -28,6 +28,38 @@ RSSI −4), battery 42–44 °C. One sample per cell. Markers confirmed per cell
 - Unworn, 20 s per cell, one round: runtime-accepted 90 Hz and sustained in this live window; worn/head motion and
   Metro still to do. Quality (dumps, Library thumbnails) below.
 
+## Owner worn A/B: ours C9 vs upstream `.62` (2026-10-08 10:28–11:20, WORN, Metro + SteamVR dashboard)
+**C9 = ours** (`hq-cdf53-1000-v2-fabrc-csf-metro`, 9c126c6, CDF 5/3 V2 mode 5, crop 2624x2752, fast ABR v2, RDO 27.8):
+89.8 fresh/s worn, decode 3.3 ms, dtf 4.6, latency 84 ms. Owner (verbatim): *"Very very clear compression artifacts on
+the main menu, with lots of "aliasing" (flickering on edges) and compression artifacts still flickering as well. I
+feel compression may be worse actually."* Compositor super-sampling (`layer_filter=supersample_hq`, client restart
+only, marker active_flags=0x2): *"No difference."* Owner: the screencaps/recordings don't show what they see.
+
+**Upstream `.62` as-is** (`up-cdf53-1000-e2624-metro`: their APK/server, CDF 5/3 V2 mode 5 + packed present, 4:2:0
+(`chroma_444: false`), render 3072x3232 downscaled to 2624x2752 full FOV, their encoder rate allocation). Owner
+(verbatim): *"There is much much less compression, on the SteamVR dashboard menu, it is not visible. The flickering of
+colour on SteamVR Dashboard is practically gone. I still see the mura like compression of the picture though. Can we
+run at 2000mbps? Colours look a bit weird, are we on 4:4:4?"* and *"By colours flickering, I mean, for example there
+is a bright orange part of a thumbnail on the steamVR dashboard. It would always flicker from uncompressed looking to
+compressed (blocky to normal and vice versa)"*.
+Upstream at 2000 (`up-cdf53-2000-e2624-metro`, new cells 1500/2000): 90.0 submitted/s, decode 6.2, dtf 7.5, latency
+43 ms, but **only 815 Mbps p50 sent**: their encoder stops when everything is coded; ours always fills the budget.
+The session ended when the Quest lost both controllers (right "Searching" since 10:55:18, left not in the paired list:
+`dumpsys OVRRemoteService`); restored, exit 0.
+
+What this means (planner):
+- **The owner's colour flicker is chroma blocks toggling coded/dropped from frame to frame** (intra-only, independent
+  per-frame RDO). Every metric I used was luma-only (PSNR-Y, temporal Y, blockiness Y), so the dumps and recordings
+  were blind to it. Our encoder runs chroma weight 0.6 with no discard weighting; upstream's runs 1.6 plus a discard
+  distortion weight, which keeps saturated chroma coded. Fast ABR's per-frame budget changes can add to the toggling.
+- **Correction:** full `PYROWAVE_HEADSET_CSF=1` (= upstream's chroma 1.6 + discard weight + LF boost) was rejected
+  above on luma metrics only. It is the main candidate fix for this flicker and must be re-tested with chroma metrics
+  and the owner's eye, with a fixed budget (no fast ABR).
+- Other differences from upstream that may matter: their render-then-downscale (3072x3232 → 2624x2752, anti-aliasing;
+  ours renders the crop at native size), their client defaults (raw sRGB copy etc.), no crop.
+- Remaining "mura-like" compression on upstream too: likely intra-only low-frequency quantization (blotchy smooth
+  areas), common to both builds.
+
 ## Brightness: `raw_srgb_copy` changes nothing (2026-10-08 10:00–10:10, unworn, sweep `rsc`, `-Record`)
 5/3 V2 1000 `-fabrc-csf-metro` vs the same + `debug.q3pw.raw_srgb_copy=1` (new `-rsc` suffix), interleaved x2, no game
 (SteamVR Library in view), in-headset screencaps + 2 x 5 s screenrecords per cell. Markers: `[Q3PW_COLOR_COPY]
