@@ -80,6 +80,12 @@ int pyroclient_decode_guarded(pyroclient *c, AHardwareBuffer **out, pyroclient_f
 int pyroclient_decode_guarded3(pyroclient *c, AHardwareBuffer **out, pyroclient_frame_info *info,
                               AHardwareBuffer *protected_a, AHardwareBuffer *protected_b,
                               AHardwareBuffer *protected_c);
+// As above with any number of excluded buffers: the opt-in output FIFO (debug.q3pw.output_queue,
+// ALVR's client-output-queue overlay) protects its render lease and every queued output. The list
+// is borrowed only for this synchronous call; NULL entries exclude nothing, and a NULL list is
+// valid only with count zero. Returns -4 when every ring buffer is excluded.
+int pyroclient_decode_guarded_many(pyroclient *c, AHardwareBuffer **out, pyroclient_frame_info *info,
+                                  AHardwareBuffer *const *protected_buffers, size_t protected_count);
 
 // Experimental early publication (debug.q3pw.ready_fd=1). At most ONE submission
 // may be outstanding. ready_fd >= 0 is transferred to caller and MUST gate all

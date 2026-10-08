@@ -10,6 +10,7 @@
 #include <cstring>
 #include <vector>
 #include <algorithm>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <zlib.h>
@@ -36,7 +37,7 @@ static bool load(const char *path, Wave &w) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 3 || argc > 9) { fprintf(stderr, "usage: %s <in.wave> <-|out.rgba> [iterations] [auto|compute|fragment] [warmup_frames] [protect_first_buffer=0|1] [gpu|cpu] [flip_y=0|1]\n", argv[0]); return 1; }
+    if (argc < 3 || argc > 9) { fprintf(stderr, "usage: %s <in.wave> <-|out.rgba> [iterations] [auto|compute|fragment] [warmup_frames] [protect_first_buffer=0|1|2] [gpu|cpu] [flip_y=0|1]\n", argv[0]); return 1; }
     Wave w;
     if (!load(argv[1], w)) return 1;
     const int iters = argc > 3 ? atoi(argv[3]) : 1;
@@ -66,7 +67,12 @@ int main(int argc, char **argv) {
     const char *wavelet_name = getenv("PYROWAVE_WAVELET");
     const int wavelet = wavelet_name && !strcmp(wavelet_name, "haar") ? 2 :
                         wavelet_name && !strcmp(wavelet_name, "53") ? 53 : 97;
-    pyroclient *c = pyroclient_create_ex((uint32_t)w.width, (uint32_t)w.height, w.chroma == 1, w.full_range, 3, wavelet, hint);
+    // protect_first_buffer: nonzero keeps the first output leased beside the previous one (guarded).
+    // 2 checks pyroclient_decode_guarded_many as the depth-3 output FIFO uses it: a ring of five,
+    // the first output plus the three most recent outputs excluded, so one slot stays writable.
+    const int protect_mode = argc > 6 ? atoi(argv[6]) : 0;
+    pyroclient *c = pyroclient_create_ex((uint32_t)w.width, (uint32_t)w.height, w.chroma == 1, w.full_range,
+                                         protect_mode == 2 ? 5 : 3, wavelet, hint);
     if (!c) { fprintf(stderr, "pyroclient_create failed (see logcat pyroclient)\n"); return 1; }
     const std::unique_ptr<pyroclient, decltype(&pyroclient_destroy)> owned(c, &pyroclient_destroy);
     AHardwareBuffer *ahb = nullptr;
@@ -76,7 +82,8 @@ int main(int argc, char **argv) {
     double warmupMax = 0;
     int completes = 0;
     AHardwareBuffer *held = nullptr;
-    const bool protect_first = argc > 6 && atoi(argv[6]) != 0;
+    const bool protect_first = protect_mode != 0;
+    AHardwareBuffer *recent[3] = {};
     for (int i = 0; i < iters + warmup; i++) {
         // Re-pushing the same frame reads as an old sequence number and is dropped; a decode
         // would then run on nothing. Clear first, as the harness does.
@@ -84,12 +91,16 @@ int main(int argc, char **argv) {
         int r = pyroclient_push_packet(c, w.frame.data(), w.frame.size());
         if (r < 0) { fprintf(stderr, "push failed %d\n", r); return 1; }
         AHardwareBuffer *previous = ahb;
-        int decoded = protect_first ? pyroclient_decode_guarded(c, &ahb, &info, held, previous)
+        AHardwareBuffer *const guarded[4] = {held, recent[0], recent[1], recent[2]};
+        int decoded = protect_mode == 2 ? pyroclient_decode_guarded_many(c, &ahb, &info, guarded, 4)
+                    : protect_first ? pyroclient_decode_guarded(c, &ahb, &info, held, previous)
                                     : pyroclient_decode(c, &ahb, &info);
         if (decoded != 0) { fprintf(stderr, "decode failed\n"); return 1; }
-        if (protect_first && (ahb == held || ahb == previous)) {
+        if ((protect_first && protect_mode != 2 && (ahb == held || ahb == previous))
+            || (protect_mode == 2 && std::find(std::begin(guarded), std::end(guarded), ahb) != std::end(guarded))) {
             fprintf(stderr, "protected hardware buffer was recycled\n"); return 1;
         }
+        recent[2] = recent[1]; recent[1] = recent[0]; recent[0] = ahb;
         if (protect_first && !held) held = ahb;
         if (i < warmup) { warmupMax = std::max(warmupMax, info.total_ms); continue; }
         decodes.push_back(info.decode_ms); converts.push_back(info.convert_ms);

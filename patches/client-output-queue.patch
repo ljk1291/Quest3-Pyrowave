@@ -1,0 +1,317 @@
+diff --git a/alvr/client_core/src/video_decoder/mod.rs b/alvr/client_core/src/video_decoder/mod.rs
+index e7724ccda52e67bf8d67ea760090bc4066e80383..51ef17acc42a16ac1204e632006189e2e262daab 100644
+--- a/alvr/client_core/src/video_decoder/mod.rs
++++ b/alvr/client_core/src/video_decoder/mod.rs
+@@ -232,6 +232,14 @@ struct FrameSlotState {
+     /// for that frame. Not compatible with copy handoff or ready FDs (one pending FD only).
+     hold: Option<Duration>,
+     held: Option<Held>,
++    /// Opt-in decoded-output FIFO (`debug.q3pw.output_queue=2|3`, docs/OUTPUT-QUEUE.md): untaken
++    /// outputs older than `pending`, oldest first, at most `queue_depth - 1`. A full queue drops
++    /// its oldest output; so does catch-up past `queue_max_age` of source time. take() hands out
++    /// the oldest. Empty unless `queue_depth` > 1; replaces the hold, not compatible with copy
++    /// handoff or ready FDs.
++    queue: std::collections::VecDeque<Held>,
++    queue_depth: usize,
++    queue_max_age: Duration,
+     #[cfg(test)]
+     consumer_waiters: usize,
+     #[cfg(test)]
+@@ -249,6 +257,14 @@ impl FrameSlot {
+         let mut state = self.inner.lock();
+         state.hold = hold.filter(|_| !state.handoff_enabled);
+     }
++    /// Depth 1 keeps the latest-output slot. Depth 2 or 3 keeps that many untaken outputs and
++    /// clears the hold. Copy handoff serializes production and cannot fill a FIFO: depth 1.
++    pub fn set_output_queue(&self, depth: usize, max_age: Duration) {
++        let mut state = self.inner.lock();
++        state.queue_depth = if state.handoff_enabled { 1 } else { depth.clamp(1, 3) };
++        state.queue_max_age = max_age;
++        if state.queue_depth > 1 { state.hold = None; }
++    }
+     pub fn wait_producer_ready(&self, running: impl Fn() -> bool) -> bool {
+         let mut state = self.inner.lock();
+         while running() && state.handoff_enabled
+@@ -315,8 +331,15 @@ impl FrameSlot {
+             state.freshness.late[freshness_bucket(late)] += 1;
+         }
+         let hold = state.hold.is_some() && !state.freshness.ready_active;
++        let fifo = state.queue_depth > 1 && !state.freshness.ready_active;
+         if let Some(old) = state.pending.replace((timestamp, buffer)) {
+-            let older = if hold {
++            let older = if fifo {
++                let entry = Held { frame: old, published_at: state.pending_published_at.unwrap_or(now),
++                                   release_token: state.pending_release_token, was_late: state.pending_was_late };
++                state.queue.push_back(entry);
++                Self::trim_output_queue(state, timestamp);
++                None
++            } else if hold {
+                 let held = Held { frame: old, published_at: state.pending_published_at.unwrap_or(now),
+                                   release_token: state.pending_release_token, was_late: state.pending_was_late };
+                 state.held.replace(held).map(|h| (h.frame, h.was_late))
+@@ -337,6 +360,21 @@ impl FrameSlot {
+         { state.ready_fds.replace_pending(None); }
+         true
+     }
++    /// FIFO overflow and catch-up, at publication so telemetry counts each drop at once. Tracking
++    /// keys can repeat or regress: only a strictly positive source age beyond the bound drops an
++    /// output, and keys are never rewritten.
++    fn trim_output_queue(state: &mut FrameSlotState, newest: Duration) {
++        while let Some(oldest) = state.queue.front() {
++            let overflow = state.queue.len() >= state.queue_depth;
++            let stale = newest.saturating_sub(oldest.frame.0) > state.queue_max_age;
++            if !overflow && !stale { break; }
++            let Some(dropped) = state.queue.pop_front() else { break };
++            crate::frame_trace::record(b'X', dropped.frame.0.as_nanos() as u64, 0, 2);
++            state.superseded += 1;
++            state.freshness.superseded += 1;
++            if dropped.was_late { state.freshness.late_superseded += 1; }
++        }
++    }
+     pub fn superseded(&self) -> u64 {
+         self.inner.lock().superseded
+     }
+@@ -384,6 +422,19 @@ impl FrameSlot {
+     }
+     pub fn take(&self) -> Option<(Duration, usize)> {
+         let mut state = self.inner.lock();
++        // Output FIFO: the oldest retained output first; `pending` stays queued behind it.
++        if let Some(entry) = state.queue.pop_front() {
++            let age = entry.published_at.elapsed();
++            state.freshness.taken += 1;
++            state.freshness.margin[freshness_bucket(age)] += 1;
++            crate::frame_trace::record(b'T', entry.frame.0.as_nanos() as u64, age.as_micros() as i64, 2);
++            if entry.was_late { state.freshness.late_taken += 1; }
++            state.leased = entry.frame.1;
++            state.leased_release_token = entry.release_token;
++            #[cfg(unix)]
++            { state.ready_fds.lease(entry.frame.1); }
++            return Some(entry.frame);
++        }
+         if let Some(held) = state.held.take() {
+             let age = held.published_at.elapsed();
+             if state.hold.is_some_and(|limit| age <= limit) {
+@@ -437,6 +488,14 @@ impl FrameSlot {
+         let state = self.inner.lock();
+         [state.leased, state.pending.map_or(0, |(_, buffer)| buffer), state.held.as_ref().map_or(0, |h| h.frame.1)]
+     }
++    /// Output FIFO: the lease, the pending output and every queued output, read under one lock.
++    /// The consumer can take any of them while the producer's GPU work runs. Unused entries are 0.
++    pub fn protected_buffers_many(&self) -> [usize; 4] {
++        let state = self.inner.lock();
++        let mut protected = [state.leased, state.pending.map_or(0, |(_, buffer)| buffer), 0, 0];
++        for (slot, entry) in protected[2..].iter_mut().zip(&state.queue) { *slot = entry.frame.1; }
++        protected
++    }
+     pub fn leased_release_token(&self, buffer: usize) -> u64 {
+         let state = self.inner.lock();
+         if state.leased == buffer { state.leased_release_token } else { 0 }
+@@ -459,6 +518,24 @@ pub fn pyrowave_worker_count(value: &str) -> usize {
+     if value.trim() == "2" { 2 } else { 1 }
+ }
+ 
++/// `debug.q3pw.output_queue`: 2 or 3 selects the decoded-output FIFO of that depth. Anything else,
++/// or a copy handoff (which serializes production and cannot fill a FIFO), keeps depth 1.
++pub fn pyrowave_output_depth(value: &str, handoff: bool) -> usize {
++    if handoff { return 1; }
++    match value.trim() {
++        "2" => 2,
++        "3" => 3,
++        _ => 1,
++    }
++}
++
++/// `debug.q3pw.output_queue_max_age_us`: the FIFO's source-timestamp age bound, 1-1,000,000 us.
++/// Default two 90 Hz display periods, rounded up.
++pub fn pyrowave_output_max_age(value: &str) -> Duration {
++    Duration::from_micros(value.trim().parse::<u64>().ok()
++        .filter(|age| (1..=1_000_000).contains(age)).unwrap_or(22_223))
++}
++
+ static PYROWAVE_REFRESH_HZ_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+ 
+ /// Display refresh rate the next PyroWave decoder runs at; it selects the decode queue priority.
+@@ -1229,4 +1306,119 @@ mod tests {
+         slot.take();
+         assert_eq!(slot.protected_buffers(), [0x30, 0]);
+     }
++
++    #[test]
++    fn output_fifo_orders_frames_and_empty_preserves_repeat_lease() {
++        let slot = FrameSlot::default();
++        slot.set_output_queue(2, ms(23));
++        assert_eq!(slot.take(), None);
++        slot.publish(ms(1), 0x10);
++        slot.publish(ms(12), 0x20);
++        assert_eq!(slot.take(), Some((ms(1), 0x10)));
++        assert_eq!(slot.protected_buffers_many(), [0x10, 0x20, 0, 0]);
++        assert_eq!(slot.take(), Some((ms(12), 0x20)));
++        assert_eq!(slot.take(), None);
++        assert_eq!(slot.protected_buffers_many(), [0x20, 0, 0, 0]);
++        assert_eq!(slot.superseded(), 0);
++    }
++
++    #[test]
++    fn output_fifo_overflow_drops_only_oldest_and_protects_every_pending_buffer() {
++        for depth in [2usize, 3] {
++            let slot = FrameSlot::default();
++            slot.set_output_queue(depth, Duration::from_secs(1));
++            slot.publish(Duration::ZERO, 0x10);
++            slot.take();
++            for index in 1..=depth {
++                slot.publish(ms(index as u64), 0x10 + index);
++            }
++            let protected = slot.protected_buffers_many();
++            assert_eq!(protected[..2], [0x10, 0x10 + depth]);
++            assert_eq!(protected[2..1 + depth], (1..depth).map(|i| 0x10 + i).collect::<Vec<_>>()[..]);
++            slot.publish(ms(4), 0x20);
++            assert_eq!(slot.superseded(), 1);
++            assert_eq!(slot.protected_buffers_many()[0], 0x10);
++            for index in 2..=depth {
++                assert_eq!(slot.take(), Some((ms(index as u64), 0x10 + index)));
++            }
++            assert_eq!(slot.take(), Some((ms(4), 0x20)));
++            assert_eq!(slot.take(), None);
++        }
++    }
++
++    #[test]
++    fn output_fifo_catches_up_only_beyond_age_bound_and_counts_each_drop() {
++        let slot = FrameSlot::default();
++        slot.set_output_queue(3, ms(22));
++        slot.publish(Duration::ZERO, 0x10);
++        slot.publish(ms(22), 0x20);
++        assert_eq!(slot.superseded(), 0); // Equality is still eligible.
++        slot.publish(Duration::from_micros(22_001), 0x30);
++        assert_eq!(slot.superseded(), 1);
++        assert_eq!(slot.take(), Some((ms(22), 0x20)));
++        slot.publish(ms(23), 0x40);
++        slot.publish(ms(50), 0x50);
++        assert_eq!(slot.superseded(), 3); // Two stale entries, not one event.
++        assert_eq!(slot.take(), Some((ms(50), 0x50)));
++        assert_eq!(slot.take(), None);
++        let f = slot.take_freshness();
++        assert_eq!((f.taken, f.superseded), (2, 3));
++    }
++
++    #[test]
++    fn output_fifo_preserves_source_keys_and_rejects_late_workers_after_take() {
++        let slot = FrameSlot::default();
++        slot.set_output_queue(3, ms(22));
++        for (order, timestamp) in [(1u64, 30u64), (2, 30), (3, 1)] {
++            assert!(slot.publish_ordered(ms(timestamp), order as usize, order));
++        }
++        for (order, timestamp) in [(1u64, 30u64), (2, 30), (3, 1)] {
++            assert_eq!(slot.take(), Some((ms(timestamp), order as usize)));
++        }
++        assert_eq!(slot.superseded(), 0);
++        assert!(!slot.publish_ordered(ms(31), 4, 2));
++        assert!(!slot.publish_ordered(ms(31), 4, 3));
++        assert_eq!(slot.superseded(), 2);
++        assert!(slot.take().is_none());
++    }
++
++    #[test]
++    fn output_fifo_replaces_the_hold_keeps_release_tokens_and_is_refused_with_handoff() {
++        let slot = FrameSlot::default();
++        slot.set_hold(Some(Duration::from_secs(1)));
++        slot.set_output_queue(3, Duration::from_secs(1));
++        for (i, buffer) in [0x10usize, 0x20, 0x30].into_iter().enumerate() {
++            assert!(slot.publish_fenced(ms(i as u64), buffer, i as u64 + 1, buffer as u64 + 1));
++        }
++        assert_eq!(slot.superseded(), 0);
++        assert_eq!(slot.protected_buffers_many(), [0, 0x30, 0x10, 0x20]);
++        assert_eq!(slot.take(), Some((ms(0), 0x10)));
++        assert_eq!(slot.leased_release_token(0x10), 0x11);
++        assert_eq!(slot.protected_buffers3(), [0x10, 0x30, 0]);
++        assert_eq!(slot.take(), Some((ms(1), 0x20)));
++        assert_eq!(slot.leased_release_token(0x20), 0x21);
++
++        let slot = FrameSlot::default();
++        slot.enable_copy_handoff();
++        slot.set_output_queue(3, Duration::from_secs(1));
++        slot.publish(ms(1), 0x10);
++        slot.publish(ms(2), 0x20);
++        assert_eq!(slot.superseded(), 1);
++        assert_eq!(slot.protected_buffers_many(), [0, 0x20, 0, 0]);
++    }
++
++    #[test]
++    fn output_queue_configuration_is_bounded_and_handoff_falls_back() {
++        for value in ["", "0", "1", "4", "-2", "invalid"] {
++            assert_eq!(pyrowave_output_depth(value, false), 1);
++        }
++        for (value, depth) in [("2\n", 2), ("3", 3)] {
++            assert_eq!(pyrowave_output_depth(value, false), depth);
++            assert_eq!(pyrowave_output_depth(value, true), 1);
++        }
++        for value in ["", "0", "-1", "1000001", "invalid"] {
++            assert_eq!(pyrowave_output_max_age(value), Duration::from_micros(22_223));
++        }
++        assert_eq!(pyrowave_output_max_age("33334"), Duration::from_micros(33_334));
++    }
+ }
+diff --git a/alvr/client_core/src/video_decoder/pyrowave.rs b/alvr/client_core/src/video_decoder/pyrowave.rs
+index caffcf96b81f306f5fcb269abeae1e75250dd40d..67f0fbfaa0b882010c347de63c575015d4dd39a5 100644
+--- a/alvr/client_core/src/video_decoder/pyrowave.rs
++++ b/alvr/client_core/src/video_decoder/pyrowave.rs
+@@ -77,6 +77,8 @@ extern "C" {
+     ) -> i32;
+     fn pyroclient_decode_guarded3(c: *mut PyroClient, out: *mut *mut c_void, info: *mut FrameInfo,
+         protected_a: *mut c_void, protected_b: *mut c_void, protected_c: *mut c_void) -> i32;
++    fn pyroclient_decode_guarded_many(c: *mut PyroClient, out: *mut *mut c_void, info: *mut FrameInfo,
++        protected: *const *mut c_void, protected_count: usize) -> i32;
+     fn pyroclient_destroy(c: *mut PyroClient);
+     fn pyroclient_submit_guarded(c: *mut PyroClient, out: *mut *mut c_void,
+         info: *mut FrameInfo, protected_a: *mut c_void, protected_b: *mut c_void, ready_fd: *mut i32) -> i32;
+@@ -253,6 +255,29 @@ pub fn video_decoder_split(
+     decoded.set_hold(hold);
+     super::logcat_info("PYROWAVE", &format!("[Q3PW_FRAME_HOLD] hold_us={} ring={}",
+         hold.map_or(0, |h| h.as_micros()), if hold.is_some() { 4 } else { 3 }));
++    // debug.q3pw.output_queue=2|3 (opt-in, docs/OUTPUT-QUEUE.md): keep up to that many decoded
++    // outputs and show the oldest, instead of superseding an untaken one. Replaces the frame hold.
++    // Every worker's ring holds the queued outputs, the render lease and one writable slot.
++    let queue_len = unsafe { libc::__system_property_get(c"debug.q3pw.output_queue".as_ptr(), property.as_mut_ptr().cast()) };
++    let queue_requested = String::from_utf8_lossy(&property[..queue_len.max(0) as usize]).into_owned();
++    let incompatible = if handoff { Some("decode_handoff=1") } else if ready_requested { Some("ready_fd=1") }
++        else if prerecord_requested { Some("prerecord_mode=1") } else { None };
++    let output_depth = super::pyrowave_output_depth(&queue_requested, incompatible.is_some());
++    if let Some(reason) = incompatible.filter(|_| super::pyrowave_output_depth(&queue_requested, false) > 1) {
++        super::logcat_info("PYROWAVE", &format!(
++            "[Q3PW_OUTPUT_QUEUE] depth=1 fallback: {reason} is incompatible with depth>1"));
++    }
++    let age_len = unsafe { libc::__system_property_get(c"debug.q3pw.output_queue_max_age_us".as_ptr(), property.as_mut_ptr().cast()) };
++    let max_age = super::pyrowave_output_max_age(&String::from_utf8_lossy(&property[..age_len.max(0) as usize]));
++    let hold_ignored = output_depth > 1 && hold.is_some();
++    let hold = hold.filter(|_| output_depth == 1);
++    if output_depth > 1 { decoded.set_output_queue(output_depth, max_age); }
++    let ring_size: u32 = if output_depth > 1 { output_depth as u32 + 2 } else if hold.is_some() { 4 } else { 3 };
++    if !queue_requested.trim().is_empty() {
++        super::logcat_info("PYROWAVE", &format!(
++            "[Q3PW_OUTPUT_QUEUE] depth={output_depth} max_age_us={} ring={ring_size} workers={workers} copy_handoff={handoff} frame_hold_ignored={hold_ignored}",
++            max_age.as_micros()));
++    }
+     let report_frame_decoded = Arc::new(report_frame_decoded);
+     let mut threads = Vec::with_capacity(workers);
+     for worker_index in 0..workers {
+@@ -277,7 +302,7 @@ pub fn video_decoder_split(
+                     cfg.height,
+                     cfg.chroma444 as i32,
+                     cfg.full_range as i32,
+-                    if hold.is_some() { 4 } else { 3 },
++                    ring_size,
+                     cfg.wavelet as i32,
+                     cfg.decode_path as i32,
+                     low_priority as i32,
+@@ -392,6 +417,11 @@ pub fn video_decoder_split(
+                             protected[0] as *mut c_void,protected[1] as *mut c_void)
+                     } else if ready_active { pyroclient_submit_guarded(client, &mut out, &mut info,
+                         protected[0] as *mut c_void, protected[1] as *mut c_void, &mut ready_fd) }
++                    else if output_depth > 1 {
++                        // One snapshot of the lease and every queued output; a take() between
++                        // separate reads could lease a buffer this decode then overwrites.
++                        let all = decoded.protected_buffers_many().map(|buffer| buffer as *mut c_void);
++                        pyroclient_decode_guarded_many(client, &mut out, &mut info, all.as_ptr(), all.len()) }
+                     else if hold.is_some() { pyroclient_decode_guarded3(client, &mut out, &mut info,
+                         protected[0] as *mut c_void, protected[1] as *mut c_void, protected3[2] as *mut c_void) }
+                     else { pyroclient_decode_guarded(

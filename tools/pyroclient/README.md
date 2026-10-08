@@ -45,6 +45,7 @@ samplers; that is not the conversion.
 ./build.sh                    # libpyroclient.so (bundled into the APK) + pyroclient_test
 pyroclient_test in.wave out.rgba [iterations]     # on the headset, LD_LIBRARY_PATH to the .so dir
 pyroclient_test in.wave - 80 fragment 10 1        # timing/guarded-buffer screen, no CPU dump
+pyroclient_test in.wave - 80 compute 10 2         # guarded_many screen: ring of 5, 4 outputs excluded (output FIFO depth 3)
 PYROWAVE_WAVELET=haar pyroclient_test in.wave out.rgba 80 compute 10 1 gpu 0
 ```
 

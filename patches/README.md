@@ -712,3 +712,37 @@ value and build.rs then reports `has no pyrowave.h` for a directory that plainly
 
 Stop SteamVR first (the DLL is locked while loaded). Run-time: launch via the
 `XRWiredSteamVRPyroClean` task (sets `ALVR_PYROWAVE=1` in-process; no tap, no dump).
+
+## Fork overlays: `frame-dump`, `frame-loss-diagnostics`, `client-output-queue`
+
+Three default-off ljk1291 overlays on the complete ALVR tree, ported to upstream `18d43ce` (`.65`).
+Order: upstream's ALVR stack and copied files, `fork-identity-alvr.patch`, `fast-abr.patch`, then
+these three. Each patch is one commit of a reconstructed tree (`git diff --full-index --binary`)
+and applies only on the one before it: `frame-loss-diagnostics.patch` instruments fast ABR's
+`send_video_nal` `match`, its video-thread sends and its reduced byte cap.
+
+| Patch | Controls | Doc | SHA-256 |
+|---|---|---|---|
+| `frame-dump.patch` | `ALVR_Q3PW_FRAME_DUMP=dir:count:interval`, `debug.q3pw.frame_dump=count:interval` | [FRAME-DUMP](../docs/FRAME-DUMP.md) | `5917434e83643c1b086186a95fd39722c17e40d895ca289918f449029a2e89ad` |
+| `frame-loss-diagnostics.patch` | `ALVR_FRAME_LOSS=1`, `debug.q3pw.frame_loss=1`, `debug.q3pw.stats_source_ts=1` | [FRAME-LOSS-DIAGNOSIS](../docs/FRAME-LOSS-DIAGNOSIS.md) | `39280bd5621df968076112a97aed179030a26c62bac236ab2d0782888b729112` |
+| `client-output-queue.patch` | `debug.q3pw.output_queue=2\|3`, `debug.q3pw.output_queue_max_age_us` | [OUTPUT-QUEUE](../docs/OUTPUT-QUEUE.md) | `b4519c71258f723b5400daa9cdce11a86a007d125f1ad87163a9af5bdd855e44` |
+
+`client-output-queue.patch` calls `pyroclient_decode_guarded_many`, which `tools/pyroclient` in
+the same commit provides; build the APK from that commit.
+
+Wiring, for `tools/ci/fetch_sources.sh` after the fork-identity line:
+
+```sh
+overlay "$dest/ALVR-20.13.0" patches/fast-abr.patch
+overlay "$dest/ALVR-20.13.0" patches/frame-dump.patch
+overlay "$dest/ALVR-20.13.0" patches/frame-loss-diagnostics.patch
+overlay "$dest/ALVR-20.13.0" patches/client-output-queue.patch
+```
+
+and in `sources.lock.json` `"overlays"` (fast ABR's own pin comes with its patch):
+
+```json
+"patches/frame-dump.patch": "5917434e83643c1b086186a95fd39722c17e40d895ca289918f449029a2e89ad",
+"patches/frame-loss-diagnostics.patch": "39280bd5621df968076112a97aed179030a26c62bac236ab2d0782888b729112",
+"patches/client-output-queue.patch": "b4519c71258f723b5400daa9cdce11a86a007d125f1ad87163a9af5bdd855e44"
+```
