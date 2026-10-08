@@ -19,7 +19,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 LOCK = REPO / "sources.lock.json"
 FETCH = REPO / "tools" / "ci" / "fetch_sources.sh"
-OVERLAY_LINE = re.compile(r'^overlay\s+"\$dest/[^"]+"\s+(patches/[A-Za-z0-9_.-]+\.patch)\s*$', re.M)
+OVERLAY_LINE = re.compile(r'^overlay[ \t]+"\$dest/[^"]+"[ \t]+(patches/[A-Za-z0-9_.-]+\.patch)[ \t]*(?:#.*)?$', re.M)
 # fetch_sources.sh's base pins must agree with the lock that documents them.
 BASE_PINS = {"ALVR_BASE": "alvr", "PYROWAVE_BASE": "pyrowave", "GRANITE_COMMIT": "granite"}
 
