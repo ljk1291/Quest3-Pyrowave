@@ -57,8 +57,11 @@ What this means (planner):
   and the owner's eye, with a fixed budget (no fast ABR).
 - Other differences from upstream that may matter: their render-then-downscale (3072x3232 → 2624x2752, anti-aliasing;
   ours renders the crop at native size), their client defaults (raw sRGB copy etc.), no crop.
-- Remaining "mura-like" compression on upstream too: likely intra-only low-frequency quantization (blotchy smooth
-  areas), common to both builds.
+- Remaining "mura-like" compression on upstream too. Owner, after the session (verbatim): *"The mura compression was
+  much much more prevalent on our build"*. Mura = low-frequency (coarse band) error in smooth areas; upstream's encoder
+  boosts levels ≥ 3 by x6 (`lf_boost=6`), ours runs `lf_boost=1`. PSNR-type metrics barely weight that error, which is
+  why the full-CSF rejection above was wrong for this goal. Next owner look: `hq-cdf53-1000-v2-csf-metro` (fixed budget)
+  with `PYROWAVE_HEADSET_CSF=1`.
 
 ## Brightness: `raw_srgb_copy` changes nothing (2026-10-08 10:00–10:10, unworn, sweep `rsc`, `-Record`)
 5/3 V2 1000 `-fabrc-csf-metro` vs the same + `debug.q3pw.raw_srgb_copy=1` (new `-rsc` suffix), interleaved x2, no game
@@ -97,6 +100,8 @@ Dumps, density-only `-csf` (from `v2dump`) → **full CSF**:
 | Library 5/3 V2 1000 | 55.4 → 54.4 | 50.6 → 49.0 | 0.643 → 0.743 | 1.76 → 1.86 | .033 → .035 |
 | Library 5/3 V2 1250 | 56.5 → 54.9 | 52.5 → 50.0 | 0.537 → 0.798 | 1.54 → **1.87** | .028 → .041 |
 
+- **Superseded by the owner's worn A/B (section above): these are luma-only metrics, blind to chroma flicker and to
+  low-frequency mura, which is what full CSF targets. Re-test with the owner's eye.**
 - **Full CSF makes 5/3 worse on every metric, including the static-area temporal p99 (the flicker proxy) on both
   targets.** Its ×6 low-frequency boost and discard weighting move bits from fine detail to coarse bands; at our
   rates that adds fine-detail error that changes frame to frame. Haar is nearly unaffected (a little less blocking).
