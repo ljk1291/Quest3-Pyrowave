@@ -4,6 +4,8 @@
 #   <dest>/pyrowave      Themaister/pyrowave at PYROWAVE_BASE + patches/pyrowave-cdf53-haar-experiments2-3.patch,
 #                        with Granite (and its submodules) at GRANITE_COMMIT
 # Both patches are cumulative: base + one patch reproduces the measured clone exactly.
+# The ljk1291 fork then applies its additive overlays, in the order of the `overlay` lines below,
+# each SHA-256 pinned in sources.lock.json (tools/ci/source_lock.py, patches/README.md).
 # Usage: tools/ci/fetch_sources.sh <dest>
 # Q3PW_PYROWAVE_ONLY=1 reconstructs just the patched pyrowave tree, without ALVR or Granite, for
 # shader-level checks that need only its sources and generated slangmosh.hpp.
@@ -30,6 +32,13 @@ checkout() {  # <url> <dir> <commit>
     git -C "$2" checkout -q FETCH_HEAD
 }
 
+if python3 -c 'import sys' >/dev/null 2>&1; then python_cmd=python3; else python_cmd=python; fi
+overlay() {  # <tree> <patch>: check the pin and that it applies before touching the tree
+    "$python_cmd" "$repo/tools/ci/source_lock.py" verify "$2"
+    git -C "$1" apply --check --binary "$repo/$2"
+    git -C "$1" apply --binary "$repo/$2"
+}
+
 pyrowave_only=${Q3PW_PYROWAVE_ONLY:-0}
 if [ "$pyrowave_only" != 1 ]; then
 checkout https://github.com/alvr-org/ALVR "$dest/ALVR-20.13.0" "$ALVR_BASE"
@@ -45,6 +54,13 @@ cp "$repo/tools/fences/latest_wait.rs" "$dest/ALVR-20.13.0/alvr/client_openxr/sr
 cp "$repo/tools/quest3/cadence_probe.rs" "$dest/ALVR-20.13.0/alvr/client_openxr/src/cadence_probe.rs"
 cp "$repo/tools/quest3/producer_opportunity.rs" "$dest/ALVR-20.13.0/alvr/client_core/src/video_decoder/producer_opportunity.rs"
 cp "$repo/tools/quest3/producer_prerecord.rs" "$dest/ALVR-20.13.0/alvr/client_core/src/video_decoder/producer_prerecord.rs"
+# ljk1291 fork overlays on the complete upstream ALVR tree above, in this order. Each needs its
+# pin: python3 tools/ci/source_lock.py pin patches/<name>.patch
+# Insertion points for the overlays being rebased onto this upstream: uncomment each with its pin.
+# overlay "$dest/ALVR-20.13.0" patches/fast-abr.patch
+# overlay "$dest/ALVR-20.13.0" patches/frame-dump.patch
+# overlay "$dest/ALVR-20.13.0" patches/frame-loss-diagnostics.patch
+# overlay "$dest/ALVR-20.13.0" patches/client-output-queue.patch
 fi
 
 checkout https://github.com/Themaister/pyrowave "$dest/pyrowave" "$PYROWAVE_BASE"
