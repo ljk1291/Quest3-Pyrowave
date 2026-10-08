@@ -16,7 +16,7 @@ fork (ljk1291/Quest3-Pyrowave) is based on upstream JMS1717/Quest3-Pyrowave at
 | 2 | `quest3-alvr.patch` (cumulative Quest 3 tree, version `20.13.0-quest3.pyro.65`) | upstream | upstream history |
 | 3 | nine `cp` lines: `tools/foveation/light.glsl`, `tools/latency/latency_stamp.h`, `tools/fences/{native_ready,ready_wait,ready_frames,latest_wait}.rs`, `tools/quest3/{cadence_probe,producer_opportunity,producer_prerecord}.rs` | upstream | upstream history |
 | 4 | `fork-identity-alvr.patch` | fork | `sources.lock.json` |
-| 5 | `fast-abr.patch` | fork, in progress | reserved |
+| 5 | `fast-abr.patch` | fork | `sources.lock.json` |
 | 6 | `frame-dump.patch` | fork, in progress | reserved |
 | 7 | `frame-loss-diagnostics.patch` | fork, in progress | reserved |
 | 8 | `client-output-queue.patch` | fork, in progress | reserved |
@@ -34,7 +34,7 @@ would follow the same rules after `pyrowave-cdf53v2.patch`.
 
 - **One list.** The `overlay "$dest/ALVR-20.13.0" patches/<name>.patch` lines in
   `tools/ci/fetch_sources.sh` set the order. Rows 5-8 are commented insertion points; uncomment
-  one only together with its pin.
+  one only together with its pin. Rows 4-5 are active.
 - **One pin each.** `python3 tools/ci/source_lock.py pin patches/<name>.patch` writes the patch's
   SHA-256 into `sources.lock.json` under `"overlays"`; upstream's pins are untouched.
 - **Checked before anything is applied.** `overlay()` verifies the pin, runs
@@ -44,6 +44,11 @@ would follow the same rules after `pyrowave-cdf53v2.patch`.
   commits differ from the lock.
 - **Default off.** Runtime behaviour an overlay adds is opt-in with a log marker
   ([AGENTS.md](../AGENTS.md)).
+- **`fast-abr.patch`** (active): opt-in `video.pyrowave.fast_abr`, default disabled. Over TCP it
+  lowers each PyroWave frame's byte budget below ALVR's per-frame ceiling when the sender falls
+  behind, bounds the stream socket's send buffer and stops a full server video queue from waiting
+  for an IDR. `Aimd` and `Capacity` modes; inactive on UDP. Log markers: `[Q3PW_FAST_ABR]`. See
+  [docs/FAST-ABR.md](../docs/FAST-ABR.md). Not yet built or run on `.65`; CI compiles it first.
 
 **Making or regenerating an overlay.** No compiler is needed for this part.
 

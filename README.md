@@ -25,7 +25,7 @@ stack, each pinned by SHA-256. [patches/README.md](patches/README.md) lists the 
 | Overlay | State |
 |---|---|
 | `fork-identity-alvr.patch`: own version, protocol and Android package (label "Quest3 PyroWave Baseline"), so it installs beside upstream's app and only pairs with a server of the same fork version | in this branch |
-| `fast-abr.patch`: opt-in per-frame PyroWave budget over TCP | in progress (being rebased onto `.65`) |
+| `fast-abr.patch`: opt-in `video.pyrowave.fast_abr` (default off): per-frame PyroWave budget below ALVR's ceiling over TCP, bounded send buffer, Aimd/Capacity modes, inactive on UDP, markers `[Q3PW_FAST_ABR]` ([docs/FAST-ABR.md](docs/FAST-ABR.md)) | in this branch (not yet built on `.65`) |
 | `frame-dump.patch`: opt-in lossless frame dumps for quality scoring | in progress |
 | `frame-loss-diagnostics.patch`: opt-in frame-loss accounting | in progress |
 | `client-output-queue.patch`: opt-in decoded output FIFO | in progress |

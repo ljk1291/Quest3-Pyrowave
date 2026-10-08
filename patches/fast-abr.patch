@@ -1,0 +1,1416 @@
+diff --git a/alvr/server_core/src/connection.rs b/alvr/server_core/src/connection.rs
+index 23c94cb7b62b6e8e3b9400cfcfeb90adc9109abe..3b3bf4524e5a448fad5640ed46ac7ec7d041efec 100644
+--- a/alvr/server_core/src/connection.rs
++++ b/alvr/server_core/src/connection.rs
+@@ -1251,6 +1251,89 @@ fn connection_pipeline(
+             info!("[PYROWAVE] wired video over {} parallel connections", streams.len());
+             WiredVideoSender::new(streams)
+         });
++
++    // Quest3-Pyrowave fast ABR (docs/FAST-ABR.md): an opt-in per-frame PyroWave budget below
++    // ALVR's ceiling, for TCP video only (ALVR's stream socket or the wired connections). PyroWave
++    // UDP video keeps ALVR's cap; the setup line below names the path either way.
++    let fast_abr_requested = initial_settings.video.pyrowave.fast_abr.as_option();
++    let fast_abr_tcp = matches!(stream_protocol, SocketProtocol::Tcp);
++    let fast_abr_path = if udp_video.is_some() {
++        "pyrowave_udp"
++    } else if wired_video.is_some() {
++        "wired_tcp"
++    } else if fast_abr_tcp {
++        "stream_tcp"
++    } else {
++        "stream_udp"
++    };
++    let fast_abr_enabled = crate::fast_abr::enabled(
++        fast_abr_requested.is_some(),
++        pyrowave.enabled,
++        udp_video.is_some(),
++        fast_abr_tcp,
++    );
++    let fast_abr_config = fast_abr_requested
++        .map(|c| crate::fast_abr::Config {
++            mode: match c.mode {
++                alvr_session::PyroWaveFastAbrMode::Aimd => crate::fast_abr::Mode::Aimd,
++                alvr_session::PyroWaveFastAbrMode::Capacity => crate::fast_abr::Mode::Capacity,
++            },
++            floor: c.floor,
++            decrease: c.decrease,
++            recovery: c.recovery,
++            backlog_frames: c.backlog_frames,
++            send_buffer_bytes: c.send_buffer_bytes,
++        })
++        .unwrap_or_default();
++    let fast_abr = if fast_abr_enabled {
++        match crate::fast_abr::FastAbr::new(fast_abr_config, fps) {
++            Ok(controller) => Some(Arc::new(controller)),
++            Err(e) => con_bail!("[Q3PW_FAST_ABR] {e}"),
++        }
++    } else {
++        None
++    };
++    // The ceiling the encoder starts from: a constant rate raised to the quality floor, or Auto's
++    // maximum (1000 Mbps when unset). The video sender then follows the encoder's live ceiling.
++    let fast_abr_initial_mbps = match &initial_settings.video.bitrate.mode {
++        alvr_session::BitrateMode::ConstantMbps(mbps) => {
++            (*mbps).max(quality_floor_mbps.unwrap_or(0))
++        }
++        alvr_session::BitrateMode::Adaptive {
++            max_throughput_mbps,
++            ..
++        } => max_throughput_mbps.as_option().copied().unwrap_or(1000),
++    };
++    let send_buffer_bytes =
++        fast_abr_config.send_buffer_bytes(fast_abr_initial_mbps.saturating_mul(1_000_000), fps);
++    // Strict, unlike the builder's best-effort setup: the connection fails unless the OS
++    // establishes the bound. Audio and haptics share this socket. The wired video connections
++    // keep their own buffers: they are loopback sockets into adb (docs/FAST-ABR.md).
++    let actual_send_buffer = if fast_abr_enabled {
++        Some(stream_socket.set_send_buffer_size(send_buffer_bytes as usize).to_con()?)
++    } else {
++        None
++    };
++    let fast_abr_line = format!(
++        "[Q3PW_FAST_ABR] enabled={} requested={} floor={} decrease={} recovery={} backlog_frames={} sndbuf={} sndbuf_actual={:?} mode={:?} sndbuf_auto={} video_path={fast_abr_path}",
++        fast_abr_enabled,
++        fast_abr_requested.is_some(),
++        fast_abr_config.floor,
++        fast_abr_config.decrease,
++        fast_abr_config.recovery,
++        fast_abr_config.backlog_frames,
++        if fast_abr_enabled { send_buffer_bytes.to_string() } else { "unchanged".into() },
++        actual_send_buffer,
++        fast_abr_config.mode,
++        fast_abr_config.send_buffer_bytes == 0,
++    );
++    if fast_abr_requested.is_some() && !fast_abr_enabled {
++        // Once per connection: requested, but this stream's video is not PyroWave over TCP.
++        warn!("{fast_abr_line}");
++    } else {
++        info!("{fast_abr_line}");
++    }
++
+     let game_audio_sender: alvr_sockets::StreamSender<()> = stream_socket.request_stream(AUDIO);
+     let mut microphone_receiver: alvr_sockets::StreamReceiver<()> =
+         stream_socket.subscribe_to_stream(AUDIO, MAX_UNREAD_PACKETS);
+@@ -1262,12 +1345,17 @@ fn connection_pipeline(
+ 
+     let (video_channel_sender, video_channel_receiver) =
+         std::sync::mpsc::sync_channel(initial_settings.connection.max_queued_server_video_frames);
++    *ctx.fast_abr.write() = fast_abr.clone();
+     *ctx.video_channel_sender.lock() = Some(video_channel_sender);
+     *ctx.haptics_sender.lock() = Some(haptics_sender);
+ 
+     let video_send_thread = thread::spawn({
+         let client_hostname = client_hostname.clone();
++        let fast_abr = fast_abr.clone();
++        let disconnect_notif = Arc::clone(&disconnect_notif);
+         move || {
++            let mut estimator = crate::fast_abr::SendEstimator::default();
++            let mut current_send_buffer = send_buffer_bytes;
+             while is_streaming(&client_hostname) {
+                 let VideoPacket { header, payload } =
+                     match video_channel_receiver.recv_timeout(STREAMING_RECV_TIMEOUT) {
+@@ -1281,8 +1369,37 @@ fn connection_pipeline(
+                     continue;
+                 }
+ 
++                // Fast ABR times each TCP hand-off: the stream socket send, or the dispatch to
++                // the wired writers (it blocks while a writer has a frame sending and one queued).
++                let payload_len = payload.len();
++                if let Some(abr) = &fast_abr {
++                    // Resize only when the ceiling's 64 KiB-rounded automatic bound changes.
++                    // This is on the sender, never the encode callback; explicit sizes stay fixed.
++                    let desired = abr.desired_send_buffer_bytes();
++                    if desired != current_send_buffer {
++                        match video_sender.set_send_buffer_size(desired as usize) {
++                            Ok(actual) => {
++                                info!("[Q3PW_FAST_ABR] sndbuf_update={desired} sndbuf_actual={actual}");
++                                current_send_buffer = desired;
++                                estimator = crate::fast_abr::SendEstimator::default();
++                            }
++                            Err(e) => {
++                                warn!("[Q3PW_FAST_ABR] send buffer update failed: {e}");
++                                abr.enqueue_failed();
++                                disconnect_notif.notify_one();
++                                return;
++                            }
++                        }
++                    }
++                    abr.begin_send();
++                }
++
+                 if let Some(sender) = &mut wired_video {
+-                    if sender.send(VideoPacket { header, payload }) {
++                    let sent = sender.send(VideoPacket { header, payload });
++                    if let Some(abr) = &fast_abr {
++                        abr.end_send(sent, payload_len, &mut estimator);
++                    }
++                    if sent {
+                         continue;
+                     }
+                     error!("[PYROWAVE] wired video connection lost; back to the stream socket");
+@@ -1295,7 +1412,10 @@ fn connection_pipeline(
+                 buffer
+                     .get_range_mut(0, payload.len())
+                     .copy_from_slice(&payload);
+-                video_sender.send(buffer).ok();
++                let sent = video_sender.send(buffer).is_ok();
++                if let Some(abr) = &fast_abr {
++                    abr.end_send(sent, payload_len, &mut estimator);
++                }
+             }
+         }
+     });
+@@ -1545,6 +1665,11 @@ fn connection_pipeline(
+                     }
+                 }
+ 
++                // Fast ABR's per-second line; the lock is released before logging.
++                let fast_abr_stats = ctx.fast_abr.read().as_ref().map(|abr| abr.take_stats());
++                if let Some(stats) = fast_abr_stats {
++                    info!("{stats}");
++                }
+                 thread::sleep(REAL_TIME_UPDATE_INTERVAL);
+             }
+         }
+@@ -1945,6 +2070,7 @@ fn connection_pipeline(
+ 
+     // This requests shutdown from threads
+     *ctx.video_channel_sender.lock() = None;
++    *ctx.fast_abr.write() = None;
+     *ctx.pyrowave_udp.lock() = None;
+     *ctx.haptics_sender.lock() = None;
+ 
+@@ -2046,4 +2172,17 @@ mod beta_tests {
+             ["pyrowave_chroma_444", "video.preferred_fps", "video.pyrowave"]
+         );
+     }
++
++    #[test]
++    fn fast_abr_changes_reconnect_without_a_driver_restart() {
++        let session = SessionConfig::default();
++        let baseline = stream_start_settings(&session);
++        let mut tuned = session.clone();
++        tuned.session_settings.video.pyrowave.fast_abr.enabled = true;
++        // Only the stream-start comparison changes; the OpenVR driver configuration does not.
++        assert_eq!(
++            changed_settings(&baseline, &stream_start_settings(&tuned)),
++            ["video.pyrowave"]
++        );
++    }
+ }
+diff --git a/alvr/server_core/src/fast_abr.rs b/alvr/server_core/src/fast_abr.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..b725108da734c20475da881e63d7f0984f8712f4
+--- /dev/null
++++ b/alvr/server_core/src/fast_abr.rs
+@@ -0,0 +1,440 @@
++//! Per-encode TCP budget control for PyroWave (docs/FAST-ABR.md). AIMD remains available
++//! unchanged for A/B. Standard library only: CI may also compile this file alone with
++//! `rustc --edition=2021 --test`.
++#[path = "fast_abr_capacity.rs"]
++mod capacity;
++use capacity::{CapacityController, Feedback};
++pub use capacity::SendEstimator;
++#[cfg(test)]
++#[path = "fast_abr_tests.rs"]
++mod capacity_tests;
++use std::{
++    sync::{
++        atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering::{Acquire, Release, Relaxed}},
++        Mutex,
++    },
++    time::Instant,
++};
++
++#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
++pub enum Mode {
++    #[default]
++    Aimd,
++    Capacity,
++}
++
++#[derive(Clone, Copy, Debug)]
++pub struct Config {
++    pub mode: Mode,
++    pub floor: f32,
++    pub decrease: f32,
++    pub recovery: f32,
++    pub backlog_frames: f32,
++    pub send_buffer_bytes: u32,
++}
++
++impl Default for Config {
++    fn default() -> Self {
++        Self { mode: Mode::Aimd, floor: 0.35, decrease: 0.6, recovery: 0.05,
++            backlog_frames: 0.75, send_buffer_bytes: 0 }
++    }
++}
++
++impl Config {
++    /// Zero selects an automatic bound; explicit v1 values keep their exact behavior.
++    pub fn send_buffer_bytes(self, ceiling_bps: u64, fps: f32) -> u32 {
++        if self.send_buffer_bytes != 0 {
++            return self.send_buffer_bytes;
++        }
++        if ceiling_bps <= 1_000_000_000 || !fps.is_finite() || fps <= 0.0 {
++            return 1_048_576;
++        }
++        let bytes = (1.5 * ceiling_bps as f64 / 8.0 / fps as f64 / 65536.0).ceil() * 65536.0;
++        bytes.clamp(1_048_576.0, 16_777_216.0) as u32
++    }
++
++    pub fn validate(self) -> Result<Self, &'static str> {
++        if !self.floor.is_finite() || !(0.01..=1.0).contains(&self.floor)
++            || !self.decrease.is_finite() || !(0.01..1.0).contains(&self.decrease)
++            || !self.recovery.is_finite() || !(0.0001..=1.0).contains(&self.recovery)
++            || !self.backlog_frames.is_finite() || !(0.25..=8.0).contains(&self.backlog_frames)
++            || (self.send_buffer_bytes != 0 && !(65536..=16777216).contains(&self.send_buffer_bytes))
++        {
++            return Err("invalid fast ABR parameters");
++        }
++        Ok(self)
++    }
++}
++
++/// Active only when PyroWave video travels over TCP: ALVR's stream socket or the wired video
++/// connections (wired streams always use a TCP stream socket). `udp_video` is PyroWave's own
++/// UDP sender, which keeps ALVR's cap: dropped datagrams there are not sender back-pressure.
++pub fn enabled(requested: bool, pyrowave: bool, udp_video: bool, tcp_stream: bool) -> bool {
++    requested && pyrowave && !udp_video && tcp_stream
++}
++
++fn step(config: Config, multiplier: f32, backlog: f32, dropped: bool) -> f32 {
++    if dropped || backlog > config.backlog_frames {
++        (multiplier * config.decrease).max(config.floor)
++    } else {
++        (multiplier + config.recovery).min(1.0)
++    }
++}
++
++// Bounded histogram: quarter-frame upper bounds; final bucket means > 15.75 frames.
++const BACKLOG_BUCKETS: usize = 65;
++const SCALE: f32 = 1_000_000.0;
++
++pub struct FastAbr {
++    config: Config,
++    // Only the encoder callback uses this mutex; the send thread publishes atomic feedback.
++    capacity_controller: Mutex<CapacityController>,
++    ceiling_bps: AtomicU64,
++    capacity_bps: AtomicU64,
++    capacity_updated_ns: AtomicU64,
++    completed: AtomicU64,
++    cuts: AtomicU64,
++    at_floor: AtomicU64,
++    epoch: Instant,
++    // f64 bits: the encoder's frame period, which also sets its per-frame byte cap.
++    frame_ns: AtomicU64,
++    queued: AtomicUsize,
++    send_started_ns: AtomicU64,
++    completed_send_ns: AtomicU64,
++    drop_pending: AtomicBool,
++    multiplier: AtomicU32,
++    samples: AtomicU64,
++    multiplier_sum: AtomicU64,
++    multiplier_min: AtomicU32,
++    shrunk: AtomicU64,
++    dropped: AtomicU64,
++    send_errors: AtomicU64,
++    backlog: [AtomicU64; BACKLOG_BUCKETS],
++}
++
++impl FastAbr {
++    pub fn new(config: Config, fps: f32) -> Result<Self, &'static str> {
++        let config = config.validate()?;
++        if !fps.is_finite() || !(1.0..=1000.0).contains(&fps) {
++            return Err("invalid fast ABR frame rate");
++        }
++        Ok(Self {
++            config,
++            capacity_controller: Mutex::new(CapacityController::default()),
++            ceiling_bps: AtomicU64::new(0),
++            capacity_bps: AtomicU64::new(0),
++            capacity_updated_ns: AtomicU64::new(0),
++            completed: AtomicU64::new(0),
++            cuts: AtomicU64::new(0),
++            at_floor: AtomicU64::new(0),
++            epoch: Instant::now(),
++            frame_ns: AtomicU64::new((1e9 / fps as f64).to_bits()),
++            queued: AtomicUsize::new(0),
++            send_started_ns: AtomicU64::new(0),
++            completed_send_ns: AtomicU64::new(0),
++            drop_pending: AtomicBool::new(false),
++            multiplier: AtomicU32::new(1.0_f32.to_bits()),
++            samples: AtomicU64::new(0),
++            multiplier_sum: AtomicU64::new(0),
++            multiplier_min: AtomicU32::new(1.0_f32.to_bits()),
++            shrunk: AtomicU64::new(0),
++            dropped: AtomicU64::new(0),
++            send_errors: AtomicU64::new(0),
++            backlog: std::array::from_fn(|_| AtomicU64::new(0)),
++        })
++    }
++
++    fn now_ns(&self) -> u64 {
++        // Zero is reserved for "no send in progress".
++        (self.epoch.elapsed().as_nanos() as u64).max(1)
++    }
++
++    fn frame_ns(&self) -> f64 {
++        f64::from_bits(self.frame_ns.load(Relaxed))
++    }
++
++    /// The encoder divides ALVR's bitrate by this rate for its per-frame cap, so pressure and
++    /// the automatic send buffer use the same frame period. Today that is the stream's refresh
++    /// rate; a cap from the measured game frame rate (PLAN 2.1) needs no change here.
++    /// Invalid rates keep the previous period.
++    fn set_framerate(&self, framerate: f32) {
++        if framerate.is_finite() && (1.0..=1000.0).contains(&framerate) {
++            self.frame_ns.store((1e9 / framerate as f64).to_bits(), Relaxed);
++        }
++    }
++
++    // Called BEFORE try_send: the consumer must never decrement an unpublished count.
++    pub fn enqueue(&self) {
++        self.queued.fetch_add(1, Relaxed);
++    }
++
++    pub fn enqueue_failed(&self) {
++        self.queued.fetch_sub(1, Relaxed);
++        self.drop_pending.store(true, Relaxed);
++        self.dropped.fetch_add(1, Relaxed);
++    }
++
++    pub fn begin_send(&self) {
++        self.begin_send_at(self.now_ns());
++    }
++
++    fn begin_send_at(&self, now_ns: u64) {
++        self.send_started_ns.store(now_ns, Relaxed);
++        self.queued.fetch_sub(1, Relaxed);
++    }
++
++    pub fn desired_send_buffer_bytes(&self) -> u32 {
++        self.config.send_buffer_bytes(self.ceiling_bps.load(Relaxed), (1e9 / self.frame_ns()) as f32)
++    }
++
++    pub fn end_send(&self, success: bool, bytes: usize, estimator: &mut SendEstimator) {
++        self.end_send_measured_at(self.now_ns(), success, bytes, estimator);
++    }
++
++    fn end_send_measured_at(&self, now_ns: u64, success: bool, bytes: usize, estimator: &mut SendEstimator) {
++        if let Some(bps) = estimator.observe(self.send_started_ns.load(Relaxed), now_ns, bytes, self.frame_ns(), success) {
++            self.capacity_bps.store(bps, Relaxed);
++            self.capacity_updated_ns.store(now_ns, Release);
++        }
++        self.end_send_at(now_ns, success);
++    }
++
++    fn end_send_at(&self, now_ns: u64, success: bool) {
++        let start = self.send_started_ns.load(Relaxed);
++        self.completed_send_ns.fetch_max(now_ns.saturating_sub(start), Relaxed);
++        self.send_started_ns.store(0, Relaxed);
++        self.completed.fetch_add(1, Relaxed);
++        if !success {
++            self.drop_pending.store(true, Relaxed);
++            self.dropped.fetch_add(1, Relaxed);
++            self.send_errors.fetch_add(1, Relaxed);
++        }
++    }
++
++    /// One call per PyroWave encode, independently of ALVR's slow bitrate updates.
++    /// `ceiling_bps` and `framerate` are what the encoder's per-frame cap is computed from.
++    pub fn next_frame(&self, ceiling_bps: u64, framerate: f32) -> f32 {
++        self.set_framerate(framerate);
++        self.next_frame_with_ceiling_at(self.now_ns(), ceiling_bps)
++    }
++
++    #[cfg(test)]
++    fn next_frame_at(&self, now_ns: u64) -> f32 {
++        self.next_frame_with_ceiling_at(now_ns, 2_000_000_000)
++    }
++
++    fn next_frame_with_ceiling_at(&self, now_ns: u64, ceiling_bps: u64) -> f32 {
++        self.ceiling_bps.store(ceiling_bps, Relaxed);
++        let started = self.send_started_ns.load(Relaxed);
++        let active = if started == 0 { 0 } else { now_ns.saturating_sub(started) };
++        let completed = self.completed_send_ns.swap(0, Relaxed);
++        // This is pressure in frame equivalents, NOT a TCP byte-queue measurement.
++        // A blocked send remains observable even before it returns. Completed durations
++        // are consumed once, so a stale slow send cannot pin the controller at its floor.
++        let queued = self.queued.load(Relaxed);
++        let frame_ns = self.frame_ns();
++        let backlog = (queued as f64 + active as f64 / frame_ns)
++            .max(completed as f64 / frame_ns) as f32;
++        // The native encoder is the sole caller; feedback/telemetry use only atomics.
++        let previous = f32::from_bits(self.multiplier.load(Relaxed));
++        let dropped = self.drop_pending.swap(false, Relaxed);
++        let (value, cut) = match self.config.mode {
++            Mode::Aimd => {
++                let value = step(self.config, previous, backlog, dropped);
++                (value, value < previous)
++            }
++            Mode::Capacity => {
++                let updated = self.capacity_updated_ns.load(Acquire);
++                self.capacity_controller.lock().unwrap_or_else(|e| e.into_inner()).update(
++                    self.config, previous, ceiling_bps, Feedback {
++                        now_ns, frame_ns, raw_backlog: backlog,
++                        // One in-flight frame is normal service, not an ever-growing queue.
++                        backlog: queued as f32 + (active as f64 / frame_ns - 1.0).max(0.0) as f32,
++                        pending: queued as u64 + u64::from(started != 0),
++                        completed: self.completed.load(Relaxed), dropped,
++                        capacity_bps: self.capacity_bps.load(Relaxed), capacity_updated_ns: updated,
++                    },
++                )
++            }
++        };
++        if cut { self.cuts.fetch_add(1, Relaxed); }
++        if value <= self.config.floor { self.at_floor.fetch_add(1, Relaxed); }
++        self.multiplier.store(value.to_bits(), Relaxed);
++        self.samples.fetch_add(1, Relaxed);
++        self.multiplier_sum.fetch_add((value * SCALE).round() as u64, Relaxed);
++        self.multiplier_min.fetch_min(value.to_bits(), Relaxed);
++        if value < 1.0 {
++            self.shrunk.fetch_add(1, Relaxed);
++        }
++        let bucket = ((backlog * 4.0).ceil() as usize).min(BACKLOG_BUCKETS - 1);
++        self.backlog[bucket].fetch_add(1, Relaxed);
++        value
++    }
++
++    /// Called once per second by the existing telemetry thread, never the socket sender.
++    /// Atomic interval counters can straddle a sample at the reporting boundary.
++    pub fn take_stats(&self) -> String {
++        let capacity_updated = self.capacity_updated_ns.load(Acquire);
++        let capacity_age_ms = if capacity_updated == 0 { -1.0 } else {
++            self.now_ns().saturating_sub(capacity_updated) as f64 / 1e6
++        };
++        let samples = self.samples.swap(0, Relaxed);
++        let sum = self.multiplier_sum.swap(0, Relaxed);
++        let min = f32::from_bits(self.multiplier_min.swap(1.0_f32.to_bits(), Relaxed));
++        let counts: [u64; BACKLOG_BUCKETS] = std::array::from_fn(|i| self.backlog[i].swap(0, Relaxed));
++        let total: u64 = counts.iter().sum();
++        let rank = (total * 95).div_ceil(100);
++        let mut cumulative = 0;
++        let p95 = counts.iter().position(|count| {
++            cumulative += count;
++            cumulative >= rank
++        }).unwrap_or(0);
++        format!(
++            "[Q3PW_FAST_ABR] samples={samples} multiplier_min={min:.3} multiplier_mean={:.3} frames_shrunk={} frames_dropped={} send_errors={} backlog_p95_frames={:.2} backlog_p95_saturated={} mode={:?} capacity_mbps={:.1} cuts={} frames_at_floor={} capacity_age_ms={capacity_age_ms:.1}",
++            if samples == 0 { 1.0 } else { sum as f64 / SCALE as f64 / samples as f64 },
++            self.shrunk.swap(0, Relaxed), self.dropped.swap(0, Relaxed),
++            self.send_errors.swap(0, Relaxed), p95 as f32 / 4.0,
++            p95 == BACKLOG_BUCKETS - 1, self.config.mode,
++            self.capacity_bps.load(Relaxed) as f64 / 1e6,
++            self.cuts.swap(0, Relaxed), self.at_floor.swap(0, Relaxed),
++        )
++    }
++}
++
++/// 1.0 (the encoder's unchanged cap) when no controller is published for this stream.
++pub fn next_frame(controller: Option<&FastAbr>, ceiling_bps: u64, framerate: f32) -> f32 {
++    controller.map_or(1.0, |abr| abr.next_frame(ceiling_bps, framerate))
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn config() -> Config {
++        Config { mode: Mode::Aimd, floor: 0.35, decrease: 0.6, recovery: 0.05,
++            backlog_frames: 1.0, send_buffer_bytes: 1_048_576 }
++    }
++
++    fn close(actual: f32, expected: f32) {
++        assert!((actual - expected).abs() < 0.00001, "{actual} != {expected}");
++    }
++
++    #[test]
++    fn step_response_floor_and_recovery_never_exceed_ceiling() {
++        let c = config();
++        let mut value = 1.0;
++        for expected in [0.6, 0.36, 0.35, 0.35] {
++            value = step(c, value, 2.0, false);
++            close(value, expected);
++        }
++        close(step(c, value, 0.0, false), 0.4);
++        for _ in 0..100 { value = step(c, value, 0.0, false); }
++        close(value, 1.0);
++    }
++
++    #[test]
++    fn blocked_send_is_seen_before_completion_and_stale_feedback_is_consumed() {
++        let abr = FastAbr::new(config(), 100.0).unwrap();
++        abr.enqueue(); abr.begin_send_at(1);
++        close(abr.next_frame_at(20_000_001), 0.6);
++        close(abr.next_frame_at(30_000_001), 0.36);
++        abr.end_send_at(30_000_001, true);
++        close(abr.next_frame_at(40_000_001), 0.35);
++        close(abr.next_frame_at(50_000_001), 0.4);
++    }
++
++    #[test]
++    fn queued_frames_and_rejected_enqueue_are_accounted_once() {
++        let abr = FastAbr::new(config(), 90.0).unwrap();
++        abr.enqueue(); abr.enqueue();
++        close(abr.next_frame_at(1), 0.6);
++        abr.enqueue(); abr.enqueue_failed();
++        assert_eq!(abr.queued.load(Relaxed), 2);
++        abr.begin_send_at(1); abr.end_send_at(2, true);
++        abr.begin_send_at(3); abr.end_send_at(4, true);
++        close(abr.next_frame_at(5), 0.36); // full-channel event survives queue drain
++        close(abr.next_frame_at(6), 0.41);
++        assert_eq!(abr.queued.load(Relaxed), 0);
++        let stats = abr.take_stats();
++        assert!(stats.contains("frames_dropped=1"));
++        assert!(stats.contains("backlog_p95_frames=2.00"));
++        assert!(abr.take_stats().contains("samples=0"));
++    }
++
++    #[test]
++    fn send_failure_decreases_and_counts_one_frame() {
++        let abr = FastAbr::new(config(), 90.0).unwrap();
++        abr.enqueue(); abr.begin_send_at(1); abr.end_send_at(2, false);
++        close(abr.next_frame_at(3), 0.6);
++        let stats = abr.take_stats();
++        assert!(stats.contains("frames_dropped=1 send_errors=1"));
++    }
++
++    #[test]
++    fn disabled_or_other_transports_are_no_ops() {
++        close(next_frame(None, 2_000_000_000, 90.0), 1.0);
++        assert!(!enabled(false, true, false, true));
++        assert!(!enabled(true, false, false, true));
++        assert!(!enabled(true, true, true, true));
++        assert!(!enabled(true, true, false, false));
++        assert!(enabled(true, true, false, true));
++    }
++
++    #[test]
++    fn threshold_and_custom_tuning_are_respected() {
++        let c = Config { floor: 0.5, decrease: 0.8, recovery: 0.02,
++            backlog_frames: 2.0, ..config() };
++        close(step(c, 0.8, 2.0, false), 0.82);
++        close(step(c, 0.8, 2.01, false), 0.64);
++        close(step(c, 0.5, 3.0, false), 0.5);
++    }
++
++    #[test]
++    fn encoder_frame_rate_sets_the_pressure_period_and_automatic_buffer() {
++        let abr = FastAbr::new(Config { send_buffer_bytes: 0, ..config() }, 90.0).unwrap();
++        for invalid in [f32::NAN, f32::INFINITY, 0.0, 0.5, 5000.0] {
++            abr.set_framerate(invalid);
++        }
++        assert!((abr.frame_ns() - 1e9 / 90.0).abs() < 1.0);
++        close(abr.next_frame_with_ceiling_at(1, 2_000_000_000), 1.0);
++        assert_eq!(abr.desired_send_buffer_bytes(), 4_194_304);
++        // A cap from a 45 fps game rate doubles the bytes per frame and the frame period.
++        abr.set_framerate(45.0);
++        assert_eq!(abr.desired_send_buffer_bytes(), 8_388_608);
++        // A 15 ms blocked send is 0.675 frames at 45 fps but 1.35 at 90: only the latter cuts.
++        abr.enqueue(); abr.begin_send_at(2);
++        close(abr.next_frame_with_ceiling_at(15_000_002, 2_000_000_000), 1.0);
++        abr.set_framerate(90.0);
++        close(abr.next_frame_with_ceiling_at(15_000_003, 2_000_000_000), 0.6);
++    }
++
++    #[test]
++    fn reconnect_starts_at_ceiling_with_no_stale_pressure() {
++        let first = FastAbr::new(config(), 90.0).unwrap();
++        first.enqueue(); first.enqueue();
++        close(first.next_frame_at(1), 0.6);
++        let second = FastAbr::new(config(), 90.0).unwrap();
++        close(second.next_frame_at(1), 1.0);
++        assert_eq!(second.queued.load(Relaxed), 0);
++    }
++
++    #[test]
++    fn invalid_configuration_is_rejected() {
++        for floor in [f32::NAN, f32::INFINITY, 0.0, 1.01] {
++            assert!(Config { floor, ..config() }.validate().is_err());
++        }
++        for decrease in [f32::NAN, 0.0, 1.0] {
++            assert!(Config { decrease, ..config() }.validate().is_err());
++        }
++        for recovery in [f32::NAN, 0.0, 1.01] {
++            assert!(Config { recovery, ..config() }.validate().is_err());
++        }
++        for backlog_frames in [f32::NAN, 0.0, 9.0] {
++            assert!(Config { backlog_frames, ..config() }.validate().is_err());
++        }
++        for send_buffer_bytes in [1, 65535, u32::MAX] {
++            assert!(Config { send_buffer_bytes, ..config() }.validate().is_err());
++        }
++        assert!(FastAbr::new(config(), f32::NAN).is_err());
++    }
++}
+diff --git a/alvr/server_core/src/fast_abr_capacity.rs b/alvr/server_core/src/fast_abr_capacity.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..f9b821ec758cb0e8a107491769a7b6a4d4e3d35b
+--- /dev/null
++++ b/alvr/server_core/src/fast_abr_capacity.rs
+@@ -0,0 +1,142 @@
++//! Capacity mode policy and sender-owned throughput measurement. No sockets or clocks.
++use super::Config;
++
++/// Three consecutive completed sends, after discarding the first send of a busy run.
++/// The first send may merely fill free SO_SNDBUF space, not measure link service.
++#[derive(Default)]
++pub struct SendEstimator {
++    last_end_ns: u64,
++    was_busy: bool,
++    samples: [(u64, u64); 3],
++    count: usize,
++    cursor: usize,
++}
++
++impl SendEstimator {
++    pub fn observe(
++        &mut self, start_ns: u64, end_ns: u64, bytes: usize, frame_ns: f64, success: bool,
++    ) -> Option<u64> {
++        let duration = end_ns.saturating_sub(start_ns);
++        let busy = success && duration as f64 > frame_ns * 0.25;
++        // Allow a short sender scheduling gap, but include it in the denominator.
++        let continuous = self.was_busy
++            && start_ns.saturating_sub(self.last_end_ns) as f64 <= frame_ns * 0.1;
++        let estimate = if busy && continuous {
++            self.samples[self.cursor] = (bytes as u64, end_ns - self.last_end_ns);
++            self.cursor = (self.cursor + 1) % self.samples.len();
++            self.count = (self.count + 1).min(self.samples.len());
++            let bytes: u64 = self.samples[..self.count].iter().map(|s| s.0).sum();
++            let ns: u64 = self.samples[..self.count].iter().map(|s| s.1).sum();
++            Some((bytes as f64 * 8e9 / ns as f64) as u64)
++        } else {
++            self.count = 0;
++            self.cursor = 0;
++            None
++        };
++        self.was_busy = busy;
++        self.last_end_ns = end_ns;
++        estimate
++    }
++}
++
++pub struct Feedback {
++    pub now_ns: u64,
++    pub frame_ns: f64,
++    pub raw_backlog: f32,
++    pub backlog: f32,
++    pub pending: u64,
++    pub completed: u64,
++    pub dropped: bool,
++    pub capacity_bps: u64,
++    pub capacity_updated_ns: u64,
++}
++
++#[derive(Default)]
++pub struct CapacityController {
++    memory_bps: f32,
++    high_water_bps: f32,
++    last_estimate_ns: u64,
++    previous_ceiling_bps: f32,
++    hold_frames: u32,
++    drain_until: u64,
++    episode_peak: f32,
++    frames_since_cut: u32,
++    episode: bool,
++    learning: bool,
++    idle_frames: u32,
++}
++
++impl CapacityController {
++    pub fn update(&mut self, config: Config, previous: f32, ceiling_bps: u64, f: Feedback) -> (f32, bool) {
++        let ceiling = ceiling_bps as f32;
++        if ceiling_bps == 0 {
++            return (1.0, false);
++        }
++        // Memory is in bits/s, not multipliers: ALVR can change its ceiling independently.
++        let previous = if self.previous_ceiling_bps > 0.0 {
++            (previous * self.previous_ceiling_bps / ceiling).clamp(config.floor, 1.0)
++        } else {
++            previous
++        };
++        self.previous_ceiling_bps = ceiling;
++        self.frames_since_cut = self.frames_since_cut.saturating_add(1);
++        if f.capacity_updated_ns != 0 && f.capacity_updated_ns != self.last_estimate_ns {
++            self.last_estimate_ns = f.capacity_updated_ns;
++            self.memory_bps = f.capacity_bps as f32;
++            self.high_water_bps = self.high_water_bps.max(self.memory_bps);
++            self.learning = false;
++        }
++        let fresh = f.capacity_updated_ns != 0
++            && (f.now_ns.saturating_sub(f.capacity_updated_ns) as f64) < 8.0 * f.frame_ns;
++        self.idle_frames = if f.raw_backlog < 0.01 {
++            self.idle_frames.saturating_add(1)
++        } else {
++            0
++        };
++        // Idle writes after a dip are evidence to probe the previously achieved rate again.
++        // Do not snap back to a stale low estimate when that probe first starts blocking.
++        if self.idle_frames >= 3 {
++            self.learning = true;
++        }
++        if self.episode && f.completed >= self.drain_until && f.backlog <= 0.25 {
++            self.episode = false;
++        }
++        let emergency = f.backlog > (2.0 * config.backlog_frames).max(self.episode_peak + 1.0)
++            && self.frames_since_cut >= 2;
++        if (f.backlog > config.backlog_frames || f.dropped) && (!self.episode || emergency) {
++            // With no valid measurement yet, make ONE conservative provisional cut.
++            // An emergency growing-queue event can replace it once capacity is measured.
++            let target = if fresh { 0.9 * f.capacity_bps as f32 / ceiling } else { 0.9 * previous };
++            let value = target.min(previous).max(config.floor);
++            self.memory_bps = if fresh { f.capacity_bps as f32 } else { previous * ceiling };
++            self.hold_frames = 3;
++            self.drain_until = f.completed.saturating_add(f.pending);
++            self.episode_peak = f.backlog;
++            self.frames_since_cut = 0;
++            self.episode = true;
++            return (value, value < previous);
++        }
++        if self.hold_frames > 0 {
++            self.hold_frames -= 1;
++            return (previous, false);
++        }
++        // 97% leaves room for measurement rounding/jitter while staying within 5% of capacity.
++        // Recover quickly to remembered capacity, then probe by one ceiling percentage point.
++        let remembered = if self.learning {
++            self.high_water_bps.max(self.memory_bps)
++        } else {
++            self.memory_bps
++        };
++        let target = if remembered > 0.0 { (0.97 * remembered / ceiling).min(1.0) } else { 1.0 };
++        let value = if previous < target {
++            (previous + config.recovery).min(target)
++        } else if f.raw_backlog > 0.25 && self.memory_bps > 0.0 && !self.learning {
++            // Normal send service time is not another congestion episode. Trim probes
++            // toward the measured rate while the pipe is busy instead of cutting again.
++            previous.min(0.99 * self.memory_bps / ceiling).max(target)
++        } else {
++            previous + 0.01
++        };
++        (value.clamp(config.floor, 1.0), false)
++    }
++}
+diff --git a/alvr/server_core/src/fast_abr_tests.rs b/alvr/server_core/src/fast_abr_tests.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..e5f72c92748cb7e79cbb26d6540e88db69edff8b
+--- /dev/null
++++ b/alvr/server_core/src/fast_abr_tests.rs
+@@ -0,0 +1,201 @@
++//! Deterministic fluid TCP model: a bounded kernel send buffer, a blocking writer,
++//! and the real two-frame producer queue. Completion means write admission, NOT ACK.
++//! Only simulated time advances. No threads, sockets, devices, sleeps or GPU work.
++use super::*;
++use std::collections::VecDeque;
++
++const FPS: f32 = 90.0;
++const CEILING: u64 = 2_000_000_000;
++const QUANTUM_NS: u64 = 100_000;
++
++struct Trace {
++    multipliers: Vec<f32>,
++    max_buffered_frames: f64,
++    drops: u64,
++}
++
++fn simulate(capacity_mbps: impl Fn(usize) -> f64, jitter: bool) -> Trace {
++    let config = Config { mode: Mode::Capacity, ..Config::default() };
++    let abr = FastAbr::new(config, FPS).unwrap();
++    let frame_ns = 1e9 / FPS as f64;
++    let full_frame_bytes = CEILING as f64 / 8.0 / FPS as f64;
++    let socket_limit = config.send_buffer_bytes(CEILING, FPS) as f64;
++    let mut estimator = SendEstimator::default();
++    let mut queue = VecDeque::<usize>::new();
++    let mut active: Option<(usize, f64)> = None;
++    let mut socket_bytes = 0.0_f64;
++    let mut trace = Trace { multipliers: vec![], max_buffered_frames: 0.0, drops: 0 };
++    let frames = 270;
++
++    for tick in 0..frames * 112 {
++        let now_ns = tick as u64 * QUANTUM_NS;
++        let frame = (now_ns as f64 / frame_ns) as usize;
++        let jitter_factor = if jitter { [1.0, 0.9, 1.1, 0.95, 1.05][frame % 5] } else { 1.0 };
++        let drain = capacity_mbps(frame) * 1e6 / 8.0 * jitter_factor * QUANTUM_NS as f64 / 1e9;
++        socket_bytes = (socket_bytes - drain).max(0.0);
++        loop {
++            if active.is_none() {
++                if let Some(bytes) = queue.pop_front() {
++                    abr.begin_send_at(now_ns.max(1));
++                    active = Some((bytes, bytes as f64));
++                }
++            }
++            let Some((bytes, remaining)) = active.as_mut() else { break };
++            let admitted = (*remaining).min(socket_limit - socket_bytes);
++            *remaining -= admitted;
++            socket_bytes += admitted;
++            if *remaining > 0.000001 { break; }
++            abr.end_send_measured_at(now_ns.max(1), true, *bytes, &mut estimator);
++            active = None;
++        }
++        if trace.multipliers.len() < frames && now_ns as f64 >= trace.multipliers.len() as f64 * frame_ns {
++            let multiplier = abr.next_frame_with_ceiling_at(now_ns.max(1), CEILING);
++            trace.multipliers.push(multiplier);
++            abr.enqueue();
++            if queue.len() == 2 {
++                abr.enqueue_failed();
++            } else {
++                // Same ceiling truncation, multiplier precision and word alignment as native.
++                queue.push_back(((full_frame_bytes as usize as f64 * multiplier as f64) as usize) & !3);
++            }
++        }
++        let remaining = active.map_or(0.0, |(_, bytes)| bytes);
++        let buffered = socket_bytes + remaining + queue.iter().sum::<usize>() as f64;
++        trace.max_buffered_frames = trace.max_buffered_frames.max(buffered / full_frame_bytes);
++    }
++    trace.drops = abr.dropped.load(Relaxed);
++    assert_eq!(trace.multipliers.len(), frames);
++    assert!(trace.multipliers.iter().all(|m| *m > config.floor && *m <= 1.0), "hit floor or ceiling: {:?}", trace.multipliers);
++    assert!(trace.max_buffered_frames < 4.1, "unbounded backlog: {} ceiling frames", trace.max_buffered_frames);
++    trace
++}
++
++fn close_to_capacity(multiplier: f32, capacity_mbps: f32) {
++    let target = capacity_mbps / 2000.0;
++    assert!((multiplier / target - 1.0).abs() <= 0.05, "multiplier={multiplier}, target={target}");
++}
++
++#[test]
++fn fixed_links_settle_within_ten_frames_of_detection_without_hitting_floor() {
++    for mbps in [1000.0_f32, 1100.0, 1500.0, 1600.0] {
++        let trace = simulate(|_| mbps as f64, false);
++        let detection = trace.multipliers.iter().position(|m| *m < 1.0).unwrap();
++        // Includes startup socket fill. Convergence is measured from first controller action.
++        for &multiplier in &trace.multipliers[detection + 10..] {
++            close_to_capacity(multiplier, mbps);
++        }
++        assert!(trace.drops <= 2, "{mbps} Mbps: {} rejected frames", trace.drops);
++    }
++}
++
++fn dip(frame: usize) -> f64 {
++    if (90..135).contains(&frame) { 1100.0 } else { 1600.0 }
++}
++
++#[test]
++fn half_second_dip_recovers_within_half_a_second() {
++    let trace = simulate(dip, false);
++    for &multiplier in &trace.multipliers[100..135] {
++        close_to_capacity(multiplier, 1100.0);
++    }
++    for &multiplier in &trace.multipliers[180..] {
++        close_to_capacity(multiplier, 1600.0);
++    }
++}
++
++#[test]
++fn jittered_link_and_dip_settle_in_mean_without_floor_excursions() {
++    // +/-10% deterministic link-service jitter. Check every 20-frame mean, not
++    // individual probe samples against a capacity which itself changes every frame.
++    let fixed = simulate(|_| 1600.0, true);
++    for window in fixed.multipliers[20..].windows(20) {
++        close_to_capacity(window.iter().sum::<f32>() / 20.0, 1600.0);
++    }
++    let stepped = simulate(dip, true);
++    for window in stepped.multipliers[100..135].windows(20) {
++        close_to_capacity(window.iter().sum::<f32>() / 20.0, 1100.0);
++    }
++    for window in stepped.multipliers[180..].windows(20) {
++        close_to_capacity(window.iter().sum::<f32>() / 20.0, 1600.0);
++    }
++}
++
++#[test]
++fn sufficient_capacity_keeps_the_original_budget() {
++    let trace = simulate(|_| 2500.0, false);
++    assert!(trace.multipliers.iter().all(|m| *m == 1.0));
++    assert_eq!(trace.drops, 0);
++}
++
++fn feedback(frame: u64, backlog: f32, capacity_bps: u64) -> Feedback {
++    Feedback {
++        now_ns: frame * 10_000_000, frame_ns: 10_000_000.0,
++        raw_backlog: backlog, backlog, pending: 3, completed: 0, dropped: false,
++        capacity_bps, capacity_updated_ns: frame * 10_000_000,
++    }
++}
++
++#[test]
++fn one_cut_holds_old_backlog_and_growth_allows_an_emergency_cut() {
++    let mut controller = CapacityController::default();
++    let config = Config::default();
++    let (mut value, cut) = controller.update(config, 1.0, CEILING, feedback(1, 1.0, 1_600_000_000));
++    assert!(cut);
++    assert!((value - 0.72).abs() < 0.00001);
++    for frame in 2..=4 {
++        let (next, cut) = controller.update(config, value, CEILING, feedback(frame, 1.0, 1_600_000_000));
++        assert_eq!(value, next);
++        assert!(!cut);
++        value = next;
++    }
++    let (value, cut) = controller.update(config, value, CEILING, feedback(5, 1.0, 1_600_000_000));
++    assert!(!cut);
++    assert!(value > 0.72, "bounded hold must allow recovery while the old backlog drains");
++    let (next, cut) = controller.update(config, value, CEILING, feedback(6, 2.5, 1_100_000_000));
++    assert!(cut);
++    assert!((next - 0.495).abs() < 0.00001);
++}
++
++#[test]
++fn sender_discards_free_buffer_bursts_idle_time_and_failed_sends() {
++    let mut estimator = SendEstimator::default();
++    let frame_ns = 10_000_000.0;
++    assert_eq!(estimator.observe(1, 2, 1_000_000, frame_ns, true), None);
++    assert_eq!(estimator.observe(3, 10_000_003, 1_000_000, frame_ns, true), None);
++    assert_eq!(estimator.observe(10_000_003, 20_000_003, 1_000_000, frame_ns, true), Some(800_000_000));
++    assert_eq!(estimator.observe(40_000_003, 50_000_003, 1_000_000, frame_ns, true), None);
++    assert_eq!(estimator.observe(50_000_003, 60_000_003, 1_000_000, frame_ns, false), None);
++}
++
++#[test]
++fn stale_estimates_do_not_force_a_cut_to_old_capacity() {
++    let mut controller = CapacityController::default();
++    let mut sample = feedback(100, 1.0, 100_000_000);
++    sample.capacity_updated_ns = 1;
++    let (value, cut) = controller.update(Config::default(), 1.0, CEILING, sample);
++    assert!(cut);
++    assert_eq!(value, 0.9);
++}
++
++#[test]
++fn changing_the_alvr_ceiling_does_not_scale_capacity_memory() {
++    let mut controller = CapacityController::default();
++    let config = Config::default();
++    let (value, _) = controller.update(config, 1.0, CEILING, feedback(1, 1.0, 1_600_000_000));
++    let (value, _) = controller.update(config, value, 3_000_000_000, feedback(2, 1.0, 1_600_000_000));
++    assert!((value * 3_000_000_000.0 - 1_440_000_000.0).abs() < 1000.0);
++}
++
++#[test]
++fn automatic_socket_buffer_scales_and_explicit_v1_sizes_do_not() {
++    let auto = Config::default();
++    assert!(auto.validate().is_ok());
++    assert_eq!(auto.send_buffer_bytes(0, FPS), 1_048_576);
++    assert_eq!(auto.send_buffer_bytes(1_000_000_000, FPS), 1_048_576);
++    assert_eq!(auto.send_buffer_bytes(1_500_000_000, FPS), 3_145_728);
++    assert_eq!(auto.send_buffer_bytes(2_000_000_000, FPS), 4_194_304);
++    assert_eq!(auto.send_buffer_bytes(2_000_000_000, 120.0), 3_145_728);
++    assert_eq!(auto.send_buffer_bytes(u64::MAX, 1.0), 16_777_216);
++    let explicit = Config { send_buffer_bytes: 1_048_576, ..auto };
++    assert_eq!(explicit.send_buffer_bytes(2_000_000_000, FPS), 1_048_576);
++}
+diff --git a/alvr/server_core/src/lib.rs b/alvr/server_core/src/lib.rs
+index ed3c31b5b43d9d9a178673a059250e1aba9312d1..2d7f7f8abf8ac806d053c366883cd0f7e80e7de8 100644
+--- a/alvr/server_core/src/lib.rs
++++ b/alvr/server_core/src/lib.rs
+@@ -1,6 +1,7 @@
+ mod bitrate;
+ mod c_api;
+ mod connection;
++mod fast_abr;
+ mod hand_gestures;
+ mod haptics;
+ mod input_mapping;
+@@ -117,6 +118,8 @@ pub struct ConnectionContext {
+     connection_threads: Mutex<Vec<JoinHandle<()>>>,
+     clients_to_be_removed: Mutex<HashSet<String>>,
+     video_channel_sender: Mutex<Option<SyncSender<VideoPacket>>>,
++    // Opt-in fast ABR (docs/FAST-ABR.md), set for the life of a PyroWave stream over TCP.
++    fast_abr: RwLock<Option<Arc<fast_abr::FastAbr>>>,
+     haptics_sender: Mutex<Option<StreamSender<Haptics>>>,
+ }
+ 
+@@ -232,6 +235,7 @@ impl ServerCoreContext {
+             connection_threads: Mutex::new(Vec::new()),
+             clients_to_be_removed: Mutex::new(HashSet::new()),
+             video_channel_sender: Mutex::new(None),
++            fast_abr: RwLock::new(None),
+             haptics_sender: Mutex::new(None),
+         });
+ 
+@@ -447,6 +451,11 @@ impl ServerCoreContext {
+         static LAST_IDR_INSTANT: Lazy<Mutex<Instant>> = Lazy::new(|| Mutex::new(Instant::now()));
+ 
+         if let Some(sender) = &*self.connection_context.video_channel_sender.lock() {
++            // Fast ABR is published only for PyroWave over TCP, whose frames are all
++            // independent. Mark each one so: a full channel then drops just that frame instead
++            // of waiting for an IDR, and the client's IDR gate recovers on the next frame too.
++            let fast_abr = self.connection_context.fast_abr.read().clone();
++            let is_idr = is_idr || fast_abr.is_some();
+             let buffer_size = nal_buffer.len();
+ 
+             if is_idr {
+@@ -493,23 +502,36 @@ impl ServerCoreContext {
+                     file.write_all(&nal_buffer).ok();
+                 }
+ 
+-                if matches!(
+-                    sender.try_send(VideoPacket {
+-                        header: VideoPacketHeader {
+-                            timestamp: target_timestamp,
+-                            is_idr,
+-                            foveation_center,
+-                        },
+-                        payload: nal_buffer,
+-                    }),
+-                    Err(TrySendError::Full(_))
+-                ) {
+-                    STREAM_CORRUPTED.store(true, Ordering::SeqCst);
+-                    self.connection_context
+-                        .events_sender
+-                        .send(ServerCoreEvent::RequestIDR)
+-                        .ok();
+-                    warn!("Dropping video packet. Reason: Can't push to network");
++                if let Some(abr) = &fast_abr {
++                    // Before try_send: the sender must never take back an unpublished count.
++                    abr.enqueue();
++                }
++                match sender.try_send(VideoPacket {
++                    header: VideoPacketHeader {
++                        timestamp: target_timestamp,
++                        is_idr,
++                        foveation_center,
++                    },
++                    payload: nal_buffer,
++                }) {
++                    Err(TrySendError::Full(_)) => {
++                        if let Some(abr) = &fast_abr {
++                            abr.enqueue_failed();
++                        } else {
++                            STREAM_CORRUPTED.store(true, Ordering::SeqCst);
++                            self.connection_context
++                                .events_sender
++                                .send(ServerCoreEvent::RequestIDR)
++                                .ok();
++                        }
++                        warn!("Dropping video packet. Reason: Can't push to network");
++                    }
++                    Err(TrySendError::Disconnected(_)) => {
++                        if let Some(abr) = &fast_abr {
++                            abr.enqueue_failed();
++                        }
++                    }
++                    Ok(()) => (),
+                 }
+             } else {
+                 warn!("Dropping video packet. Reason: Waiting for IDR frame");
+@@ -551,6 +573,17 @@ impl ServerCoreContext {
+         }
+     }
+ 
++    /// Fast ABR: this PyroWave frame's share of the encoder's per-frame cap, which the encoder
++    /// computes from `ceiling_bps` (ALVR's bitrate, quality floor included) and `framerate`.
++    /// At most 1, and exactly 1 when no controller is active.
++    pub fn get_pyrowave_budget_multiplier(&self, ceiling_bps: u64, framerate: f32) -> f32 {
++        fast_abr::next_frame(
++            self.connection_context.fast_abr.read().as_deref(),
++            ceiling_bps,
++            framerate,
++        )
++    }
++
+     pub fn report_composed(&self, target_timestamp: Duration, offset: Duration) {
+         dbg_server_core!("report_composed");
+ 
+diff --git a/alvr/server_openvr/cpp/alvr_server/alvr_server.cpp b/alvr/server_openvr/cpp/alvr_server/alvr_server.cpp
+index 184e7552545889824b525400a74813ff2ce239cc..2c9af984de2b6bfcc2d77246dc04322aa20098b3 100644
+--- a/alvr/server_openvr/cpp/alvr_server/alvr_server.cpp
++++ b/alvr/server_openvr/cpp/alvr_server/alvr_server.cpp
+@@ -297,6 +297,7 @@ unsigned long long (*PathStringToHash)(const char* path);
+ void (*ReportPresent)(unsigned long long timestamp_ns, unsigned long long offset_ns);
+ void (*ReportComposed)(unsigned long long timestamp_ns, unsigned long long offset_ns);
+ FfiDynamicEncoderParams (*GetDynamicEncoderParams)();
++float (*GetPyroWaveBudgetMultiplier)(unsigned long long ceiling_bps, float framerate);
+ unsigned long long (*GetSerialNumber)(unsigned long long deviceID, char* outString);
+ void (*SetOpenvrProps)(unsigned long long deviceID);
+ void (*RegisterButtons)(unsigned long long deviceID);
+diff --git a/alvr/server_openvr/cpp/alvr_server/bindings.h b/alvr/server_openvr/cpp/alvr_server/bindings.h
+index d51e5ca46085d6ad08a25b413530006438d2956e..4808ab3cf23c6f818f7f00ba4c33c6b6230538c6 100644
+--- a/alvr/server_openvr/cpp/alvr_server/bindings.h
++++ b/alvr/server_openvr/cpp/alvr_server/bindings.h
+@@ -148,6 +148,7 @@ extern "C" unsigned long long (*PathStringToHash)(const char* path);
+ extern "C" void (*ReportPresent)(unsigned long long timestamp_ns, unsigned long long offset_ns);
+ extern "C" void (*ReportComposed)(unsigned long long timestamp_ns, unsigned long long offset_ns);
+ extern "C" FfiDynamicEncoderParams (*GetDynamicEncoderParams)();
++extern "C" float (*GetPyroWaveBudgetMultiplier)(unsigned long long ceiling_bps, float framerate);
+ extern "C" unsigned long long (*GetSerialNumber)(unsigned long long deviceID, char* outString);
+ extern "C" void (*SetOpenvrProps)(unsigned long long deviceID);
+ extern "C" void (*RegisterButtons)(unsigned long long deviceID);
+diff --git a/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp b/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp
+index 356d83356f556d8d987ffd6cb603b0b482527457..ba6331c5896b8d40019da15bfc4b9a3edce4e186 100644
+--- a/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp
++++ b/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp
+@@ -475,6 +475,17 @@ void VideoEncoderPyroWave::Transmit(
+         }
+     }
+ 
++    // Opt-in fast ABR (video.pyrowave.fast_abr, docs/FAST-ABR.md): the TCP video sender's queue
++    // feedback lowers this frame's cap below the one above, sampled once per frame just before
++    // the encode. ALVR's bitrate is never overwritten or raised, and a disabled or inactive
++    // controller returns 1, which keeps the exact integer cap.
++    const float budgetMultiplier = GetPyroWaveBudgetMultiplier(m_bitrateBps, (float)m_framerate);
++    if (std::isfinite(budgetMultiplier) && budgetMultiplier > 0.0f && budgetMultiplier < 1.0f) {
++        rateControl.maximum_bitstream_size =
++            (size_t)(double(frameByteBudget) * double(budgetMultiplier)) & ~size_t(3);
++        if (rateControl.maximum_bitstream_size == 0) return;
++    }
++
+     // Imported images get an explicit ownership acquire/release, which is what the API asks for
+     // and what PyroWave needs in order to barrier them -- it performs no layout transitions of
+     // its own in the GPU paths. No semaphore: the fence above already ordered this.
+diff --git a/alvr/server_openvr/src/lib.rs b/alvr/server_openvr/src/lib.rs
+index e277d11fe8271552f711118c8c26c817b4d4cbf8..29560d3b2548a3337aa2a1db8cfb51a0485c0402 100644
+--- a/alvr/server_openvr/src/lib.rs
++++ b/alvr/server_openvr/src/lib.rs
+@@ -630,6 +630,14 @@ extern "C" fn send_video_udp(
+     }
+ }
+ 
++/// Fast ABR (docs/FAST-ABR.md): called by the PyroWave encoder for every frame with the values
++/// its per-frame cap comes from. Returns 1 (no change) without a server or an active controller.
++extern "C" fn get_pyrowave_budget_multiplier(ceiling_bps: u64, framerate: f32) -> f32 {
++    SERVER_CORE_CONTEXT.read().as_ref().map_or(1.0, |context| {
++        context.get_pyrowave_budget_multiplier(ceiling_bps, framerate)
++    })
++}
++
+ extern "C" fn get_dynamic_encoder_params() -> FfiDynamicEncoderParams {
+     if let Some(context) = &*SERVER_CORE_CONTEXT.read() {
+         if let Some(params) = context.get_dynamic_encoder_params() {
+@@ -777,6 +785,7 @@ pub unsafe extern "C" fn HmdDriverFactory(
+             VideoSend = Some(send_video);
+             VideoSendUdp = Some(send_video_udp);
+             GetDynamicEncoderParams = Some(get_dynamic_encoder_params);
++            GetPyroWaveBudgetMultiplier = Some(get_pyrowave_budget_multiplier);
+             ReportComposed = Some(report_composed);
+             ReportPresent = Some(report_present);
+             WaitForVSync = Some(wait_for_vsync);
+diff --git a/alvr/session/src/beta_tests.rs b/alvr/session/src/beta_tests.rs
+index 63a0d3fec56d8481b530252418eebbec36a21340..9e5aa28a6c8ef71433d0dc8be358880c6fe1b122 100644
+--- a/alvr/session/src/beta_tests.rs
++++ b/alvr/session/src/beta_tests.rs
+@@ -517,3 +517,74 @@ fn haar_is_explicit_and_environment_does_not_select_both_transforms() {
+ fn wired_video_uses_two_connections_by_default() {
+     assert_eq!(default_settings().video.pyrowave.wired_video_connections, 2);
+ }
++
++#[test]
++fn fast_abr_is_an_opt_in_research_control_and_older_sessions_load_it_disabled() {
++    assert!(matches!(default_settings().video.pyrowave.fast_abr, Switch::Disabled));
++    // Under PyroWave's Advanced / Research group, so the main list (tested above) is unchanged.
++    let entries = visible_children(&schema(), &["video", "pyrowave"]).unwrap();
++    assert!(names(entries, Visibility::Advanced).contains(&"fast_abr".to_owned()));
++
++    // A `.65` session.json has no fast_abr at all.
++    let mut saved = json::to_value(SessionConfig::default()).unwrap();
++    saved["session_settings"]["video"]["pyrowave"]
++        .as_object_mut()
++        .unwrap()
++        .remove("fast_abr")
++        .expect("fast_abr");
++    let mut session = SessionConfig::default();
++    session.merge_from_json(&saved).unwrap();
++    assert!(matches!(session.to_settings().video.pyrowave.fast_abr, Switch::Disabled));
++    let old: PyroWaveConfig = json::from_value(json::json!({
++        "chroma_444": false, "transport": "Tcp", "wavelet": "Haar", "decode_path": "Compute"
++    }))
++    .unwrap();
++    assert!(matches!(old.fast_abr, Switch::Disabled));
++
++    // Opting in keeps explicit values and takes the rest from the defaults.
++    let mut saved = json::to_value(session).unwrap();
++    let abr = &mut saved["session_settings"]["video"]["pyrowave"]["fast_abr"];
++    abr["enabled"] = true.into();
++    abr["content"]["floor"] = json::json!(0.4);
++    let mut session = SessionConfig::default();
++    session.merge_from_json(&saved).unwrap();
++    let Switch::Enabled(config) = session.to_settings().video.pyrowave.fast_abr else {
++        panic!("explicit fast ABR opt-in was lost");
++    };
++    assert_eq!(config.floor, 0.4);
++    assert_eq!(config.decrease, 0.6);
++    assert_eq!(config.recovery, 0.05);
++    assert_eq!(config.mode, PyroWaveFastAbrMode::Aimd);
++    assert_eq!(config.backlog_frames, 0.75);
++    assert_eq!(config.send_buffer_bytes, 0);
++}
++
++#[test]
++fn fast_abr_v1_sessions_keep_their_mode_threshold_and_buffer() {
++    let mut saved = json::to_value(SessionConfig::default()).unwrap();
++    let abr = &mut saved["session_settings"]["video"]["pyrowave"]["fast_abr"];
++    abr["enabled"] = true.into();
++    abr["content"].as_object_mut().unwrap().remove("mode");
++    abr["content"]["backlog_frames"] = json::json!(1.0);
++    abr["content"]["send_buffer_bytes"] = json::json!(1_048_576);
++    let mut session = SessionConfig::default();
++    session.merge_from_json(&saved).unwrap();
++    let Switch::Enabled(config) = session.to_settings().video.pyrowave.fast_abr else {
++        panic!("lost opt-in")
++    };
++    assert_eq!(config.mode, PyroWaveFastAbrMode::Aimd);
++    assert_eq!(config.backlog_frames, 1.0);
++    assert_eq!(config.send_buffer_bytes, 1_048_576);
++
++    let mut saved = json::to_value(session).unwrap();
++    saved["session_settings"]["video"]["pyrowave"]["fast_abr"]["content"]["mode"]["variant"] =
++        "Capacity".into();
++    let mut session = SessionConfig::default();
++    session.merge_from_json(&saved).unwrap();
++    let Switch::Enabled(config) = session.to_settings().video.pyrowave.fast_abr else {
++        panic!("lost opt-in")
++    };
++    assert_eq!(config.mode, PyroWaveFastAbrMode::Capacity);
++    assert_eq!(config.backlog_frames, 1.0);
++    assert_eq!(config.send_buffer_bytes, 1_048_576);
++}
+diff --git a/alvr/session/src/settings.rs b/alvr/session/src/settings.rs
+index a61060487c8f3446bcc69ccf3483bb9237b53042..6de55d69b38dce75d0652bb7f5e1bb6b21118bb1 100644
+--- a/alvr/session/src/settings.rs
++++ b/alvr/session/src/settings.rs
+@@ -719,6 +719,55 @@ pub struct PyroWaveConfig {
+     #[schema(strings(display_name = "Optical latency stamp (diagnostic)", help = "Draws the PC performance-counter clock (ms) and two frame-parity squares just below the center of each eye. Film a monitor running tools/quest3/latency_clock.py next to a headset lens to measure composition-to-photon latency. Leave off for play. Restart SteamVR."))]
+     #[schema(flag = "steamvr-restart")]
+     pub latency_stamp: bool,
++
++    #[serde(default = "default_fast_abr")]
++    #[schema(strings(
++        display_name = "Fast TCP bitrate adaptation (experimental)",
++        help = "Active only for PyroWave video over TCP: Transport TCP on Wi-Fi, or USB; off over PyroWave UDP. When the video sender falls behind, lowers each frame's byte budget below the bitrate setting's and bounds the stream connection's send buffer, so a link that cannot carry the bitrate costs detail instead of queueing frames. Never raises a frame above the bitrate setting. Intended for a constant bitrate. Applies at stream start; a change while streaming reconnects the headset."
++    ))]
++    #[schema(flag = "advanced")]
++    pub fast_abr: Switch<PyroWaveFastAbrConfig>,
++}
++
++fn default_fast_abr() -> Switch<PyroWaveFastAbrConfig> {
++    Switch::Disabled
++}
++
++#[derive(SettingsSchema, Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, Default)]
++#[schema(gui = "button_group")]
++pub enum PyroWaveFastAbrMode {
++    #[default]
++    #[schema(strings(display_name = "AIMD"))]
++    Aimd,
++    #[schema(strings(display_name = "Capacity"))]
++    Capacity,
++}
++
++#[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq, Debug)]
++pub struct PyroWaveFastAbrConfig {
++    #[serde(default)]
++    #[schema(strings(help = "AIMD: multiply the budget by the decrease factor when the sender falls more than the backlog threshold behind, add the recovery step otherwise. Capacity: measure the throughput of busy sends, cut once per congestion episode to 90% of it, then recover to the remembered capacity."))]
++    pub mode: PyroWaveFastAbrMode,
++
++    #[schema(strings(help = "Lowest budget, as a share of the bitrate setting's per-frame budget. It can go below the PyroWave quality floor: a link that cannot carry the floor would otherwise queue frames."))]
++    #[schema(gui(slider(min = 0.01, max = 1.0, step = 0.01)))]
++    pub floor: f32,
++
++    #[schema(strings(help = "AIMD only: the budget multiplier after each congested frame. 0.7 measured best in short Wi-Fi screens."))]
++    #[schema(gui(slider(min = 0.01, max = 0.99, step = 0.01)))]
++    pub decrease: f32,
++
++    #[schema(strings(help = "Budget share regained per uncongested frame (both modes). 0.03 measured best with AIMD in short Wi-Fi screens."))]
++    #[schema(gui(slider(min = 0.0001, max = 1.0, step = 0.01)))]
++    pub recovery: f32,
++
++    #[schema(strings(help = "Congestion threshold, in frames waiting or in flight on the sender."))]
++    #[schema(gui(slider(min = 0.25, max = 8.0, step = 0.25)))]
++    pub backlog_frames: f32,
++
++    #[schema(strings(help = "Send buffer of ALVR's stream connection. 0: automatic, 1 MiB up to 1000 Mbps, about 1.5 frames at the bitrate setting above that. The USB wired connections keep their own buffers."))]
++    #[schema(gui(slider(min = 0, max = 16777216, step = 65536)), suffix = " B")]
++    pub send_buffer_bytes: u32,
+ }
+ 
+ /// Only these fixed profiles are exposed by Quest3-Pyrowave. Generic stale
+@@ -1924,6 +1973,19 @@ pub fn session_settings_default() -> SettingsDefault {
+                 quest3_max_gpu_clock: false,
+                 wired_video_connections: 2,
+                 latency_stamp: false,
++                fast_abr: SwitchDefault {
++                    enabled: false,
++                    content: PyroWaveFastAbrConfigDefault {
++                        mode: PyroWaveFastAbrModeDefault {
++                            variant: PyroWaveFastAbrModeDefaultVariant::Aimd,
++                        },
++                        floor: 0.35,
++                        decrease: 0.6,
++                        recovery: 0.05,
++                        backlog_frames: 0.75,
++                        send_buffer_bytes: 0,
++                    },
++                },
+             },
+             encoder_config: EncoderConfigDefault {
+                 gui_collapsed: true,
+diff --git a/alvr/sockets/src/backend/mod.rs b/alvr/sockets/src/backend/mod.rs
+index bbcb4ce6b887a30669ce43a168a590cd246a4c22..95c54085e02cb98cf05d9d197c911d4ecf45d1f0 100644
+--- a/alvr/sockets/src/backend/mod.rs
++++ b/alvr/sockets/src/backend/mod.rs
+@@ -5,6 +5,10 @@ use alvr_common::{anyhow::Result, ConResult};
+ 
+ pub trait SocketWriter: Send {
+     fn send(&mut self, buffer: &[u8]) -> Result<()>;
++
++    fn set_send_buffer_size(&self, _bytes: usize) -> Result<usize> {
++        alvr_common::anyhow::bail!("Send-buffer readback requires TCP")
++    }
+ }
+ 
+ // Trait used to abstract different socket (or other input/output) implementations. The funtionality
+diff --git a/alvr/sockets/src/backend/tcp.rs b/alvr/sockets/src/backend/tcp.rs
+index d9383c8660ff724e1aafd6a7f871a35279373fdd..ba76c35ae219fbd20c7b7f584c2d505c6b1c9b58 100644
+--- a/alvr/sockets/src/backend/tcp.rs
++++ b/alvr/sockets/src/backend/tcp.rs
+@@ -82,6 +82,21 @@ pub fn connect_to_client(
+ }
+ 
+ impl SocketWriter for TcpStream {
++    fn set_send_buffer_size(&self, bytes: usize) -> Result<usize> {
++        let socket = socket2::SockRef::from(self);
++        socket.set_send_buffer_size(bytes)?;
++        let actual = socket.send_buffer_size()?;
++        // Linux (and Android) report doubled SO_SNDBUF accounting; Windows reports the
++        // requested size.
++        #[cfg(any(target_os = "linux", target_os = "android"))]
++        let limit = bytes.saturating_mul(2);
++        #[cfg(not(any(target_os = "linux", target_os = "android")))]
++        let limit = bytes;
++        alvr_common::anyhow::ensure!(actual > 0 && actual <= limit,
++            "TCP send buffer is not bounded as requested: requested={bytes} actual={actual}");
++        Ok(actual)
++    }
++
+     fn send(&mut self, buffer: &[u8]) -> Result<()> {
+         self.write_all(buffer)?;
+ 
+diff --git a/alvr/sockets/src/stream_socket.rs b/alvr/sockets/src/stream_socket.rs
+index ce882fc47d8f90639b8bc9d4a095624692e5cdfb..f4d0bfc48044505758812c1b194909eeb4e2f825 100644
+--- a/alvr/sockets/src/stream_socket.rs
++++ b/alvr/sockets/src/stream_socket.rs
+@@ -96,6 +96,10 @@ pub struct StreamSender<H> {
+ }
+ 
+ impl<H> StreamSender<H> {
++    pub fn set_send_buffer_size(&self, bytes: usize) -> Result<usize> {
++        self.inner.lock().set_send_buffer_size(bytes)
++    }
++
+     /// Shard and send a buffer with zero copies and zero allocations.
+     /// The prefix of each shard is written over the previously sent shard to avoid reallocations.
+     pub fn send(&mut self, mut buffer: Buffer<H>) -> Result<()> {
+@@ -408,6 +412,12 @@ pub struct StreamSocket {
+ }
+ 
+ impl StreamSocket {
++    /// Strict opt-in setting: unlike the legacy builder, propagate failures and verify readback.
++    /// All streams (including audio/haptics) share this socket.
++    pub fn set_send_buffer_size(&self, bytes: usize) -> Result<usize> {
++        self.send_socket.lock().set_send_buffer_size(bytes)
++    }
++
+     pub fn request_stream<T>(&self, stream_id: u16) -> StreamSender<T> {
+         StreamSender {
+             inner: Arc::clone(&self.send_socket),

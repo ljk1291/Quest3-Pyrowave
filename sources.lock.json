@@ -5,7 +5,8 @@
   "granite": {"url": "https://github.com/Themaister/Granite", "commit": "842d9d5686ba8c799a7d34a78a68f98d6aeb5a68"},
   "cargo_apk": {"url": "https://github.com/zarik5/cargo-apk", "commit": "0fd3126dad5aa1c5f0f26cdae3410f2e5af62c60"},
   "overlays": {
-    "patches/fork-identity-alvr.patch": "4387d54cd0f65950f727e2ffdebd40083d3a09d0244785e5142226e13546826f"
+    "patches/fork-identity-alvr.patch": "4387d54cd0f65950f727e2ffdebd40083d3a09d0244785e5142226e13546826f",
+    "patches/fast-abr.patch": "33533b59c5c192653d48df3cf65d3e149b152cba9351fa528c851fff00531e77"
   },
   "rust": "1.97.1",
   "android_ndk": "27.2.12479018",

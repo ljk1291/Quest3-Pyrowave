@@ -58,7 +58,7 @@ cp "$repo/tools/quest3/producer_prerecord.rs" "$dest/ALVR-20.13.0/alvr/client_co
 # pin: python3 tools/ci/source_lock.py pin patches/<name>.patch
 overlay "$dest/ALVR-20.13.0" patches/fork-identity-alvr.patch   # version 20.13.0-ljk1291.3, own package id
 # Insertion points for the overlays being rebased onto this upstream: uncomment each with its pin.
-# overlay "$dest/ALVR-20.13.0" patches/fast-abr.patch
+overlay "$dest/ALVR-20.13.0" patches/fast-abr.patch   # opt-in video.pyrowave.fast_abr (default off)
 # overlay "$dest/ALVR-20.13.0" patches/frame-dump.patch
 # overlay "$dest/ALVR-20.13.0" patches/frame-loss-diagnostics.patch
 # overlay "$dest/ALVR-20.13.0" patches/client-output-queue.patch
