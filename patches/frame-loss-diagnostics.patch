@@ -1,0 +1,569 @@
+diff --git a/alvr/client_core/src/connection.rs b/alvr/client_core/src/connection.rs
+index c4f38c4c4fc9599a40d13eeb153a57b5fe52e69b..14dafe831aa1d5970ef7e3891b11fa332e863d77 100644
+--- a/alvr/client_core/src/connection.rs
++++ b/alvr/client_core/src/connection.rs
+@@ -400,6 +400,7 @@ fn connection_pipeline(
+                         .unwrap_or(false);
+ 
+                     if !submitted {
++                        alvr_common::frame_loss::count("decoder_not_submitted");
+                         stream_corrupted = true;
+                         if let Some(sender) = &mut *ctx.control_sender.lock() {
+                             sender.send(&ClientControlPacket::RequestIdr).ok();
+@@ -410,6 +411,7 @@ fn connection_pipeline(
+                     if let Some(sender) = &mut *ctx.control_sender.lock() {
+                         sender.send(&ClientControlPacket::RequestIdr).ok();
+                     }
++                    alvr_common::frame_loss::count("client_wait_idr");
+                     warn!("Dropped video packet. Reason: Waiting for IDR frame")
+                 }
+             }
+diff --git a/alvr/client_core/src/lib.rs b/alvr/client_core/src/lib.rs
+index 1d6cb87eed22360f8d1beddad94219206ec3eb20..c9c0af75500c862d4109191e344ebc6ec8522c78 100644
+--- a/alvr/client_core/src/lib.rs
++++ b/alvr/client_core/src/lib.rs
+@@ -471,8 +471,13 @@ impl ClientCoreContext {
+ 
+             if let Some(sender) = &mut *self.connection_context.statistics_sender.lock() {
+                 if let Some(stats) = stats.summary(timestamp) {
+-                    sender.send_header(&stats).ok();
++                    if sender.send_header(&stats).is_ok() {
++                        alvr_common::frame_loss::count("stats_sent");
++                    } else {
++                        alvr_common::frame_loss::count("stats_send_error");
++                    }
+                 } else {
++                    alvr_common::frame_loss::count("client_stats_history_miss");
+                     warn!("Statistics summary not ready!");
+                 }
+             }
+diff --git a/alvr/client_core/src/statistics.rs b/alvr/client_core/src/statistics.rs
+index af9791d06e1d0f1ca6edc02b5432a428a3144f03..621571275885aad7d0512ce0377723aa17245948 100644
+--- a/alvr/client_core/src/statistics.rs
++++ b/alvr/client_core/src/statistics.rs
+@@ -62,6 +62,9 @@ impl StatisticsManager {
+     }
+ 
+     pub fn report_video_packet_received(&mut self, target_timestamp: Duration) {
++        if alvr_common::frame_loss::enabled() && self.summary(target_timestamp).is_none() {
++            alvr_common::frame_loss::count("received_history_miss");
++        }
+         if let Some(frame) = self
+             .history_buffer
+             .iter_mut()
+@@ -140,3 +143,24 @@ impl StatisticsManager {
+             .saturating_sub(self.steamvr_pipeline_latency)
+     }
+ }
++
++#[cfg(test)]
++mod frame_loss_tests {
++    use super::*;
++    #[test]
++    fn source_key_survives_a_display_clamp() {
++        let mut stats = StatisticsManager::new(256, Duration::from_millis(11), 0.0);
++        let source = Duration::from_secs(1);
++        let clamped_display = Duration::from_secs(2);
++        stats.report_input_acquired(source);
++        stats.report_video_packet_received(source);
++        stats.report_frame_decoded(source);
++        stats.report_compositor_start(source);
++        stats.report_submit(clamped_display, Duration::from_millis(10));
++        assert!(stats.summary(clamped_display).is_none());
++        stats.report_submit(source, Duration::from_millis(10));
++        let report = stats.summary(source).unwrap();
++        assert_eq!(report.target_timestamp, source);
++        assert!(report.total_pipeline_latency >= Duration::from_millis(10));
++    }
++}
+diff --git a/alvr/client_core/src/video_decoder/pyrowave.rs b/alvr/client_core/src/video_decoder/pyrowave.rs
+index 4b46b81f5b7cd18e97bc90f7d9a8e1a13ca832f0..caffcf96b81f306f5fcb269abeae1e75250dd40d 100644
+--- a/alvr/client_core/src/video_decoder/pyrowave.rs
++++ b/alvr/client_core/src/video_decoder/pyrowave.rs
+@@ -371,6 +371,7 @@ pub fn video_decoder_split(
+                 if !prerecord_enabled { unsafe { pyroclient_clear(client) }; }
+                 let pushed = if prerecord_enabled { 1 } else { unsafe { pyroclient_push_packet(client, data.as_ptr(), data.len()) } };
+                 if pushed != 1 {
++                    alvr_common::frame_loss::count("codec_rejected");
+                     warn!("PyroWave: complete TCP frame rejected by codec ({pushed})");
+                     decoded.clear_in_flight();
+                     totals.lock().1 += 1;
+@@ -447,6 +448,7 @@ pub fn video_decoder_split(
+                 // Wrap immediately: rejection, superseding and teardown all close.
+                 let ready_fd = (ready_fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(ready_fd) });
+                 if rc != 0 || out.is_null() || info.complete == 0 {
++                    alvr_common::frame_loss::count("decode_failed");
+                     warn!("PyroWave: decode failed ({rc})");
+                     decoded.clear_in_flight();
+                     totals.lock().1 += 1;
+diff --git a/alvr/client_openxr/src/stream.rs b/alvr/client_openxr/src/stream.rs
+index 3a1558c83724b81cdbc14b86544fcc5e28d1e5e2..5c24246df5982b6324887f7baad31f54aab77ef5 100644
+--- a/alvr/client_openxr/src/stream.rs
++++ b/alvr/client_openxr/src/stream.rs
+@@ -99,6 +99,7 @@ pub struct StreamContext {
+     /// Its existing native-buffer lease remains protected until the eye copy is ready.
+     pending_frame: Option<(Duration, *mut std::ffi::c_void)>,
+     frame_wait_budget: Duration,
++    stats_source_timestamp: bool,
+     frame_wait_event: bool,
+     event_wait_stats: [u64; 4], // eligible calls, condvar calls, pending seen, fallback calls
+     packet_grace_budget: Duration,
+@@ -264,6 +265,9 @@ impl StreamContext {
+             decoder: None,
+             pending_frame: None,
+             frame_wait_budget: frame_wait_budget_property(),
++            stats_source_timestamp: crate::extra_extensions::perf_settings::system_property(
++                "debug.q3pw.stats_source_ts",
++            ) == "1",
+             frame_wait_event: platform == Platform::Quest3 &&
+                 crate::extra_extensions::perf_settings::system_property("debug.q3pw.frame_wait_event") == "1",
+             event_wait_stats: [0; 4],
+@@ -295,6 +299,10 @@ impl StreamContext {
+             "[Q3PW_EVENT_WAIT_SETUP] requested={} default_off=true single_worker_tcp_only=true max_budget_us=4000 lease_unchanged=true",
+             this.frame_wait_event as u8,
+         ));
++        if this.stats_source_timestamp {
++            alvr_graphics::log_quest_experiment(
++                "[Q3PW_STATS_SOURCE_TS] enabled: report original source key, preserve display clamp".into());
++        }
+         this.update_reference_space();
+ 
+         this
+@@ -372,6 +380,7 @@ impl StreamContext {
+         };
+ 
+         if let Some(config) = maybe_config {
++            if self.pending_frame.is_some() { alvr_common::frame_loss::count("pending_reset"); }
+             self.pending_frame = None;
+             self.pending_frame_selected_at = None;
+             self.selection_stats = [0; 8];
+@@ -641,6 +650,13 @@ impl StreamContext {
+             }
+         }
+ 
++        let source_timestamp = frame_result.map(|(timestamp, _)| timestamp);
++        if let Some(ts) = source_timestamp {
++            if ts < vsync_time { alvr_common::frame_loss::count("source_before_display"); }
++            if ts < vsync_time.saturating_sub(Duration::from_secs(1)) {
++                alvr_common::frame_loss::count("display_timestamp_clamped");
++            }
++        }
+         // Preserve the transported identity before the XR-only timestamp clamp below.
+         let dump_timestamp = frame_result.map(|(timestamp, _)| timestamp.as_nanos() as u64);
+         let (timestamp, view_params, buffer_ptr) =
+@@ -754,10 +770,17 @@ impl StreamContext {
+ 
+         if !buffer_ptr.is_null() {
+             if let Some(xr_now) = crate::xr_runtime_now(self.xr_session.instance()) {
++                // Statistics join on the received source key, not a runtime safety clamp.
++                let report_timestamp = if self.stats_source_timestamp {
++                    source_timestamp.unwrap_or(timestamp)
++                } else { timestamp };
++                alvr_common::frame_loss::timestamp("submit", report_timestamp);
+                 self.core_context.report_submit(
+-                    timestamp,
++                    report_timestamp,
+                     vsync_time.saturating_sub(Duration::from_nanos(xr_now.as_nanos() as u64)),
+                 );
++            } else {
++                alvr_common::frame_loss::count("xr_clock_missing");
+             }
+         }
+ 
+diff --git a/alvr/common/src/frame_loss.rs b/alvr/common/src/frame_loss.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..6b2198878db58e8fce45484c4c8fe1b37703506a
+--- /dev/null
++++ b/alvr/common/src/frame_loss.rs
+@@ -0,0 +1,93 @@
++//! Default-off process-lifetime counters (`ALVR_FRAME_LOSS=1` on the server,
++//! `debug.q3pw.frame_loss=1` on the client; docs/FRAME-LOSS-DIAGNOSIS.md). Compare deltas within
++//! one process. No clocks, allocations or locks on the disabled path after the first lookup.
++use crate::parking_lot::Mutex;
++use std::{collections::BTreeMap, sync::OnceLock, time::{Duration, Instant}};
++
++pub fn enabled() -> bool {
++    static ENABLED: OnceLock<bool> = OnceLock::new();
++    *ENABLED.get_or_init(|| {
++        #[cfg(target_os = "android")]
++        {
++            extern "C" {
++                fn __system_property_get(name: *const std::ffi::c_char, value: *mut std::ffi::c_char) -> i32;
++            }
++            let mut value = [0u8; 92];
++            (unsafe { __system_property_get(c"debug.q3pw.frame_loss".as_ptr(), value.as_mut_ptr().cast()) == 1 })
++                && value[0] == b'1'
++        }
++        #[cfg(not(target_os = "android"))]
++        { std::env::var("ALVR_FRAME_LOSS").ok().as_deref() == Some("1") }
++    })
++}
++
++struct Counters {
++    started: Instant,
++    last_log: Instant,
++    counts: BTreeMap<&'static str, u64>,
++    timestamps: BTreeMap<&'static str, (u64, u64, u64, u64)>, // n, equal, regressed, last ns
++}
++
++impl Counters {
++    fn observe(&mut self, stage: &'static str, ns: u64) {
++        let entry = self.timestamps.entry(stage).or_default();
++        if entry.0 != 0 {
++            entry.1 += u64::from(ns == entry.3);
++            entry.2 += u64::from(ns < entry.3);
++        }
++        entry.0 += 1;
++        entry.3 = ns;
++    }
++}
++
++fn update(f: impl FnOnce(&mut Counters)) {
++    if !enabled() { return; }
++    static COUNTERS: OnceLock<Mutex<Counters>> = OnceLock::new();
++    let mut state = COUNTERS.get_or_init(|| Mutex::new(Counters {
++        started: Instant::now(), last_log: Instant::now(),
++        counts: BTreeMap::new(), timestamps: BTreeMap::new(),
++    })).lock();
++    f(&mut state);
++    if state.last_log.elapsed() < Duration::from_secs(1) { return; }
++    state.last_log = Instant::now();
++    let mut line = format!("[Q3PW_FRAME_LOSS] rust cumulative elapsed_ms={}", state.started.elapsed().as_millis());
++    for (key, value) in &state.counts { line.push_str(&format!(" {key}={value}")); }
++    for (key, (n, equal, regressed, ns)) in &state.timestamps {
++        line.push_str(&format!(" {key}_n={n} {key}_equal={equal} {key}_regressed={regressed} {key}_last_ns={ns}"));
++    }
++    drop(state);
++    #[cfg(target_os = "android")]
++    {
++        // Bypass client log mirroring's Error-only filter.
++        #[link(name = "log")]
++        extern "C" {
++            fn __android_log_write(priority: i32, tag: *const std::ffi::c_char, text: *const std::ffi::c_char) -> i32;
++        }
++        let text = std::ffi::CString::new(line).unwrap();
++        unsafe { __android_log_write(4, c"Q3PW_FRAME_LOSS".as_ptr(), text.as_ptr()); }
++    }
++    #[cfg(not(target_os = "android"))]
++    crate::warn!("{line}");
++}
++
++pub fn count(site: &'static str) {
++    update(|state| *state.counts.entry(site).or_default() += 1);
++}
++
++pub fn timestamp(stage: &'static str, timestamp: Duration) {
++    update(|state| state.observe(stage, timestamp.as_nanos() as u64));
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]
++    fn timestamps_distinguish_repeats_regressions_and_stage_boundaries() {
++        let mut state = Counters { started: Instant::now(), last_log: Instant::now(),
++            counts: BTreeMap::new(), timestamps: BTreeMap::new() };
++        for ns in [20, 20, 10, 30] { state.observe("submit", ns); }
++        state.observe("other", 10);
++        assert_eq!(state.timestamps["submit"], (4, 1, 1, 30));
++        assert_eq!(state.timestamps["other"], (1, 0, 0, 10));
++    }
++}
+diff --git a/alvr/common/src/lib.rs b/alvr/common/src/lib.rs
+index 8e14956da788e79783c745acd707834d3fb5d011..dcb4863a71fd70c6320fe540fc9b25baa2c4bdc9 100644
+--- a/alvr/common/src/lib.rs
++++ b/alvr/common/src/lib.rs
+@@ -1,3 +1,4 @@
++pub mod frame_loss;
+ mod average;
+ mod connection_result;
+ mod inputs;
+diff --git a/alvr/server_core/src/connection.rs b/alvr/server_core/src/connection.rs
+index 3b3bf4524e5a448fad5640ed46ac7ec7d041efec..a7927e7bd52e2fda8e58076093b26e27f2e35a5b 100644
+--- a/alvr/server_core/src/connection.rs
++++ b/alvr/server_core/src/connection.rs
+@@ -1396,6 +1396,7 @@ fn connection_pipeline(
+ 
+                 if let Some(sender) = &mut wired_video {
+                     let sent = sender.send(VideoPacket { header, payload });
++                    alvr_common::frame_loss::count(if sent { "wired_sent" } else { "wired_send_error" });
+                     if let Some(abr) = &fast_abr {
+                         abr.end_send(sent, payload_len, &mut estimator);
+                     }
+@@ -1413,6 +1414,7 @@ fn connection_pipeline(
+                     .get_range_mut(0, payload.len())
+                     .copy_from_slice(&payload);
+                 let sent = video_sender.send(buffer).is_ok();
++                alvr_common::frame_loss::count(if sent { "sent" } else { "send_error" });
+                 if let Some(abr) = &fast_abr {
+                     abr.end_send(sent, payload_len, &mut estimator);
+                 }
+diff --git a/alvr/server_core/src/lib.rs b/alvr/server_core/src/lib.rs
+index 2d7f7f8abf8ac806d053c366883cd0f7e80e7de8..50692c3dea5931c9af03ecc1b27d3b23c1361223 100644
+--- a/alvr/server_core/src/lib.rs
++++ b/alvr/server_core/src/lib.rs
+@@ -515,6 +515,7 @@ impl ServerCoreContext {
+                     payload: nal_buffer,
+                 }) {
+                     Err(TrySendError::Full(_)) => {
++                        alvr_common::frame_loss::count("server_queue_full");
+                         if let Some(abr) = &fast_abr {
+                             abr.enqueue_failed();
+                         } else {
+@@ -527,13 +528,15 @@ impl ServerCoreContext {
+                         warn!("Dropping video packet. Reason: Can't push to network");
+                     }
+                     Err(TrySendError::Disconnected(_)) => {
++                        alvr_common::frame_loss::count("server_queue_disconnected");
+                         if let Some(abr) = &fast_abr {
+                             abr.enqueue_failed();
+                         }
+                     }
+-                    Ok(()) => (),
++                    Ok(()) => alvr_common::frame_loss::count("enqueued"),
+                 }
+             } else {
++                alvr_common::frame_loss::count("server_wait_idr");
+                 warn!("Dropping video packet. Reason: Waiting for IDR frame");
+             }
+ 
+@@ -545,6 +548,8 @@ impl ServerCoreContext {
+                     .lock()
+                     .report_frame_encoded(target_timestamp, encoder_latency, buffer_size);
+             }
++        } else {
++            alvr_common::frame_loss::count("server_no_sender");
+         }
+     }
+ 
+diff --git a/alvr/server_openvr/cpp/alvr_server/FrameLoss.h b/alvr/server_openvr/cpp/alvr_server/FrameLoss.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..84617e24befea5665d3c19d24b59286c2dc966ee
+--- /dev/null
++++ b/alvr/server_openvr/cpp/alvr_server/FrameLoss.h
+@@ -0,0 +1,33 @@
++#pragma once
++
++#include "Logger.h"
++#include <chrono>
++#include <cstdlib>
++#include <cstring>
++#include <map>
++#include <mutex>
++#include <string>
++
++// Default-off (ALVR_FRAME_LOSS=1, docs/FRAME-LOSS-DIAGNOSIS.md). Separate native and Rust
++// cumulative counters; never subtract across process restarts.
++inline void FrameLoss(const char* site) {
++    static const bool enabled = [] {
++        const char* value = std::getenv("ALVR_FRAME_LOSS");
++        return value && std::strcmp(value, "1") == 0;
++    }();
++    if (!enabled) return;
++    static std::mutex mutex;
++    static std::map<std::string, unsigned long long> counters;
++    static const auto started = std::chrono::steady_clock::now();
++    static auto lastLog = started;
++    std::lock_guard<std::mutex> lock(mutex);
++    ++counters[site];
++    const auto now = std::chrono::steady_clock::now();
++    if (now - lastLog < std::chrono::seconds(1)) return;
++    lastLog = now;
++    std::string line = "[Q3PW_FRAME_LOSS] native cumulative elapsed_ms="
++        + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(now - started).count());
++    for (const auto& counter : counters)
++        line += " " + counter.first + "=" + std::to_string(counter.second);
++    Warn("%s\n", line.c_str());
++}
+diff --git a/alvr/server_openvr/cpp/platform/win32/CEncoder.cpp b/alvr/server_openvr/cpp/platform/win32/CEncoder.cpp
+index 8880b2999933d03c31db65accc61e5b929dbaef4..95345e12f25cc593c9c30a34c76f52d83e189522 100644
+--- a/alvr/server_openvr/cpp/platform/win32/CEncoder.cpp
++++ b/alvr/server_openvr/cpp/platform/win32/CEncoder.cpp
+@@ -1,4 +1,5 @@
+ #include "CEncoder.h"
++#include "alvr_server/FrameLoss.h"
+ 
+ CEncoder::CEncoder()
+     : m_bExiting(false)
+@@ -140,6 +141,7 @@ void CEncoder::Run() {
+                 m_frameDump->Capture(m_FrameRender->GetTexture().Get(),
+                     FrameRender::PyroWaveEnabled() ? planes : nullptr, m_targetTimestampNs);
+             }
++            FrameLoss("encode_attempt");
+             m_videoEncoder->Transmit(
+                 m_FrameRender->GetTexture().Get(),
+                 m_presentationTime,
+diff --git a/alvr/server_openvr/cpp/platform/win32/OvrDirectModeComponent.cpp b/alvr/server_openvr/cpp/platform/win32/OvrDirectModeComponent.cpp
+index d1a18787cf61087043cd1ad091bfcad4b26035a1..574b77ab5f83814e12bf893ed0ee999a627fe2f0 100644
+--- a/alvr/server_openvr/cpp/platform/win32/OvrDirectModeComponent.cpp
++++ b/alvr/server_openvr/cpp/platform/win32/OvrDirectModeComponent.cpp
+@@ -1,4 +1,5 @@
+ #include "OvrDirectModeComponent.h"
++#include "alvr_server/FrameLoss.h"
+ 
+ OvrDirectModeComponent::OvrDirectModeComponent(
+     std::shared_ptr<CD3DRender> pD3DRender, std::shared_ptr<PoseHistory> poseHistory
+@@ -187,6 +188,7 @@ void OvrDirectModeComponent::SubmitLayer(const SubmitLayerPerEye_t (&perEye)[2])
+         m_submitLayers[m_submitLayer][1] = perEye[1];
+         m_submitLayer++;
+     } else {
++        FrameLoss("layer_overflow");
+         Warn("Too many layers submitted!");
+     }
+ 
+@@ -201,6 +203,8 @@ void OvrDirectModeComponent::Present(vr::SharedTextureHandle_t syncTexture) {
+ 
+     m_presentMutex.lock();
+ 
++    FrameLoss("present");
++    if (m_targetTimestampNs == 0) FrameLoss("pose_unmatched");
+     ReportPresent(m_targetTimestampNs, 0);
+ 
+     bool useMutex = true;
+@@ -211,12 +215,14 @@ void OvrDirectModeComponent::Present(vr::SharedTextureHandle_t syncTexture) {
+     m_submitLayer = 0;
+ 
+     if (m_prevTargetTimestampNs == m_targetTimestampNs) {
++        FrameLoss("present_duplicate_pose");
+         Debug("Discard duplicated frame. FrameIndex=%llu (Ignoring)", m_targetTimestampNs);
+         // return;
+     }
+ 
+     ID3D11Texture2D* pSyncTexture = m_pD3DRender->GetSharedTexture((HANDLE)syncTexture);
+     if (!pSyncTexture) {
++        FrameLoss("sync_texture_missing");
+         Warn("[VDispDvr] SyncTexture is NULL!");
+         m_presentMutex.unlock();
+         return;
+@@ -231,6 +237,7 @@ void OvrDirectModeComponent::Present(vr::SharedTextureHandle_t syncTexture) {
+             // TODO: Reasonable timeout and timeout handling
+             HRESULT hr = pKeyedMutex->AcquireSync(0, 10);
+             if (hr != S_OK) {
++                FrameLoss("acquire_sync_failed");
+                 Debug(
+                     "[VDispDvr] ACQUIRESYNC FAILED!!! hr=%d %p %ls", hr, hr, GetErrorStr(hr).c_str()
+                 );
+diff --git a/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp b/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp
+index ba6331c5896b8d40019da15bfc4b9a3edce4e186..5ca5f0d5b2b5057858f001d250e0b7008f2e167f 100644
+--- a/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp
++++ b/alvr/server_openvr/cpp/platform/win32/VideoEncoderPyroWave.cpp
+@@ -1,6 +1,7 @@
+ #ifdef ALVR_PYROWAVE
+ 
+ #include "VideoEncoderPyroWave.h"
++#include "alvr_server/FrameLoss.h"
+ 
+ #include "alvr_server/BitstreamTap.h"
+ #include "alvr_server/Logger.h"
+@@ -438,6 +439,7 @@ void VideoEncoderPyroWave::Transmit(
+             m_framerate = (uint32_t)std::lround(params.framerate);
+     }
+     if (m_bitrateBps == 0 || m_framerate == 0) {
++        FrameLoss("no_rate");
+         // Nothing to target yet; dropping the frame beats encoding at an arbitrary rate.
+         return;
+     }
+@@ -447,17 +449,19 @@ void VideoEncoderPyroWave::Transmit(
+     const size_t frameByteBudget = (size_t)(m_bitrateBps / 8 / m_framerate);
+     pyrowave_rate_control rateControl = {};
+     rateControl.maximum_bitstream_size = frameByteBudget & ~size_t(3);
+-    if (rateControl.maximum_bitstream_size == 0) return;
++    if (rateControl.maximum_bitstream_size == 0) { FrameLoss("zero_budget"); return; }
+ 
+     // Order the D3D11 render before the Vulkan read. A shared fence imported as a timeline
+     // semaphore would avoid the CPU round trip; this is the simpler correct version, and the
+     // encode itself is ~0.25 ms so the wait dominates neither.
+     if (FAILED(m_context4->Signal(m_fence.Get(), ++m_fenceValue))) {
++        FrameLoss("signal_failed");
+         Error("[PYROWAVE] fence signal failed\n");
+         return;
+     }
+     m_pD3DRender->GetContext()->Flush();
+     if (FAILED(m_fence->SetEventOnCompletion(m_fenceValue, m_fenceEvent))) {
++        FrameLoss("fence_event_failed");
+         Error("[PYROWAVE] SetEventOnCompletion failed\n");
+         return;
+     }
+@@ -483,7 +487,7 @@ void VideoEncoderPyroWave::Transmit(
+     if (std::isfinite(budgetMultiplier) && budgetMultiplier > 0.0f && budgetMultiplier < 1.0f) {
+         rateControl.maximum_bitstream_size =
+             (size_t)(double(frameByteBudget) * double(budgetMultiplier)) & ~size_t(3);
+-        if (rateControl.maximum_bitstream_size == 0) return;
++        if (rateControl.maximum_bitstream_size == 0) { FrameLoss("zero_budget"); return; }
+     }
+ 
+     // Imported images get an explicit ownership acquire/release, which is what the API asks for
+@@ -503,6 +507,7 @@ void VideoEncoderPyroWave::Transmit(
+         m_pyroEncoder, &acquire, &release, &m_pyroBuffers, &rateControl
+     );
+     if (encoded != PYROWAVE_SUCCESS) {
++        FrameLoss("codec_encode_failed");
+         Error("[PYROWAVE] encode failed: %d\n", (int)encoded);
+         return;
+     }
+@@ -514,6 +519,7 @@ void VideoEncoderPyroWave::Transmit(
+     if (pyrowave_encoder_compute_num_packets(m_pyroEncoder, packetBoundary, &numPackets)
+         != PYROWAVE_SUCCESS) {
+         Error("[PYROWAVE] compute_num_packets failed\n");
++        FrameLoss("packet_count_failed");
+         return;
+     }
+     std::vector<pyrowave_packet> packets(numPackets ? numPackets : 1);
+@@ -524,6 +530,7 @@ void VideoEncoderPyroWave::Transmit(
+         )
+         != PYROWAVE_SUCCESS) {
+         Error("[PYROWAVE] packetize failed\n");
++        FrameLoss("packetize_failed");
+         return;
+     }
+ 
+@@ -532,11 +539,13 @@ void VideoEncoderPyroWave::Transmit(
+     if (outPackets != 1 || packets[0].offset > m_bitstream.size()
+         || packets[0].size > m_bitstream.size() - packets[0].offset
+         || packets[0].size > frameByteBudget) {
++        FrameLoss("byte_budget_rejected");
+         Error("[PYROWAVE] frame rejected: packets=%zu bytes=%zu budget=%zu\n",
+             outPackets, outPackets ? packets[0].size : 0, frameByteBudget);
+         return;
+     }
+ 
++    FrameLoss("encoded_valid");
+     for (size_t i = 0; i < outPackets; i++) {
+         uint8_t* buf = m_bitstream.data() + packets[i].offset;
+         int len = (int)packets[i].size;
+diff --git a/alvr/sockets/src/stream_socket.rs b/alvr/sockets/src/stream_socket.rs
+index f4d0bfc48044505758812c1b194909eeb4e2f825..1a9e322366b37a67a941eb0e27a82c2c06a5de7c 100644
+--- a/alvr/sockets/src/stream_socket.rs
++++ b/alvr/sockets/src/stream_socket.rs
+@@ -248,6 +248,7 @@ impl<H: DeserializeOwned + Serialize> StreamReceiver<H> {
+                 }
+                 Ordering::Less => {
+                     // Old packet, discard
++                    alvr_common::frame_loss::count("socket_old_packet");
+                     self.used_buffer_queue.send(packet.buffer).to_con()?;
+                     return alvr_common::try_again();
+                 }
+@@ -521,6 +522,7 @@ impl StreamSocket {
+             // in progress packets, chances are these buffers are "dead" because one of their shards
+             // has been dropped by the network.
+             let idx = *components.in_progress_packets.iter().next()?.0;
++            alvr_common::frame_loss::count("socket_recycled_incomplete");
+             Some(components.in_progress_packets.remove(&idx).unwrap().buffer)
+         }) {
+             // NB: Can't use entry pattern because we want to allow bailing out on the line above
+@@ -542,6 +544,7 @@ impl StreamSocket {
+         } else {
+             // This branch may be hit in case the thread related to the stream hangs for some reason
+             shard_recv_state_mut.should_discard = true;
++            alvr_common::frame_loss::count("socket_no_buffer");
+             shard_recv_state_mut.packet_cursor = 0; // reset cursor from old shards
+                                                     // always write at the start of the packet so the buffer doesn't grow much
+             shard_recv_state_mut.shard_index = 0;
+@@ -622,6 +625,7 @@ impl StreamSocket {
+             }) {
+                 let idx = *idx; // fix borrow rule
+                 let packet = components.in_progress_packets.remove(&idx).unwrap();
++                alvr_common::frame_loss::count("socket_obsolete_incomplete");
+ 
+                 // Recycle buffer
+                 components.used_buffer_sender.send(packet.buffer).ok();
