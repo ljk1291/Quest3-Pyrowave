@@ -25,7 +25,9 @@ these checks, which protect something real:
    wireless adb stays up; originals saved and put back by `session25.py snapshot()` before every
    run (resolution/refresh) and by `quest-save.ps1 -Restore` before anyone wears it. `-Sleep` only
    when no tests are planned, since asleep its Wi-Fi drops. hq-sweep/hq-dump/metro-dump/bench-run
-   call it at the end unless `-NoSave`; new run scripts must too.
+   call it at the end unless `-NoSave`; new run scripts must too. Never change Guardian
+   (`debug.oculus.guardian_pause` or the boundary): the owner set the boundary to the whole room
+   (2026-10-08), so unattended `-Wake` runs no longer pause it.
 5. Report feature markers, but never block on them. Record telemetry and any owner
    judgement verbatim.
 
