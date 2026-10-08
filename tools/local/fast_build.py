@@ -53,10 +53,11 @@ OPENXR_LOADER = ("https://github.com/KhronosGroup/OpenXR-SDK-Source/releases/dow
 CARGO_TOOLS = (["cargo-ndk@4.1.2", "cbindgen@0.29.4"],
                ["--git", "https://github.com/zarik5/cargo-apk",
                 "--rev", "0fd3126dad5aa1c5f0f26cdae3410f2e5af62c60", "cargo-apk"])
-# Public certificate digest of the repository's stable signing key (CI's APK-CERTIFICATE.txt).
-STABLE_CERT_SHA256 = "2f2c5b3bb99cd69edc58cc53fbac30325426e410b3fecafc76fe447549886779"
+# Public certificate digest of the repository's stable signing key (CI's APK-CERTIFICATE.txt);
+# the ljk1291 fork signs with its own key, recorded in fork.json.
+STABLE_CERT_SHA256 = json.loads((REPO / "fork.json").read_text(encoding="utf-8"))["stable_signing_certificate_sha256"]
 # The Windows test set of CI's streamer job, in its order.
-WINDOWS_TESTS = [["alvr_adb", "--lib"], ["alvr_client_core", "--lib"], ["alvr_graphics", "--lib"], ["alvr_session", "--lib"],
+WINDOWS_TESTS = [["alvr_adb", "--lib"], ["alvr_client_core", "--lib"], ["alvr_common", "--lib"], ["alvr_graphics", "--lib"], ["alvr_session", "--lib"],
                  ["alvr_packets", "--lib"], ["alvr_server_core", "--lib"],
                  ["alvr_server_io", "--lib", "initialization_tests"],
                  ["alvr_dashboard", "--bin", "alvr_dashboard"]]
