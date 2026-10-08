@@ -358,6 +358,11 @@ class BenchScene:
         return {'reason': reason, 'anchor': new.tolist(), 'content_anchor': self.content_anchor.tolist(),
                 'backdrop_anchor': self.backdrop.anchor.tolist() if self.backdrop else None}
 
+    def tracking_lost(self):
+        # The automatic startup recenter needs a continuous mismatch; an
+        # invalid/skipped pose breaks the run, so the pending timer restarts.
+        self._yaw_mismatch_since = None
+
     def maybe_recenter(self, real_pose, elapsed, request=None):
         # File consumption is edge-triggered: a second touch requests another
         # recenter. Automatic correction is confined to this bench's startup.
@@ -549,7 +554,7 @@ class BenchScene:
         x,y,w,bh = self.barcode_box
         offset = np.array([[1,0,x],[0,1,y],[0,0,1.]])
         patch = filtered_warp([self.barcode_patch(index).astype(np.float32)], transform @ offset, large)
-        mask = cv2.warpPerspective(np.ones((bh,w), np.uint8), transform @ offset, large, flags=cv2.INTER_NEAREST).astype(bool)
+        mask = plane_mask((bh,w), transform @ offset, large)  # depth-aware: GL clips a plane behind the camera
         image[mask] = patch[mask]
         # RGBA8 supersampled FBO quantizes before GL_LINEAR resolve.
         return np.rint(cv2.resize(np.rint(image).astype(np.uint8), self.size, interpolation=cv2.INTER_LINEAR)).astype(np.uint8)
@@ -581,7 +586,7 @@ class BenchScene:
                                   interpolation=cv2.INTER_CUBIC if self.backdrop_filter == 'cubic4' else cv2.INTER_LINEAR) if self.backdrop else foreground
             image[visible] = foreground[visible]
             patch = filtered_warp([self.barcode_patch(index).astype(np.float32)], transform @ offset, size)
-            mask = cv2.warpPerspective(np.ones((bh, w), np.uint8), transform @ offset, size, flags=cv2.INTER_NEAREST).astype(bool)
+            mask = plane_mask((bh, w), transform @ offset, size)  # depth-aware, as the panel
             image[mask] = patch[mask]
             image = np.rint(np.clip(image, 0, 255)).astype(np.uint8)
             image = cv2.resize(image, (self.size[0]*2, rows*2), interpolation=cv2.INTER_LINEAR)

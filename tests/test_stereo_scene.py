@@ -1,7 +1,7 @@
 import importlib.util
 import io
 import unittest
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 from tools.quest3 import stereo_scene as scene
@@ -63,6 +63,119 @@ class StereoScenePixelTests(unittest.TestCase):
             self.assertLess(x.max(), image.shape[1] - 1)
             self.assertGreater(y.min(), 0)
             self.assertLess(y.max(), image.shape[0] - 1)
+
+
+@unittest.skipUnless(RENDER_DEPS_AVAILABLE, 'requires tools/quest3/requirements.txt')
+class StereoSceneStartupRecenterTests(unittest.TestCase):
+    """The startup auto-recenter needs a continuous >60 degree mismatch for >2 s, within the first 10 s."""
+    SIZE = (384, 416)
+
+    @staticmethod
+    def pose(valid, yaw=0.):
+        import numpy as np
+        from types import SimpleNamespace
+        from tools.quest3 import bench_scene as bs
+        matrix = bs.offset_matrix({'degrees': [yaw, 0., 0.], 'metres': [0, 0, 0]})
+        return SimpleNamespace(bPoseIsValid=valid, mDeviceToAbsoluteTracking=SimpleNamespace(m=np.asarray(matrix[:3])))
+
+    def step(self, bench, t, valid=True, yaw=0.):
+        return scene.bench_pose_step(bench, self.pose(valid, yaw), t)
+
+    def test_tracking_loss_restarts_the_pending_yaw_mismatch(self):
+        from tools.quest3 import bench_scene as bs
+        bench = bs.BenchScene(size=self.SIZE)
+        self.assertIsNone(self.step(bench, .5, yaw=0)[1])
+        self.assertIsNone(self.step(bench, 1, yaw=70)[1])       # 70 degree mismatch begins at 1 s
+        self.assertIsNone(self.step(bench, 2, valid=False))     # tracking lost
+        self.assertIsNone(self.step(bench, 3, valid=False))
+        self.assertIsNone(self.step(bench, 4, yaw=70)[1])       # recovery: must not recenter at once (4-1 > 2)
+        self.assertIsNone(self.step(bench, 5, yaw=70)[1])
+        self.assertIsNone(self.step(bench, 6, yaw=70)[1])       # exactly 2 s of the new run is not yet > 2 s
+        event = self.step(bench, 6.5, yaw=70)[1]
+        self.assertEqual(event['reason'], 'startup_yaw')
+        # The recenter re-anchored to the 70 degree heading: it is now the matched pose.
+        self.assertIsNone(self.step(bench, 7, yaw=70)[1])
+
+    def test_uninterrupted_mismatch_still_recenters_after_two_seconds(self):
+        from tools.quest3 import bench_scene as bs
+        bench = bs.BenchScene(size=self.SIZE)
+        self.assertIsNone(self.step(bench, 1, yaw=70)[1])
+        self.assertIsNone(self.step(bench, 3, yaw=70)[1])
+        self.assertEqual(self.step(bench, 3.5, yaw=70)[1]['reason'], 'startup_yaw')
+
+    def test_no_automatic_recenter_after_ten_seconds_even_across_tracking_loss(self):
+        from tools.quest3 import bench_scene as bs
+        bench = bs.BenchScene(size=self.SIZE)
+        self.assertIsNone(self.step(bench, 8, yaw=70)[1])
+        self.assertIsNone(self.step(bench, 9, valid=False))
+        self.assertIsNone(self.step(bench, 10.5, yaw=70)[1])
+        for t in (11, 14, 20, 60):
+            self.assertIsNone(self.step(bench, t, yaw=70)[1])
+        self.assertIsNone(bench._yaw_mismatch_since)
+
+    def test_live_loop_skips_invalid_poses_and_restarts_the_mismatch_timer(self):
+        import json
+        import tempfile
+        import time
+        from types import SimpleNamespace
+        import numpy as np
+        from unittest import mock
+        from tools.quest3 import bench_scene as bs
+
+        # (time, valid, yaw degrees); the first entry is the initial anchoring pose.
+        sequence = [(0, True, 0), (.5, True, 0), (1, True, 70), (2, False, 0), (3, False, 0), (4, True, 70),
+                    (5, True, 70), (6, True, 70), (6.5, True, 70), (11, True, 0), (12, True, 0), (14, True, 0)]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stop = root/'stop'
+
+            class PoseType:
+                def __mul__(self, count):
+                    return lambda: [SimpleNamespace(bPoseIsValid=True, mDeviceToAbsoluteTracking=SimpleNamespace(m=np.eye(4)[:3]))
+                                    for _ in range(count)]
+
+            class Compositor:
+                calls = 0
+                now = 0.
+                def waitGetPoses(self, poses, _):
+                    now, valid, yaw = sequence[min(self.calls, len(sequence)-1)]
+                    self.calls += 1
+                    self.now = now
+                    poses[0].bPoseIsValid = valid
+                    poses[0].mDeviceToAbsoluteTracking.m = bs.offset_matrix({'degrees': [yaw, 0., 0.], 'metres': [0, 0, 0]})[:3]
+                    if self.calls >= len(sequence):
+                        stop.touch()
+                def submit(self, eye, texture, bounds):
+                    pass
+
+            class GL:
+                counter = 0
+                def __getattr__(self, name):
+                    if name.startswith('GL_'): return name
+                    return lambda *args: None
+                def glGenTextures(self, n):
+                    self.counter += 1; return self.counter
+                glGenFramebuffers = glGenTextures
+                def glCheckFramebufferStatus(self, *args): return 'GL_FRAMEBUFFER_COMPLETE'
+
+            compositor = Compositor()
+            vr = SimpleNamespace(Eye_Left=0, Eye_Right=1, TrackedDevicePose_t=PoseType(), k_unMaxTrackedDeviceCount=1,
+                                 k_unTrackedDeviceIndex_Hmd=0, Texture_t=SimpleNamespace, VRTextureBounds_t=SimpleNamespace,
+                                 TextureType_OpenGL=1, ColorSpace_Gamma=2)
+            system = SimpleNamespace(getProjectionRaw=lambda eye: (-1, 1, -1, 1),
+                                     getEyeToHeadTransform=lambda eye: SimpleNamespace(m=np.array([[1, 0, 0, .032 if eye else -.032], [0, 1, 0, 0], [0, 0, 1, 0]])))
+            clock = SimpleNamespace(monotonic=lambda: compositor.now, time_ns=time.time_ns)
+            args = scene.build_parser().parse_args(['--out', str(root), '--bench', '--bench-backdrop', 'none',
+                                                    '--bench-motion', 'none', '--stop-file', str(stop), '--seconds', '100'])
+            with mock.patch.object(scene, 'time', clock), redirect_stdout(io.StringIO()):
+                scene.run_bench(args, root, system, compositor, *self.SIZE, GL(), vr)
+            records = [json.loads(line) for line in (root/'frames.ndjson').read_text().splitlines()]
+
+        # Only valid poses are submitted/logged: the two invalid entries (2 s and 3 s) are skipped.
+        self.assertEqual(len(records), len(sequence)-1-2)
+        events = [(i, r['recenter']['reason']) for i, r in enumerate(records) if 'recenter' in r]
+        # Valid poses: 0.5, 1, 4, 5, 6, 6.5 (recenter), 11, 12, 14 -> index 5 only; none after 10 s.
+        self.assertEqual(events, [(5, 'startup_yaw')])
 
 
 class StereoSceneCliTests(unittest.TestCase):

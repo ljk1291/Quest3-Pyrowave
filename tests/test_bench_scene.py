@@ -300,3 +300,23 @@ def test_cpu_replay_clips_panel_behind_camera(scene):
     record=scene.frame_geometry(0,turned)
     frame=scene.render_frame(0,homography=np.array(record['eyes'][0]['panel_to_eye']))
     assert np.all(frame==bs.SURROUND)
+
+@pytest.mark.parametrize('filter_mode', ['default','ss4'])
+def test_cpu_replay_barcode_is_clipped_behind_camera_like_gl(filter_mode):
+    # Camera 2.5 m forward: the barcode plane (1.5 m ahead of the start pose) is behind it, so GL
+    # draws nothing there. The unclipped warpPerspective mirror image used to paint surround grey
+    # over the visible backdrop (5656 wrong pixels at this size).
+    scene = bs.BenchScene(seed=3,size=(384,416),motion='none',backdrop='mosaic',backdrop_filter=filter_mode)
+    real = bs.offset_matrix({'degrees':[0.,0.,0.],'metres':[0,0,-2.5]})
+    scene.frame_records[0] = record = scene.frame_geometry(0,real)
+    panel_h = np.array(record['eyes'][0]['panel_to_eye'])
+    x,y,w,h = scene.barcode_box
+    offset = np.array([[1,0,x],[0,1,y],[0,0,1.]])
+    assert not bs.plane_mask((h,w),panel_h @ offset,scene.size).any()
+    unclipped = cv2.warpPerspective(np.ones((h,w),np.uint8),panel_h @ offset,scene.size,flags=cv2.INTER_NEAREST).astype(bool)
+    assert unclipped.sum() > 1000, 'regression must exercise the mirrored (behind-camera) barcode footprint'
+    frame = scene.render_frame(0)
+    assert not (frame[unclipped] == bs.SURROUND).all(axis=1).any()
+    # Nothing of the barcode is visible: moving it elsewhere on the panel cannot change the frame.
+    scene.barcode_box = (0,0,w,h)
+    np.testing.assert_array_equal(scene.render_frame(0),frame)

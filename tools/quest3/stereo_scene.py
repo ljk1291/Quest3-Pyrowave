@@ -214,6 +214,20 @@ def scene_metadata(args, width, height, projections):
     }
 
 
+def bench_pose_step(scene, pose, elapsed, request=None):
+    """One live-loop pose: (real_pose, recenter_event) for a valid pose, None to skip the frame.
+
+    A skipped pose resets the pending startup yaw-mismatch timer, so the automatic
+    recenter only follows a mismatch that stayed continuous (valid poses throughout).
+    """
+    if not pose.bPoseIsValid:
+        scene.tracking_lost()
+        return None
+    from tools.quest3.bench_scene import pose_matrix
+    real_pose = pose_matrix(pose.mDeviceToAbsoluteTracking.m)
+    return real_pose, scene.maybe_recenter(real_pose, elapsed, request)
+
+
 def run_bench(args, root, system, compositor, width, height, GL, openvr):
     """World-locked planar menu. Only small barcode/pose data changes per frame."""
     from tools.quest3.bench_scene import BenchScene, PERIOD, SUPERSAMPLE, SURROUND, pose_matrix, panel_anchor, projection_raw, backdrop_arguments
@@ -315,11 +329,10 @@ def run_bench(args, root, system, compositor, width, height, GL, openvr):
     try:
         while time.monotonic()-start < args.seconds and not (args.stop_file and args.stop_file.exists()):
             compositor.waitGetPoses(poses, None)
-            pose = poses[openvr.k_unTrackedDeviceIndex_Hmd]
-            if not pose.bPoseIsValid:
+            step = bench_pose_step(scene, poses[openvr.k_unTrackedDeviceIndex_Hmd], time.monotonic()-start, args.bench_recenter_file)
+            if step is None:
                 continue  # never submit using an old pose
-            real_pose = pose_matrix(pose.mDeviceToAbsoluteTracking.m)
-            event = scene.maybe_recenter(real_pose, time.monotonic()-start, args.bench_recenter_file)
+            real_pose, event = step
             geometry = scene.frame_geometry(frames, real_pose)
             if event:
                 geometry['recenter'] = event
