@@ -61,6 +61,7 @@ overlay "$dest/ALVR-20.13.0" patches/fast-abr.patch   # opt-in video.pyrowave.fa
 overlay "$dest/ALVR-20.13.0" patches/frame-dump.patch   # opt-in lossless frame dumps (client)
 overlay "$dest/ALVR-20.13.0" patches/frame-loss-diagnostics.patch   # opt-in frame-loss accounting
 overlay "$dest/ALVR-20.13.0" patches/client-output-queue.patch   # opt-in decoded output FIFO (client)
+overlay "$dest/ALVR-20.13.0" patches/fork-baseline.patch   # fork baseline: fresh-output counter, PyroWave full-range fix (ALVR_Q3PW_PYROWAVE_FULL_RANGE=0 opts out), FOV crop, shutdown order, NVENC preflight
 fi
 
 checkout https://github.com/Themaister/pyrowave "$dest/pyrowave" "$PYROWAVE_BASE"

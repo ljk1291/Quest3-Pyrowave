@@ -20,6 +20,7 @@ fork (ljk1291/Quest3-Pyrowave) is based on upstream JMS1717/Quest3-Pyrowave at
 | 6 | `frame-dump.patch` | fork | `sources.lock.json` |
 | 7 | `frame-loss-diagnostics.patch` | fork | `sources.lock.json` |
 | 8 | `client-output-queue.patch` | fork | `sources.lock.json` |
+| 9 | `fork-baseline.patch` | fork | `sources.lock.json` |
 
 `<dest>/pyrowave`: `Themaister/pyrowave` at `d2997ac`, Granite `842d9d5` with its submodules, then
 upstream's `pyrowave-cdf53-haar-experiments2-3.patch`, `quest3-pyrowave.patch`,
@@ -33,7 +34,7 @@ would follow the same rules after `pyrowave-cdf53v2.patch`.
 ## Fork overlays
 
 - **One list.** The `overlay "$dest/ALVR-20.13.0" patches/<name>.patch` lines in
-  `tools/ci/fetch_sources.sh` set the order. Rows 4-8 are active; a further overlay's line is added
+  `tools/ci/fetch_sources.sh` set the order. Rows 4-9 are active; a further overlay's line is added
   only together with its pin.
 - **One pin each.** `python3 tools/ci/source_lock.py pin patches/<name>.patch` writes the patch's
   SHA-256 into `sources.lock.json` under `"overlays"`; upstream's pins are untouched.
@@ -64,6 +65,20 @@ would follow the same rules after `pyrowave-cdf53v2.patch`.
     and Wi-Fi UDP; marker `[Q3PW_OUTPUT_QUEUE]` ([docs/OUTPUT-QUEUE.md](../docs/OUTPUT-QUEUE.md)).
     It calls `pyroclient_decode_guarded_many`, which `tools/pyroclient` provides in the same
     commit, so build the APK from that commit.
+- **`fork-baseline.patch`** (row 9, active, applied last; generated against the tree after
+  `client-output-queue.patch`): the fork's baseline behaviour on `.65`, default off or
+  upstream-compatible unless noted. A fresh-output counter in client telemetry
+  (`selected_output_submissions`, source `selected_nonnull_post_render_release_v1`), a PyroWave
+  full-range fix (`ALVR_Q3PW_PYROWAVE_FULL_RANGE=0` opts out; markers `[Q3PW_RANGE]`,
+  `[Q3PW_COLOUR]`), a FOV crop (session keys `video.fov_crop.enabled`,
+  `video.fov_crop.content.horizontal_tangent_multiplier` and `vertical_tangent_multiplier`; marker
+  `[FOV-CROP]`), a corrected driver shutdown order and an NVENC dimension preflight, opt-in with
+  `ALVR_NVENC_DIMENSION_PREFLIGHT=1`. See [docs/FORK-BASELINE.md](../docs/FORK-BASELINE.md). It
+  changes `get_frame` to return a `SelectedFrame` on the path `client-output-queue.patch`
+  reworks, so the two were merged by hand; CI compiles the result first.
+- **Caution: no mixed pairs.** `fork-baseline.patch` extends the bincode `HeadsetTelemetry`
+  packet, so a build with it and a build without it must never be used as a pair, even though
+  both advertise `20.13.0-ljk1291.3`.
 
 **Making or regenerating an overlay.** No compiler is needed for this part.
 

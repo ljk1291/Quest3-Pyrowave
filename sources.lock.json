@@ -9,7 +9,8 @@
     "patches/fast-abr.patch": "33533b59c5c192653d48df3cf65d3e149b152cba9351fa528c851fff00531e77",
     "patches/frame-dump.patch": "5917434e83643c1b086186a95fd39722c17e40d895ca289918f449029a2e89ad",
     "patches/frame-loss-diagnostics.patch": "39280bd5621df968076112a97aed179030a26c62bac236ab2d0782888b729112",
-    "patches/client-output-queue.patch": "b4519c71258f723b5400daa9cdce11a86a007d125f1ad87163a9af5bdd855e44"
+    "patches/client-output-queue.patch": "b4519c71258f723b5400daa9cdce11a86a007d125f1ad87163a9af5bdd855e44",
+    "patches/fork-baseline.patch": "3ba1a6857018cb4bea51d3b20a4187f5a49cf939124880f6ab58f5a566a13d87"
   },
   "rust": "1.97.1",
   "android_ndk": "27.2.12479018",
