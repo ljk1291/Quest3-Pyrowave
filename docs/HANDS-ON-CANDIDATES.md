@@ -28,13 +28,56 @@ RSSI −4), battery 42–44 °C. One sample per cell. Markers confirmed per cell
 - Unworn, 20 s per cell, one round: runtime-accepted 90 Hz and sustained in this live window; worn/head motion and
   Metro still to do. Quality (dumps, Library thumbnails) below.
 
+## Brightness: `raw_srgb_copy` changes nothing (2026-10-08 10:00–10:10, unworn, sweep `rsc`, `-Record`)
+5/3 V2 1000 `-fabrc-csf-metro` vs the same + `debug.q3pw.raw_srgb_copy=1` (new `-rsc` suffix), interleaved x2, no game
+(SteamVR Library in view), in-headset screencaps + 2 x 5 s screenrecords per cell. Markers: `[Q3PW_COLOR_COPY]
+requested=true active=true srgb_target=true correction=true gamma=1` on `-rsc`, `active=false` on the control.
+Restore exit 0; battery 45–47 °C, charger on.
+
+| Cell | Fresh/s | Latency p50 | Screencap luma mean / median (lit) / p90 / p99 | Shimmer flicker px (4 clips) |
+|---|---|---|---|---|
+| control (raw copy off) | 90.0 / 89.9 | 58.0 / 63.2 | 22.40 / 36.9 / 71.5 / 165.1 | 0.66–1.27 % |
+| `-rsc` (raw copy on) | 90.1 / 90.0 | 51.7 / 53.0 | 22.42 / 36.9 / 71.7 / 165.2 | 0.51–1.21 % |
+
+- **Identical brightness** (±0.03 codes): the paired sRGB decode/encode cancels exactly, as 6.1-sol's code trace
+  predicted. Our darker-than-VD image (median 13 vs 22 in the 2026-10-07 Metro screencaps) is therefore not a client
+  transfer-function bug. Remaining suspects: VD's own colour/brightness settings (ask the owner), or a server-side
+  input classification (ALVR composition decodes a non-sRGB SDR texture as sRGB). No change to defaults.
+- Flicker on this view is within run-to-run noise between the arms (it is higher than the 02:00 run's 0.1 % because
+  the view differs: no Metro behind the dashboard). Recordings: results/local/session-25/metro-rec-rsc-20261008-100028/.
+
+## Full headset CSF (`PYROWAVE_HEADSET_CSF=1`): rejected on flicker (2026-10-08 09:28–09:59, unworn, `hcsf`/`hcsfdump`)
+Same build/settings as `v2live`/`v2dump`, plus the streamer env `PYROWAVE_HEADSET_CSF=1`. The harness relaunched
+SteamVR after ALVR's config restart so the encoder got the env: every cell logged `[Q3PW_HEADSET_CSF] requested=1
+active=1 nyquist=13.899 lf_boost=6 chroma_csf=1.6 discard_weight=1`. Battery 29 → 37 °C, charger on throughout.
+Restore exit 0 (both runs).
+
+Live (one sample): 5/3 V2 1000 89.9 fresh/s (decode 5.1, dtf 5.8, latency 74), 5/3 V2 1250 89.9 (3.6 / 5.2 / 70),
+Haar 1250 89.5 (6.3 / 8.6 / 95). The CSF doesn't cost frame rate.
+
+Dumps, density-only `-csf` (from `v2dump`) → **full CSF**:
+
+| Cell | PSNR-Y | Edge PSNR | HF err | Temporal static p99 | Blockiness 32 |
+|---|---|---|---|---|---|
+| Chart 5/3 V2 1000 | 59.8 → **55.6** | 52.6 → 49.2 | 0.141 → 0.294 | 1.30 → **2.05** | .007 → .025 |
+| Chart 5/3 V2 1250 | 58.0 → 57.0 | 52.1 → 51.2 | 0.119 → 0.171 | 1.37 → 1.67 | −.001 → −.002 |
+| Chart Haar 1250 | 62.6 → 62.4 | 55.4 → 55.3 | 0.060 → 0.068 | 0.79 → 0.89 | .029 → .011 |
+| Library 5/3 V2 1000 | 55.4 → 54.4 | 50.6 → 49.0 | 0.643 → 0.743 | 1.76 → 1.86 | .033 → .035 |
+| Library 5/3 V2 1250 | 56.5 → 54.9 | 52.5 → 50.0 | 0.537 → 0.798 | 1.54 → **1.87** | .028 → .041 |
+
+- **Full CSF makes 5/3 worse on every metric, including the static-area temporal p99 (the flicker proxy) on both
+  targets.** Its ×6 low-frequency boost and discard weighting move bits from fine detail to coarse bands; at our
+  rates that adds fine-detail error that changes frame to frame. Haar is nearly unaffected (a little less blocking).
+- Verdict: keep the density-only `-csf` (RDO 27.8 px/deg); don't use `PYROWAVE_HEADSET_CSF=1` for the flicker goal.
+  (PSNR-type metrics penalise perceptual weighting, but the temporal metric is the one the owner's flicker is about.)
+
 ## Candidate C9 for the owner's worn Metro look: CDF 5/3 at 90 Hz (2026-10-08 ~02:20)
 **`hq-cdf53-1000-v2-fabrc-csf-metro`** (and `hq-cdf53-1250-v2-fabrc-csf-metro`) on the installed Decoder V2 build
 9c126c6, vs C8 `hq-haar1250-fabrc-csf-metro` on the same build. Run e.g.
 `hq-sweep.ps1 -Pair decoder-v2-37690049712 -Cells hq-cdf53-1000-v2-fabrc-csf-metro` (owner launches Metro).
 Evidence: 90.0 fresh/s live with Metro running, ~20 ms lower latency than Haar, 6–7x less block structure, ~30 % less
 static-view flicker (sections below). Look for: fine-texture shimmer and thin lines while moving the head; blur vs
-Haar's square patches; ringing (halos) at hard edges such as HUD text. Not yet: full `PYROWAVE_HEADSET_CSF=1`.
+Haar's square patches; ringing (halos) at hard edges such as HUD text. Full `PYROWAVE_HEADSET_CSF=1` was tested and rejected (above).
 
 ## Decoder V2 with Metro running, in-headset Library recordings (2026-10-08 01:55–02:10, unworn, sweep `v2metro`)
 New `hq-sweep.ps1 -LaunchMetro`: per `-metro` cell it starts Metro on our stream (launch_metro_steamvr.py), waits 75 s,
