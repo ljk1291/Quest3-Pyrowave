@@ -178,11 +178,17 @@ def git_shell(name):
     """Git for Windows' sh/bash; the `bash` on a Windows PATH can be WSL's."""
     if os.name != "nt":
         return shutil.which(name)
+    # `git --exec-path` names the real installation (<root>\mingw64\libexec\git-core) even when
+    # `git` on PATH is a scoop shim, so no PATH setup is needed. Walk up to the root with bin\<name>.exe.
     git = shutil.which("git")
     if git:
-        candidate = Path(git).resolve().parents[1] / "bin" / f"{name}.exe"
-        if candidate.exists():
-            return str(candidate)
+        exec_path = subprocess.run([git, "--exec-path"], capture_output=True, text=True).stdout.strip()
+        starts = ([Path(exec_path).resolve()] if exec_path else []) + [Path(git).resolve()]
+        for start in starts:
+            for parent in start.parents:
+                candidate = parent / "bin" / f"{name}.exe"
+                if candidate.exists():
+                    return str(candidate)
     return rf"C:\Program Files\Git\bin\{name}.exe"
 
 
@@ -214,16 +220,33 @@ def vs_generator():
     return "Visual Studio 17 2022"
 
 
+def main_checkout():
+    """Root of the main checkout; equals REPO unless REPO is a linked git worktree."""
+    out = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=REPO,
+                         capture_output=True, text=True).stdout.strip()
+    return Path(out).parent if out else REPO
+
+
+def keystore_candidates():
+    """Default stable-key locations, in search order. The first is gitignored and, in a linked
+    worktree, lives in the main checkout; the last is the old private-workspace layout."""
+    signing = Path("results") / "local" / "signing" / "quest3-baseline.p12"
+    old = Path("workspace") / "keys" / "quest3-release" / "quest3-release.p12"
+    return [REPO / signing, main_checkout() / signing, REPO.parent / old]
+
+
 def signing_key(args):
+    """(keystore, password, where): where says which source was used; the password is never printed."""
     if os.environ.get("CARGO_APK_RELEASE_KEYSTORE"):
-        return os.environ["CARGO_APK_RELEASE_KEYSTORE"], os.environ.get("CARGO_APK_RELEASE_KEYSTORE_PASSWORD")
-    keystore = Path(args.keystore) if args.keystore else \
-        REPO.parent / "workspace" / "keys" / "quest3-release" / "quest3-release.p12"
-    password = Path(args.keystore_password_file) if args.keystore_password_file else \
-        keystore.with_name("keystore-password.txt")
-    if keystore.exists() and password.exists():
-        return str(keystore), password.read_text(encoding="utf-8").strip()
-    return None, None
+        return (os.environ["CARGO_APK_RELEASE_KEYSTORE"],
+                os.environ.get("CARGO_APK_RELEASE_KEYSTORE_PASSWORD"), "CARGO_APK_RELEASE_KEYSTORE")
+    candidates = [Path(args.keystore)] if args.keystore else keystore_candidates()
+    for keystore in candidates:
+        password = Path(args.keystore_password_file) if args.keystore_password_file else \
+            keystore.with_name("keystore-password.txt")
+        if keystore.exists() and password.exists():
+            return str(keystore), password.read_text(encoding="utf-8").strip(), str(keystore)
+    return None, None, None
 
 
 def build_env(root, args):
@@ -239,10 +262,11 @@ def build_env(root, args):
         "Q3PW_CMAKE_GENERATOR": vs_generator(),
         "PATH": os.pathsep.join([str(tc / "shim"), str(tc / "cargo-tools" / "bin"), env["PATH"]]),
     })
-    keystore, password = signing_key(args)
+    keystore, password, where = signing_key(args)
     if keystore:
         env["CARGO_APK_RELEASE_KEYSTORE"] = keystore
         env["CARGO_APK_RELEASE_KEYSTORE_PASSWORD"] = password
+        print(f"signing key: {where}", flush=True)
     return env, bool(keystore)
 
 
@@ -350,6 +374,21 @@ def setup(root, args):
     print(f"toolchain ready under {tc}")
 
 
+def build_version():
+    """CI's installable identity (tools/ci/stamp_alvr_version.py): <protocol_version>+<sha12>, with
+    `.dirty` appended when tracked files have uncommitted changes (CI builds are never dirty)."""
+    head, dirty = source_identity()
+    base = json.loads((REPO / "fork.json").read_text(encoding="utf-8"))["protocol_version"]
+    return f"{base}+{head[:12]}" + (".dirty" if dirty else "")
+
+
+def stamp_version(alvr_tree):
+    """Stamp the reconstructed ALVR tree like CI does. This runs on the staged tree, before the
+    content sync, so an unchanged version leaves every Cargo.toml (and its timestamp) alone."""
+    subprocess.run([sys.executable, str(REPO / "tools" / "ci" / "stamp_alvr_version.py"), str(alvr_tree),
+                    "--version", build_version()], check=True, stdout=subprocess.DEVNULL)
+
+
 def sync_sources(root, timer):
     research = root / "research"
     sh = git_shell("sh")
@@ -358,6 +397,7 @@ def sync_sources(root, timer):
         timer.run("reconstruct (first run, network)",
                   lambda: subprocess.run([sh, "tools/ci/fetch_sources.sh", research.as_posix()],
                                          cwd=REPO, check=True))
+        stamp_version(research / "ALVR-20.13.0")
         return timer.run("sync manifest", lambda: sync_tree(research, research, root / "sync-backups"))
     granite = subprocess.run(["git", "-C", str(research / "pyrowave" / "Granite"), "rev-parse", "HEAD"],
                              capture_output=True, text=True).stdout.strip()
@@ -370,6 +410,7 @@ def sync_sources(root, timer):
     timer.run("stage patched sources (local)",
               lambda: subprocess.run([sh, "tools/ci/fetch_sources.sh", stage.as_posix()], cwd=REPO,
                                      env=env, check=True, stdout=subprocess.DEVNULL))
+    stamp_version(stage / "ALVR-20.13.0")
     stamp = time.strftime("%Y%m%dT%H%M%S")
     report = timer.run("content sync", lambda: sync_tree(stage, research, root / "sync-backups" / stamp))
     remove_tree(stage)
@@ -486,8 +527,11 @@ def main(argv=None):
     parser.add_argument("--client", action="store_true", help="build only the Quest client")
     parser.add_argument("--streamer", action="store_true", help="build only the Windows streamer")
     parser.add_argument("--no-sync", action="store_true", help="build the tree as it is")
-    parser.add_argument("--keystore", help="release keystore (.p12); default: the stable key in the private workspace")
-    parser.add_argument("--keystore-password-file")
+    parser.add_argument("--keystore", help="release keystore (.p12). Default search order: "
+                        "$CARGO_APK_RELEASE_KEYSTORE; results/local/signing/quest3-baseline.p12 in this checkout, "
+                        "then in the main checkout; then ../workspace/keys/quest3-release/quest3-release.p12. "
+                        "keystore-password.txt must sit beside it. The build prints which one it used.")
+    parser.add_argument("--keystore-password-file", help="default: keystore-password.txt beside the keystore")
     parser.add_argument("--allow-while-vr", action="store_true",
                         help="build even though SteamVR is running (it competes with the game for the CPU)")
     args = parser.parse_args(argv)

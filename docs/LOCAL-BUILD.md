@@ -132,6 +132,29 @@ follow the hardware rules in [AGENTS.md](../AGENTS.md).
   (requires administrator rights) restores compiler parity. `fast_build.py` picks VS2022
   automatically once its C++ tools exist.
 
+## Fork notes (ljk1291)
+
+- **Command.** `python tools/local/fast_build.py build` builds the APK and the Windows streamer;
+  add `--client` or `--streamer` for one side, `--no-sync` to build the tree as it is. Run it from
+  any checkout or worktree of this repo.
+- **Environment.** Python 3.12 or newer runs the script (3.10 fails in `remove_tree`); the build
+  scripts' own `python` may be older. `cmake`, `ninja`, `rustup`/`cargo` and a JDK 17 must be
+  findable (`JAVA_HOME` may point to any JDK 17 directory). No PATH surgery for Git is needed:
+  `sh.exe` and `bash.exe` come from the Git installation that `git --exec-path` reports, so a scoop
+  `git` shim works. The `setup` step installs the rest under `<root>\toolchain`.
+- **Stable key.** Without `--keystore`, the script uses the first of these that has a
+  `keystore-password.txt` beside it: `$CARGO_APK_RELEASE_KEYSTORE`, then
+  `results\local\signing\quest3-baseline.p12` in this checkout, then the same path in the main
+  checkout (a linked worktree has no copy of the gitignored `results\local`), then
+  `..\workspace\keys\quest3-release\quest3-release.p12`. The build prints the keystore path it used
+  (never the password), and `APK-CERTIFICATE.txt` / `PROVENANCE.json` record whether the
+  certificate equals `fork.json`'s `stable_signing_certificate_sha256`.
+- **Version stamp.** Like CI, every sync stamps the reconstructed ALVR tree with
+  `<protocol_version>+<sha12>` (`tools/ci/stamp_alvr_version.py`), with `.dirty` appended when
+  tracked files have uncommitted changes. The stamp is applied before the content sync, so an
+  unchanged version rebuilds nothing; a new commit or the first edit of a clean tree changes every
+  `Cargo.toml` and costs one full rebuild (about 2 minutes). `--no-sync` does not re-stamp.
+
 ## When to use which
 
 | Need | Use |
