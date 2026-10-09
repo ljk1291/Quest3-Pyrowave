@@ -5,6 +5,32 @@ Configurations that passed automatic screening and are worth the owner's in-head
 evidence that put it here, and what to look at. Rejected options are listed at the end
 so they aren't retried by accident.
 
+## E5 encoder stability switches on weighting W (2026-10-09 03:54–05:16, offline, PC only)
+Same scene, 16 frames of `jitter`, 1000 Mbps, codec stage. Tools: rebase PyroWave + opt-in rate-control experiments
+(out/rebase-tools-850b6da00627-e5, Astra; source ws/encoder-experiments/pyrowave-e5). All profiles use weighting W.
+- `PYROWAVE_RC_FULL_SCAN=1` (wh2): fixes the finalize-scan bug.
+- `PYROWAVE_RC_TIEBREAK=slope` (wh1): orders the marginal bucket by slope.
+- `PYROWAVE_RC_HYSTERESIS=h` (wq025 / wq050): soft bias toward each 32x32 block's previous-frame truncation.
+
+| metric | W | wh2 | wh1 | **wq025** | wq050 | wh1q050 |
+|---|---:|---:|---:|---:|---:|---:|
+| sat toggle fraction | 0.030 | 0.030 | 0.020 | 0.031 | 0.028 | 0.021 |
+| sat detail toggle fraction | 0.058 | 0.058 | 0.072 | **0.029** | 0.043 | 0.101 |
+| natural detail toggle fraction | 0.015 | 0.015 | 0.013 | **0.011** | 0.011 | 0.012 |
+| mura LF8 p99 | 0.150 | 0.150 | 0.141 | 0.154 | 0.163 | 0.146 |
+| edge flicker p99 | 7.85 | 7.85 | 8.32 | 7.92 | 8.13 | 8.48 |
+| natural PSNR-Y dB | 46.80 | 46.80 | 46.40 | 46.74 | 46.62 | 46.28 |
+| backdrop detail retained | 0.739 | 0.739 | 0.743 | 0.735 | 0.735 | 0.741 |
+
+- **The scan-bug fix changes no decision on this content at 1000 Mbps.** All metrics are identical to W. It is a correct
+  fix to keep, not a cause of the visible artifacts.
+- **The slope tie-break is mixed**: less chroma toggling, more edge flicker, -0.4 dB. Not worth it.
+- **Hysteresis 0.25 is the stability win**: it halves sat detail toggling and cuts natural detail ("low-res <->
+  high-res") toggling 27 %, with other metrics within noise. 0.5 over-holds and does worse.
+- Candidate encoder = **W + `PYROWAVE_RC_HYSTERESIS=0.25`** (implies full scan). This is a 16-frame screen: confirm on
+  120 frames, seeds 1–3, tremor/pan/turn before promoting. The live R4 streamer does not have the switch yet; it needs
+  a PyroWave overlay in the streamer build.
+
 ## E3 encoder weighting grid: a middle ground (2026-10-09 02:25–03:51, offline, PC only)
 Same scene, 12 frames of `jitter`, 1000 Mbps (1,388,888 B/frame), codec stage. **Rebase** PyroWave tools built locally
 (out/rebase-tools-850b6da00627: pin d2997ac + fork overlays; with ours-c9 knobs they match the legacy Decoder V2 tools).
