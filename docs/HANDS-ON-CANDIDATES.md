@@ -29,6 +29,22 @@ D-U = codec part, U-T = sampling/preprocessing part (uncompressed), D-T = total.
 - Caveats: the compositor model is uniform bilinear (lens distortion, per-pixel scale and timewarp are not modelled);
   16 frames; one seed. The live compositor decides, so this points at E7 (client mips / 1:1 eye size) and the E1 live
   cells, not a final answer.
+- **E1b, the PC downsample filter (06:21–06:45), is decisive.** Totals in the same model:
+
+| total | Adaptive 2624 | Adaptive 2080 | Lanczos 2624 | Lanczos 2080 | Area 2624 | **Area 2080** |
+|---|---:|---:|---:|---:|---:|---:|
+| edge flicker p99 | 16.9 | 14.3 | 19.3 | 17.5 | 14.7 | **8.9** |
+| natural flicker p99 | 3.57 | 3.14 | 3.80 | 3.48 | 3.38 | **2.80** |
+| mura LF8 Y p99 | 0.587 | 0.660 | 0.718 | 0.729 | 0.567 | **0.539** |
+| natural PSNR-Y dB | 47.2 | 46.9 | 46.7 | 45.2 | 46.5 | **47.4** |
+| sat toggle fraction | 0.107 | 0.119 | 0.122 | 0.131 | **0.098** | 0.116 |
+
+  - A 3072x3232 render, **area-filtered** (footprint-integrating box) down to a ~display-native 2080x2208 encode,
+    nearly halves edge shimmer vs today's path (-47 % vs Adaptive 2624). Natural flicker is -22 %, mura and PSNR are
+    the best of all, and sat toggling is comparable.
+  - Lanczos (negative lobes, ringing) is the worst.
+  - The rebased ALVR server offers only Bilinear / Adaptive / Lanczos (the old fork's Area option was not carried into
+    the rebase), so this needs a streamer overlay with an Area downsample mode. Next task.
 
 ## E5 encoder stability switches on weighting W (2026-10-09 03:54–05:16, offline, PC only)
 Same scene, 16 frames of `jitter`, 1000 Mbps, codec stage. Tools: rebase PyroWave + opt-in rate-control experiments
