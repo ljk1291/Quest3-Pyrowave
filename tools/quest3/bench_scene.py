@@ -23,6 +23,9 @@ VERSION = 4
 # V3's default renderer is preserved byte-for-byte by the default branch.
 # Only this audited predecessor is accepted, never an arbitrary hash bypass.
 V3_RENDERER = '669fdf30c06f6d1b2df38cd53d8396e4c7cdb0aa41d2264730fbe6c46ff801bb'
+# Audited pre-calibration v4: the default raster/geometry path is unchanged.
+V4_RENDERER = '64e3e015eb1d4fe4dd738ef4edc7fe792eed39e4a40fd644072d7b8d2901a99a'
+CALIBRATION_LAYOUT = 'full-eye-5x5-v1'
 
 
 def sha256(path):
@@ -643,8 +646,10 @@ class BenchScene:
         if path.is_dir(): path /= 'bench.json'
         meta = json.loads(path.read_text(encoding='utf-8-sig'))
         meta = meta.get('bench', meta)
+        if meta.get('calibration_layout'):
+            return CalibrationScene.from_metadata(path, size)
         compatible_v3 = meta['version'] == 3 and meta['renderer_sha256'] == V3_RENDERER
-        if not compatible_v3 and (meta['version'] != VERSION or meta['renderer_sha256'] != sha256(__file__)):
+        if not compatible_v3 and (meta['version'] != VERSION or meta['renderer_sha256'] not in (sha256(__file__), V4_RENDERER)):
             raise ValueError('renderer changed; replay with the captured version')
         if meta['backdrop_renderer_sha256'] != sha256(Path(__file__).with_name('bench_backdrop.py')):
             raise ValueError('backdrop renderer changed; replay with the captured version')
@@ -674,6 +679,118 @@ class BenchScene:
         return result
 
 
+class CalibrationScene(BenchScene):
+    """Head-locked eye raster; geometry uses pixel centres, patch boxes use edges.
+
+    ArUco IDs provide a coarse correspondence. Gaussian spot centres in the
+    blank margins provide independent subpixel geometry, including holdouts.
+    Neither detector uses the colour patches. GL uploads this exact raster.
+    """
+    def __init__(self, seed=1, size=REFERENCE_SIZE, motion='none', scale=0., assets=None, **kwargs):
+        from tools.quest3.bench_colour import layout
+        self.size = self.panel_size = tuple(size)
+        if min(size) < 384 or any(v % 2 for v in size):
+            raise ValueError('even eye dimensions >=384 required')
+        self.seed, self.motion, self.scale = seed, 'none', 0.
+        self.layout = CALIBRATION_LAYOUT
+        self.backdrop, self.backdrop_kind, self.backdrop_filter = None, 'none', 'default'
+        self.panel_mode = 'on'
+        self.manifest = {'assets': []}
+        self.trajectory = trajectory(seed, 'none', 0.)
+        self.frame_records, self.live = {}, False
+        self.calibration = layout(size)
+        w, h = size
+        self.panel = np.full((h, w, 3), 28, np.uint8)
+        self.panel_labels = np.zeros((h, w), np.uint8)
+        for patch in self.calibration:
+            x, y, pw, ph = patch['box']
+            x0, y0, x1, y1 = np.ceil(np.array([x, y, x+pw, y+ph])-.5).astype(int)
+            self.panel[y0:y1, x0:x1] = patch['rgb']
+        cw, ch = max(2, int(w*.18/28)), max(2, int(h*.014/4))
+        self.barcode_box = ((w-28*cw)//2, max(1, round(h*.004)), 28*cw, 4*ch)
+        dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+        side = max(6, round(min(size)*.016))
+        pad = max(1, round(side/6))
+        self.fiducials, reserved = [], [self.barcode_box]
+        locations = (.012, .198, .398, .598, .798, .986)
+        for row, cy in enumerate(locations):
+            for col, cx in enumerate(locations):
+                ident = row*6+col
+                x, y = round(cx*w-side/2), round(cy*h-side/2)
+                self.panel[y-pad:y+side+pad, x-pad:x+side+pad] = 235
+                self.panel[y:y+side, x:x+side] = cv2.aruco.generateImageMarker(dictionary, ident, side)[..., None]
+                self.fiducials.append({'id': ident, 'corners': [[x-.5, y-.5], [x+side-.5, y-.5],
+                                                               [x+side-.5, y+side-.5], [x-.5, y+side-.5]]})
+                reserved.append((x-pad, y-pad, side+2*pad, side+2*pad))
+        self.spot_sigma = max(1., min(size)*.0012)
+        radius = int(np.ceil(4*self.spot_sigma))
+        yy, xx = np.mgrid[-radius:radius+1, -radius:radius+1]
+        spot = np.rint(28+192*np.exp(-(xx*xx+yy*yy)/(2*self.spot_sigma**2))).astype(np.uint8)
+        self.landmarks = []
+        for v in (.01, .19, .21, .39, .41, .59, .61, .79, .81, .99):
+            for col in range(5):
+                for u in (.035, .06, .085, .11, .135, .16):
+                    x, y = round((col/5+u)*w-.5), round(v*h-.5)
+                    if x-radius < 0 or y-radius < 0 or x+radius >= w or y+radius >= h:
+                        continue
+                    if any(x+radius >= bx and x-radius < bx+bw and y+radius >= by and y-radius < by+bh
+                           for bx, by, bw, bh in reserved):
+                        continue
+                    self.panel[y-radius:y+radius+1, x-radius:x+radius+1] = spot[..., None]
+                    self.landmarks.append([x, y])
+        contract = {'layout': self.layout, 'size': list(size), 'patches': self.calibration,
+                    'fiducials': self.fiducials, 'landmarks': self.landmarks,
+                    'spot_sigma': self.spot_sigma, 'barcode_box': self.barcode_box,
+                    'background': [28, 28, 28], 'raster': 'pixel-centre inclusion; direct RGBA8 upload'}
+        self.layout_hash = hashlib.sha256(json.dumps(contract, sort_keys=True).encode()).hexdigest()
+
+    def maybe_recenter(self, real_pose, elapsed, request=None):
+        return None
+
+    def frame_geometry(self, index, real_pose=None):
+        return {'frame': index, 'index': index % PERIOD, 'head_locked': True,
+                'real_pose': (np.eye(4) if real_pose is None else real_pose).tolist(),
+                'synthetic_offset': self.trajectory[index % PERIOD],
+                'eyes': [{'panel_to_eye': np.eye(3).tolist()} for _ in range(2)]}
+
+    def render_frame(self, index, eye='left', homography=None):
+        self.homography(index, eye)  # retain live barcode/pose-log identity checks
+        if homography is not None and not np.array_equal(homography, np.eye(3)):
+            raise ValueError('calibration is head-locked in source eye coordinates')
+        return self.panel_frame(index)
+
+    def metadata(self):
+        return {'version': VERSION, 'calibration_layout': self.layout, 'layout_sha256': self.layout_hash,
+                'size': list(self.size), 'panel_size': list(self.size), 'seed': self.seed,
+                'motion': 'none', 'head_locked': True, 'live': self.live,
+                'fiducials': self.fiducials, 'landmarks': self.landmarks, 'spot_sigma': self.spot_sigma,
+                'barcode_box': self.barcode_box, 'calibration': self.calibration,
+                'renderer_sha256': sha256(__file__), 'numpy': np.__version__, 'opencv': cv2.__version__}
+
+    @classmethod
+    def from_metadata(cls, path, size=None):
+        path = Path(path)
+        if path.is_dir(): path /= 'bench.json'
+        meta = json.loads(path.read_text(encoding='utf-8-sig'))
+        meta = meta.get('bench', meta)
+        if meta['calibration_layout'] != CALIBRATION_LAYOUT or meta['renderer_sha256'] != sha256(__file__):
+            raise ValueError('calibration renderer changed; replay with the captured version')
+        if meta['numpy'] != np.__version__ or meta['opencv'] != cv2.__version__:
+            raise ValueError('CPU library versions changed since capture')
+        result = cls(meta['seed'], meta['size'])
+        if result.layout_hash != meta['layout_sha256']:
+            raise ValueError('calibration layout hash changed')
+        if size is not None and tuple(size) != result.size:
+            raise ValueError('source geometry is recorded; --size cannot replace it')
+        result.live = meta['live']
+        logs = path.parent/'frames.ndjson'
+        if logs.exists():
+            for line in logs.read_text(encoding='utf-8').splitlines():
+                record = json.loads(line)
+                result.frame_records[record['frame']] = record
+        return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out', type=Path, required=True)
@@ -682,10 +799,15 @@ def main(argv=None):
     parser.add_argument('--bench-scale', type=float, default=1.)
     parser.add_argument('--bench-layout', choices=('cards','metro'), default='cards')
     parser.add_argument('--bench-assets')
+    parser.add_argument('--bench-calibration', choices=(CALIBRATION_LAYOUT,))
     add_backdrop_arguments(parser)
     parser.add_argument('--size', type=int, nargs=2, default=REFERENCE_SIZE)
     args = parser.parse_args(argv)
-    BenchScene(args.bench_seed, args.size, args.bench_motion, args.bench_scale, args.bench_assets, layout=args.bench_layout, **backdrop_arguments(args)).save(args.out)
+    scene_type = CalibrationScene if args.bench_calibration else BenchScene
+    scene = scene_type(args.bench_seed, args.size, args.bench_motion, args.bench_scale, args.bench_assets, layout=args.bench_layout, **backdrop_arguments(args))
+    scene.save(args.out)
+    if args.bench_calibration:
+        print(f'[Q3PW_BENCH_CALIBRATION] mode={scene.layout} layout_sha256={scene.layout_hash} head_locked=1')
 
 
 def add_backdrop_arguments(parser):

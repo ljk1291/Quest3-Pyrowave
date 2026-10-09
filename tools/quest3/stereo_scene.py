@@ -169,6 +169,7 @@ def build_parser():
     parser.add_argument('--bench-panel', choices=('on','off'), default='on')
     parser.add_argument('--bench-backdrop-filter', choices=('default', 'ss4', 'cubic4'), default='default')
     parser.add_argument('--bench-recenter-file', type=Path)
+    parser.add_argument('--bench-calibration', choices=('full-eye-5x5-v1',))
     return parser
 
 
@@ -193,6 +194,8 @@ def validate_args(parser, args):
         parser.error('--image takes one or two existing image files')
     if args.bench and (not math.isfinite(args.bench_scale) or not 0 <= args.bench_scale <= 1):
         parser.error('--bench-scale must be finite in [0,1]')
+    if args.bench_calibration and not args.bench:
+        parser.error('--bench-calibration requires --bench')
     return args
 
 
@@ -230,7 +233,7 @@ def bench_pose_step(scene, pose, elapsed, request=None):
 
 def run_bench(args, root, system, compositor, width, height, GL, openvr):
     """World-locked planar menu. Only small barcode/pose data changes per frame."""
-    from tools.quest3.bench_scene import BenchScene, PERIOD, SUPERSAMPLE, SURROUND, pose_matrix, panel_anchor, projection_raw, backdrop_arguments
+    from tools.quest3.bench_scene import BenchScene, CalibrationScene, PERIOD, SUPERSAMPLE, SURROUND, pose_matrix, panel_anchor, projection_raw, backdrop_arguments
     _, np = render_modules()
     eyes = (openvr.Eye_Left, openvr.Eye_Right)
     raw = [list(system.getProjectionRaw(eye)) for eye in eyes]
@@ -241,7 +244,9 @@ def run_bench(args, root, system, compositor, width, height, GL, openvr):
     if not poses[openvr.k_unTrackedDeviceIndex_Hmd].bPoseIsValid:
         raise RuntimeError('Valid initial HMD render pose required to anchor benchmark panel')
     initial = pose_matrix(poses[openvr.k_unTrackedDeviceIndex_Hmd].mDeviceToAbsoluteTracking.m)
-    scene = BenchScene(args.bench_seed, (width, height), args.bench_motion, args.bench_scale, args.bench_assets,
+    calibration = bool(args.bench_calibration)
+    scene_type = CalibrationScene if calibration else BenchScene
+    scene = scene_type(args.bench_seed, (width, height), args.bench_motion, args.bench_scale, args.bench_assets,
                        layout=args.bench_layout, projections=projections, eye_to_head=eye_poses, anchor=panel_anchor(initial), **backdrop_arguments(args))
     scene.frame_records[0] = scene.frame_geometry(0, initial)  # startup preview only; frame 0 is logged from its later render pose
     scene.save(root)
@@ -249,8 +254,10 @@ def run_bench(args, root, system, compositor, width, height, GL, openvr):
     scene.live = True
     from tools.quest3.bench_scene import write_json
     write_json(root/'bench.json', scene.metadata())
-    print('[Q3PW_BENCH] active=1 world_locked=1 seed=%d motion=%s layout=%s period=%d' %
-          (args.bench_seed, args.bench_motion, args.bench_layout, PERIOD), flush=True)
+    print('[Q3PW_BENCH] active=1 world_locked=%d seed=%d motion=%s layout=%s period=%d' %
+          (int(not calibration), args.bench_seed, scene.motion, scene.layout, PERIOD), flush=True)
+    if calibration:
+        print(f'[Q3PW_BENCH_CALIBRATION] mode={scene.layout} layout_sha256={scene.layout_hash} head_locked=1', flush=True)
     print(f'[Q3PW_BENCH_BACKDROP] mode={scene.backdrop_kind} panel={scene.panel_mode} mosaic={int(scene.backdrop_kind == "mosaic")}', flush=True)
     print(f'[Q3PW_BENCH_FILTER] mode={scene.backdrop_filter}', flush=True)
 
@@ -279,7 +286,7 @@ def run_bench(args, root, system, compositor, width, height, GL, openvr):
             raise RuntimeError('Bench framebuffer incomplete')
         return texture, fbo
 
-    panel = upload(scene.panel, scene.panel_size, scene.mips)
+    panel = None if calibration else upload(scene.panel, scene.panel_size, scene.mips)
     backdrop = upload(scene.backdrop.image,scene.backdrop.size,scene.backdrop.mips) if scene.backdrop else None
     cubic_program = None
     if scene.backdrop_filter == 'cubic4' and scene.backdrop:
@@ -288,9 +295,12 @@ def run_bench(args, root, system, compositor, width, height, GL, openvr):
     x, y, bw, bh = scene.barcode_box
     barcode = upload(scene.barcode_patch(0), (bw, bh))
     large = tuple(v*4 if scene.backdrop_filter != 'default' else round(v*SUPERSAMPLE) for v in scene.size)
-    _, render_fbo = target(large)
+    render_fbo = None if calibration else target(large)[1]
     half = target(tuple(v*2 for v in scene.size)) if scene.backdrop_filter != 'default' else None
-    targets = [target(scene.size) for _ in eyes]
+    # Direct source-eye uploads preserve exact CPU pixels. Only the barcode
+    # changes per frame; there is no pose transform, mip or FBO resolve here.
+    targets = ([(upload(scene.panel_frame(0), scene.size), None) for _ in eyes]
+               if calibration else [target(scene.size) for _ in eyes])
     textures = []
     for texture, _ in targets:
         vr = openvr.Texture_t()
@@ -299,6 +309,8 @@ def run_bench(args, root, system, compositor, width, height, GL, openvr):
     # FBO has conventional GL +Y up. Unlike legacy CPU uploads it needs no flip.
     bounds = openvr.VRTextureBounds_t()
     bounds.uMin, bounds.uMax, bounds.vMin, bounds.vMax = 0, 1, 0, 1
+    if calibration:
+        bounds.vMin, bounds.vMax = 1, 0  # top-down upload, as in the legacy CPU path
     GL.glEnable(GL.GL_TEXTURE_2D)
     GL.glDisable(GL.GL_BLEND)
     GL.glDisable(GL.GL_DEPTH_TEST)
@@ -341,6 +353,11 @@ def run_bench(args, root, system, compositor, width, height, GL, openvr):
             GL.glBindTexture(GL.GL_TEXTURE_2D, barcode)
             GL.glTexSubImage2D(GL.GL_TEXTURE_2D, 0, 0, 0, bw, bh, GL.GL_RGB, GL.GL_UNSIGNED_BYTE, scene.barcode_patch(frames))
             for n, eye in enumerate(eyes):
+                if calibration:
+                    GL.glBindTexture(GL.GL_TEXTURE_2D, targets[n][0])
+                    GL.glTexSubImage2D(GL.GL_TEXTURE_2D, 0, x, y, bw, bh, GL.GL_RGB, GL.GL_UNSIGNED_BYTE, scene.barcode_patch(frames))
+                    compositor.submit(eye, textures[n], bounds)
+                    continue
                 GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, render_fbo)
                 GL.glViewport(0, 0, *large)
                 GL.glClear(GL.GL_COLOR_BUFFER_BIT)
