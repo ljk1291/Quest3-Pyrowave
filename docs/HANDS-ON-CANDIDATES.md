@@ -5,6 +5,34 @@ Configurations that passed automatic screening and are worth the owner's in-head
 evidence that put it here, and what to look at. Rejected options are listed at the end
 so they aren't retried by accident.
 
+## Offline high-bitrate sweep: is the residual compression? (2026-10-09 00:46–02:34, offline, PC only)
+Bench v4 scene (cards panel + world-locked Metro main-menu backdrop), 24 frames of `jitter` motion, codec stage
+(encoder input vs decoded, exact). Decoder V2 9c126c6 Windows tools, CDF 5/3, fixed budgets
+1,388,888 / 2,083,333 / 2,777,777 / 4,166,666 B per stereo frame. `ours-c9` = density-only CSF (chroma 0.6, no
+discard weight, LF x1). `upstream-like` = `PYROWAVE_HEADSET_CSF=1` (chroma 1.6, weighted discard, LF x6). Data:
+results/local/bench-v4-high-bitrate (private).
+
+| Mbps | 1000 | 1500 | 2000 | 3000 |
+|---|---:|---:|---:|---:|
+| ours: sat block toggle fraction | 0.411 | 0.330 | 0.234 | 0.120 |
+| upstream-like: sat block toggle fraction | 0.002 | 0.000 | 0.000 | 0.000 |
+| ours / upstream-like: sat block RMS p99 (codes) | 7.37 / 1.20 | 4.78 / 0.75 | 3.32 / 0.60 | 2.48 / 0.40 |
+| ours / upstream-like: mura LF8 Y p99 | 0.242 / 0.104 | 0.181 / 0.103 | 0.133 / 0.103 | 0.086 / 0.092 |
+| ours / upstream-like: edge flicker p99 | 7.32 / 9.52 | 4.70 / 5.50 | 3.24 / 4.27 | 2.25 / 2.78 |
+| ours / upstream-like: backdrop detail retained | 0.776 / 0.658 | 0.871 / 0.823 | 0.950 / 0.895 | 0.990 / 0.970 |
+| ours / upstream-like: backdrop PSNR-Y (dB) | 48.9 / 46.3 | 52.1 / 50.1 | 54.5 / 52.4 | 59.0 / 55.4 |
+
+- **Ours' blocky chroma toggling is a weighting problem, not a bitrate problem.** It is still 12 % of saturated blocks at
+  3000 Mbps, while upstream weighting is ~0 at 1000.
+- **Upstream weighting's residual softness/shimmer (owner's B: "shimmer, smearing/softness ... low res to high res") is
+  compression.** Detail retention climbs 66 -> 82 -> 90 -> 97 % and edge flicker falls 9.5 -> 2.8 codes from 1000 to
+  3000 Mbps. At 1500 it is better but not transparent.
+- 1500+ is not sustainable live on this Wi-Fi (frame-paced TCP ceiling ~1.15 Gbps; brainstorm B4). The route to a
+  clean image at 1000 is therefore more bits per pixel: a smaller, filtered encode (E1, ~1.4–1.57x bpp) plus a weighting
+  that keeps chroma stable without starving luma (E3). Plan: ws/bench-scene/experiment-plan.md.
+- The final cross-budget `compare` step errored ("different assets/scene/stage") because the stricter v5 identity check
+  loaded mid-run. All eight per-job reports are complete; the table is from them.
+
 ## Bench scene v3, owner's worn A/B of encoder weighting (2026-10-08 22:45–23:00, WORN, R4)
 Scene: v3 cards panel at 1.5 m in front of the world-locked Metro main-menu backdrop (exact worn encoder-input frame),
 `--bench-motion none` (owner's own head motion), R4 pair, cell `hq-cdf53-1000-v2-csf-q2` (C10: CDF 5/3 Decoder V2,
