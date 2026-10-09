@@ -300,9 +300,9 @@ def block_mean(field, block=16):
     return field[:h//block*block, :w//block*block].reshape(h//block, block, w//block, block).mean(axis=(1, 3))
 
 
-def block_metrics(cb, cr, eligible):
-    rms = np.sqrt(block_mean((cb*cb+cr*cr)*.5))
-    valid = block_mean(eligible.astype(np.float32)) == 1
+def block_metrics(cb, cr, eligible, block=16):
+    rms = np.sqrt(block_mean((cb*cb+cr*cr)*.5, block))
+    valid = block_mean(eligible.astype(np.float32), block) == 1
     selected = rms[valid]
     return {'block_rms_mean': float(selected.mean()) if selected.size else None,
             'block_rms_p99': float(np.percentile(selected, 99)) if selected.size else None,
