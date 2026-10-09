@@ -5,6 +5,33 @@ Configurations that passed automatic screening and are worth the owner's in-head
 evidence that put it here, and what to look at. Rejected options are listed at the end
 so they aren't retried by accident.
 
+## E3 encoder weighting grid: a middle ground (2026-10-09 02:25–03:51, offline, PC only)
+Same scene, 12 frames of `jitter`, 1000 Mbps (1,388,888 B/frame), codec stage. **Rebase** PyroWave tools built locally
+(out/rebase-tools-850b6da00627: pin d2997ac + fork overlays; with ours-c9 knobs they match the legacy Decoder V2 tools).
+Knobs: `PYROWAVE_CHROMA_CSF`, `PYROWAVE_LF_BOOST` (levels>=3 multiplier), `PYROWAVE_DISCARD_WEIGHT`, CPD 13.9.
+
+| profile (chroma / LF / discard weight) | sat toggle | sat RMS p99 | mura LF8 p99 | dark LF24 p99 | edge flicker p99 | PSNR-Y nat | backdrop detail |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| ours-c9 (0.6 / x1 / 0) | 0.472 | 8.14 | 0.249 | 0.087 | 7.96 | 47.9 | 0.777 |
+| ours-dw1 (0.6 / x1 / 1) | 0.276 | 2.62 | 0.271 | 0.099 | 6.68 | 48.1 | 0.785 |
+| c1.0 / x1 / 1 | 0.010 | 1.41 | 0.296 | 0.102 | 7.33 | 47.4 | 0.778 |
+| **c1.0 / x2 / 1** | **0.035** | **1.65** | **0.148** | **0.059** | **7.97** | **46.8** | **0.739** |
+| c1.3 / x2 / 1 | 0.004 | 1.27 | 0.148 | 0.059 | 8.29 | 46.5 | 0.728 |
+| c1.3 / x3 / 1 | 0.004 | 1.26 | 0.126 | 0.055 | 9.09 | 45.8 | 0.719 |
+| c1.6 / x2 / 1 | 0.000 | 1.03 | 0.176 | 0.065 | 9.08 | 45.8 | 0.720 |
+| upstream-like (1.6 / x6 / 1) | 0.001 | 1.16 | 0.104 | 0.050 | 9.71 | 45.2 | 0.659 |
+
+- **Ours' unweighted discard is a real defect** (B1, high confidence): weighting the discard alone removes 42 % of the
+  sat toggling and 87 % of the sat detail toggling, with no luma cost.
+- **Candidate "W" = chroma 1.0, LF x2, discard weighted**:
+  - our block chroma toggling drops 13x (0.47 -> 0.035) and dark mura 40 %;
+  - edge stability is ours (7.97 vs upstream 9.71);
+  - it keeps most of our luma detail (0.739 vs upstream 0.659).
+  - Env: `PYROWAVE_CPD_NYQUIST=13.9 PYROWAVE_CHROMA_CSF=1.0 PYROWAVE_LF_BOOST=3,2 PYROWAVE_DISCARD_WEIGHT=1`.
+- Every setting trades luma detail/edge stability against chroma/LF; no single one wins all columns. W is the balanced
+  choice for the owner's complaints (ours: blocky colour + mura; upstream: softness/shimmer).
+- Not yet: E5 stability switches on top of W, E1 smaller encode, live R4 confirmation, the owner's worn A/B.
+
 ## Offline high-bitrate sweep: is the residual compression? (2026-10-09 00:46–02:34, offline, PC only)
 Bench v4 scene (cards panel + world-locked Metro main-menu backdrop), 24 frames of `jitter` motion, codec stage
 (encoder input vs decoded, exact). Decoder V2 9c126c6 Windows tools, CDF 5/3, fixed budgets
