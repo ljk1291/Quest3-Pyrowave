@@ -5,6 +5,36 @@ Configurations that passed automatic screening and are worth the owner's in-head
 evidence that put it here, and what to look at. Rejected options are listed at the end
 so they aren't retried by accident.
 
+## Candidate stack vs today, display domain, new seed (2026-10-09 06:47–07:48, offline, PC only) — **finalist**
+- Same model as E1: a 3072x3232 render master, uniform bilinear compositor onto a 2064x2208 display grid, 1000 Mbps,
+  16 frames, **seed 2** (E1/E5 used seed 1), motions `jitter` and `tremor`.
+- **Today** = ours-c9 weighting, Adaptive downsample, 2624x2752 encode (= C10's encoder path).
+- **Candidate** = weighting W + `PYROWAVE_RC_HYSTERESIS=0.25`, **Area** downsample, 2080x2208 encode.
+- Tools: out/rebase-tools-850b6da00627-e5.
+
+| total (codec part in brackets) | jitter: today | jitter: candidate | tremor: today | tremor: candidate |
+|---|---:|---:|---:|---:|
+| edge flicker p99 | 16.47 (4.29) | **8.77 (3.53)** | 9.88 (3.79) | **6.65 (3.17)** |
+| sat block toggle fraction | 0.276 (0.262) | **0.109 (0)** | 0.137 (0.119) | **0.065 (0)** |
+| sat block RMS p99 | 5.01 (4.62) | **3.00 (1.01)** | 3.90 (3.29) | **2.07 (0.80)** |
+| natural flicker p99 | 3.34 (2.72) | **2.79 (2.55)** | 2.72 (2.42) | **2.44 (2.25)** |
+| mura LF8 Y p99 | 0.580 (0.338) | **0.544 (0.268)** | 0.607 (0.339) | **0.520 (0.271)** |
+| natural PSNR-Y dB | 47.45 (49.33) | 47.37 (50.22) | 47.41 (49.30) | 47.40 (50.23) |
+
+- In the model, the candidate stack roughly **halves edge shimmer and saturated-colour toggling** at equal PSNR, with
+  less natural flicker and mura, on a seed it was not tuned on and for both motions.
+- **The codec's own chroma toggling disappears** (0.26 -> 0) and codec PSNR rises 0.9 dB, since the smaller encode
+  gets more bits per pixel.
+- What remains is mostly the modelled resampling. The live compositor (lens warp, timewarp) is not modelled, so this
+  must be confirmed live and by the owner.
+- **Live test (needs the headset):**
+  - pair out/experiments-7675d02363d1 (Q3PW_ZIP_SHA256 615c8c19…948a8d);
+  - cell `hq-cdf53-1000-v2-csf-q2-r3072e2080ar-wq025-pt` vs the baseline `hq-cdf53-1000-v2-csf-q2` and the control
+    `-r3072e2080ar-wfs-pt`;
+  - then the owner's worn A/B on the v3 bench scene and Metro's menu.
+  - Look for: orange/red block toggling, dark mura, edge shimmer, "low-res <-> high-res" flicker, overall sharpness
+    (the encode is 2080 wide instead of 2624).
+
 ## E1 encode size in the display domain: sampling, not codec, now dominates flicker (2026-10-09 05:16–05:53, offline)
 Display-domain scoring (`bench_offline.py --mode offline-display`, tools/quest3/bench_display.py):
 - one common 3072x3232 render master; Adaptive (widened Catmull-Rom, linear light) PC downsample to each encode size;
