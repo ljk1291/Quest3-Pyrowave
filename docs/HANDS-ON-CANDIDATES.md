@@ -5,6 +5,31 @@ Configurations that passed automatic screening and are worth the owner's in-head
 evidence that put it here, and what to look at. Rejected options are listed at the end
 so they aren't retried by accident.
 
+## E1 encode size in the display domain: sampling, not codec, now dominates flicker (2026-10-09 05:16–05:53, offline)
+Display-domain scoring (`bench_offline.py --mode offline-display`, tools/quest3/bench_display.py):
+- one common 3072x3232 render master; Adaptive (widened Catmull-Rom, linear light) PC downsample to each encode size;
+- rebase E5 tools with weighting W, 1000 Mbps, 16 frames of `jitter`;
+- a uniform bilinear compositor model onto a 2064x2208 display grid.
+D-U = codec part, U-T = sampling/preprocessing part (uncompressed), D-T = total.
+
+| metric | domain | 2624x2752 | 2208x2336 | 2080x2208 |
+|---|---|---:|---:|---:|
+| edge flicker p99 | codec / sampling / **total** | 4.19 / 16.8 / **16.9** | 3.40 / 17.1 / **17.1** | 3.69 / 14.2 / **14.3** |
+| natural flicker p99 | codec / sampling / **total** | 2.95 / 2.06 / **3.57** | 2.58 / 2.10 / **3.30** | 2.78 / 1.39 / **3.14** |
+| sat toggle fraction | codec / **total** | 0.0025 / **0.107** | 0.0022 / **0.115** | 0.0003 / **0.119** |
+| mura LF8 Y p99 | codec / **total** | 0.283 / **0.587** | 0.276 / **0.532** | 0.277 / **0.660** |
+| natural PSNR-Y dB | codec / **total** | 48.9 / **47.2** | 50.1 / **46.2** | 49.5 / **46.9** |
+
+- **With weighting W at 1000 Mbps, the codec is no longer the main flicker source in this model.** Edge shimmer, natural
+  flicker and saturated colour toggling under motion come mostly from resampling: render -> encode -> compositor
+  against the display grid.
+- **An encode at about display-native size (2080) has the least total edge (-15 %) and natural (-12 %) flicker.**
+  2208 is worst on edges, since it adds a non-integer second resample. 2624 keeps the best PSNR and sat toggling.
+  2080 has more LF/mura error from the downsample filter.
+- Caveats: the compositor model is uniform bilinear (lens distortion, per-pixel scale and timewarp are not modelled);
+  16 frames; one seed. The live compositor decides, so this points at E7 (client mips / 1:1 eye size) and the E1 live
+  cells, not a final answer.
+
 ## E5 encoder stability switches on weighting W (2026-10-09 03:54–05:16, offline, PC only)
 Same scene, 16 frames of `jitter`, 1000 Mbps, codec stage. Tools: rebase PyroWave + opt-in rate-control experiments
 (out/rebase-tools-850b6da00627-e5, Astra; source ws/encoder-experiments/pyrowave-e5). All profiles use weighting W.
