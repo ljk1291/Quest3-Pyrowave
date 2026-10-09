@@ -137,7 +137,16 @@ def locked_state_mutation(func):
         with state_lock(state_path): return func(state_path, *args, **kwargs)
     return wrapped
 
-def json_read(path): return json.loads(Path(path).read_text(encoding='utf-8'))
+def json_read(path, *, sleep=time.sleep):
+    # Same bounded Windows retry as the writer: a reader can hit the sharing violation while atomic_write's
+    # os.replace swaps the file (2026-10-09: a supervised lease parent died on exactly this and closed its lease).
+    for delay in (*_ATOMIC_REPLACE_DELAYS_S, None):
+        try:
+            return json.loads(Path(path).read_text(encoding='utf-8'))
+        except PermissionError as exc:
+            if os.name != 'nt' or getattr(exc, 'winerror', None) not in _WINDOWS_TRANSIENT_REPLACE_ERRORS or delay is None:
+                raise
+            sleep(delay)
 def arm_digest(arm): return hashlib.sha256(json.dumps(arm,sort_keys=True,separators=(',',':')).encode()).hexdigest()
 _ATOMIC_REPLACE_DELAYS_S = (.02, .05, .1, .2)
 _WINDOWS_TRANSIENT_REPLACE_ERRORS = {5, 32}  # access denied; sharing violation

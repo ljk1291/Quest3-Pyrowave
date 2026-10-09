@@ -35,6 +35,26 @@ class AtomicWriteTests(unittest.TestCase):
                 u._replace_with_retry("temporary", "state", sleep=lambda _: None)
         self.assertEqual(replace.call_count, len(u._ATOMIC_REPLACE_DELAYS_S) + 1)
 
+    def test_json_read_retries_a_transient_sharing_violation(self):
+        sleeps = []
+        with mock.patch.object(u.os, "name", "nt"), \
+             mock.patch.object(u.Path, "read_text", side_effect=[sharing_error(), '{"ok": 1}']) as read:
+            self.assertEqual(u.json_read("state.json", sleep=sleeps.append), {"ok": 1})
+        self.assertEqual(read.call_count, 2)
+        self.assertEqual(sleeps, [.02])
+
+    def test_json_read_nontransient_or_exhausted_fails_closed(self):
+        nontransient = PermissionError(5, "denied"); nontransient.winerror = 87
+        with mock.patch.object(u.os, "name", "nt"), mock.patch.object(u.Path, "read_text", side_effect=nontransient) as read:
+            with self.assertRaises(PermissionError):
+                u.json_read("state.json", sleep=lambda _: None)
+        self.assertEqual(read.call_count, 1)
+        with mock.patch.object(u.os, "name", "nt"), \
+             mock.patch.object(u.Path, "read_text", side_effect=[sharing_error() for _ in range(5)]) as read:
+            with self.assertRaises(PermissionError):
+                u.json_read("state.json", sleep=lambda _: None)
+        self.assertEqual(read.call_count, len(u._ATOMIC_REPLACE_DELAYS_S) + 1)
+
     def test_atomic_write_removes_temp_after_terminal_replacement_failure(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "state.json"
