@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import shutil
 import struct
+import tempfile
 
 import cv2
 import numpy as np
@@ -191,10 +192,35 @@ def test_grid_and_adhoc_profiles_strip_inherited_env(tmp_path, monkeypatch, caps
 
 
 @pytest.mark.parametrize('spec', ['../bad:PYROWAVE_A=1', 'x:PATH=bad', 'x:PYROWAVE_A=',
-                                'x:PYROWAVE_A=1,PYROWAVE_A=2', 'x:PYROWAVE_A=1,INVALID=2'])
+                                'x:PYROWAVE_A=1,PYROWAVE_A=2', 'x:PYROWAVE_A=1,INVALID=2',
+                                '..:PYROWAVE_A=1', '.:PYROWAVE_A=1', '.hidden:PYROWAVE_A=1', 'a.:PYROWAVE_A=1',
+                                'a..b:PYROWAVE_A=1', 'a/b:PYROWAVE_A=1', 'a\\b:PYROWAVE_A=1', 'a.b/..:PYROWAVE_A=1',
+                                'a.b c:PYROWAVE_A=1', ':PYROWAVE_A=1', 'no-settings'])
 def test_bad_profile_env_rejected(spec):
     with pytest.raises(ValueError):
         offline.profile_overrides([spec])
+
+
+def test_profile_env_overrides_builtin_grid_names_and_allows_dotted_new_names(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv('PYROWAVE_LF_BOOST', '0,9000')
+    # Every built-in grid name contains a decimal point.
+    for name in offline.GRID_PROFILES:
+        assert offline.profile_overrides([f'{name}:PYROWAVE_CPD_NYQUIST=12.5']) == {name: {'PYROWAVE_CPD_NYQUIST': '12.5'}}
+    assert offline.profile_overrides(['trial.v1.2:PYROWAVE_LF_BOOST=3,2,PYROWAVE_CHROMA_CSF=1.3']) == {
+        'trial.v1.2': {'PYROWAVE_LF_BOOST': '3,2', 'PYROWAVE_CHROMA_CSF': '1.3'}}
+    args = cli(tmp_path)
+    args[args.index('--profiles')+1] = 'grid'
+    offline.main(args+['--profile-env', 'grid-c1.3-lf2-dw1:PYROWAVE_CPD_NYQUIST=12.5',
+                       '--profile-env', 'trial.v1.2:PYROWAVE_CPD_NYQUIST=11', '--dry-run'])
+    jobs = json.loads(capsys.readouterr().out)['jobs']
+    assert len(jobs) == 17  # 16 grid profiles (the override selects no duplicate) + the new dotted name
+    by_profile = {j['profile']: j['environment'] for j in jobs}
+    assert by_profile['grid-c1.3-lf2-dw1']['PYROWAVE_CPD_NYQUIST'] == '12.5'
+    assert by_profile['grid-c1.3-lf2-dw1']['PYROWAVE_LF_BOOST'] == '3,2'  # rest of the named profile survives
+    assert by_profile['grid-c1.3-lf3-dw1']['PYROWAVE_CPD_NYQUIST'] == '13.9'  # other names untouched
+    assert by_profile['trial.v1.2']['PYROWAVE_CPD_NYQUIST'] == '11'
+    assert all(v['PYROWAVE_LF_BOOST'] != '0,9000' for v in by_profile.values())
+    assert 'trial.v1.2' in {j['name'].split('-', 1)[1] for j in jobs}  # one plain path component per job
 
 
 @pytest.fixture
@@ -297,3 +323,141 @@ def test_convergence_preserves_fov_and_content_raster(tmp_path):
     assert len(result['samples']) == 2
     assert scene.size == (384, 384)
     assert all(np.isfinite(r['mse_y_cb_cr']).all() for r in result['samples'])
+
+
+def phase_control_scene(**kwargs):
+    return BenchScene(size=(384, 416), motion='none', backdrop='mosaic', panel='off', **kwargs)
+
+
+def test_renderer_strip_barcode_changes_the_source_per_frame():
+    # The reason the phase-only control must freeze one image (review 4, finding 2).
+    scene = phase_control_scene()
+    assert not np.array_equal(scene.render_frame(0, 'left'), scene.render_frame(1, 'left'))
+
+
+def test_stationary_phase_control_freezes_one_source_image(tmp_path):
+    scene = phase_control_scene()
+    master = d.generate_master(scene, tmp_path/'master', 3, start=5)
+    assert master['frozen_source']['render_index'] == 5
+    assert [row['index'] for row in master['frames']] == [5, 6, 7]  # observation indices still advance
+    assert {row['render_index'] for row in master['frames']} == {5}
+    assert len(list((tmp_path/'master').glob('*.npy'))) == 2  # one image per eye, reused by every row
+    for eye in ('left', 'right'):
+        images = [d.read_master(tmp_path/'master', row, eye) for row in master['frames']]
+        assert all(np.array_equal(images[0], image) for image in images[1:])
+        assert len({row['eyes'][eye]['sha256'] for row in master['frames']}) == 1
+        assert np.array_equal(images[0], scene.render_frame(5, eye))
+    # The frozen master still checks convergence against the same frozen frame.
+    config = {'display_size': [96, 96], 'phases': [[0, 0], [.5, 0]], 'transfer': 'srgb'}
+    result = d.check_convergence(scene, tmp_path/'master', master, (416, 448), config)
+    assert all(np.isfinite(r['mse_y_cb_cr']).all() for r in result['samples'])
+
+
+@pytest.mark.parametrize('kwargs', [{'motion': 'tremor', 'panel': 'off', 'backdrop': 'mosaic'},
+                                    {'motion': 'none', 'panel': 'on', 'backdrop': 'none'}])
+def test_other_scenes_keep_rendering_every_frame(tmp_path, kwargs):
+    scene = BenchScene(size=(384, 416), **kwargs)
+    master = d.generate_master(scene, tmp_path/'master', 2)
+    assert 'frozen_source' not in master and all('render_index' not in row for row in master['frames'])
+    assert len(list((tmp_path/'master').glob('*.npy'))) == 4
+    assert master['frames'][0]['eyes']['left']['sha256'] != master['frames'][1]['eyes']['left']['sha256']
+
+
+def test_phase_only_control_scores_one_source_with_advancing_phases(tmp_path, fake_codec):
+    offline.main(cli(tmp_path)+['--window', 'fake', '--frames', '3', '--bench-backdrop', 'mosaic', '--bench-panel', 'off',
+                                '--display-phase', '0', '0', '--display-phase', '.5', '0'])
+    plan = json.loads((tmp_path/'out/plan.json').read_text())
+    assert plan['frozen_source'] is True
+    report = json.loads(next((tmp_path/'out').glob('*/summary.json')).read_text())
+    assert report['frozen_source']['render_index'] == 0
+    rows = [p for p in report['frame_provenance'] if p['eye'] == 'left']
+    assert [p['index'] for p in rows] == [0, 1, 2]
+    assert len({p['master_sha256'] for p in rows}) == 1  # one stored source image
+    assert len({p['source_sha256'] for p in rows}) == 1  # identical encoder input every frame
+    assert [s['phase'] for s in report['domains']['total']['samples'] if s['eye'] == 'left'] == [[0, 0], [.5, 0], [0, 0]]
+    # Only the display phase changes the displayed truth: frames 0 and 2 share a phase.
+    assert rows[0]['target_sha256'] == rows[2]['target_sha256'] != rows[1]['target_sha256']
+    assert [c[2] for c in fake_codec] == [3, 3]  # one encoder process, all three frames
+
+
+def command_log(kind):
+    """A command log far longer than WindowGuard's 8192-character tail."""
+    lines = [f'[Q3PW_EARLY_{kind.upper()}] start-up configuration CDF 5/3', 'PYROWAVE_CPD_NYQUIST=13.9']
+    lines += [f'filler line {n:05d} nothing to see' for n in range(800)]
+    lines.append(f'[Q3PW_LATE_{kind.upper()}] finished')
+    return '\n'.join(lines)+'\n'
+
+
+@pytest.fixture
+def long_log_codec(tmp_path, monkeypatch):
+    """Fake guard shaped like the real one: complete command-*.log in cwd, 8 KiB tail returned."""
+    tools = tmp_path/'tools'; tools.mkdir()
+    for name in ('encode', 'decode'):
+        (tools/f'pyrowave-{name}.exe').write_bytes(b'CPU copy fixture, never executed')
+    state = {'calls': [], 'fail': None}
+    class Guard:
+        def __init__(self, *args, **kwargs): pass
+        def status(self): return {}
+        def run(self, command, *, cwd, env, timeout_s):
+            kind = 'encode' if 'encode' in Path(command[0]).name else 'decode'
+            state['calls'].append(kind)
+            full = command_log(kind)
+            with tempfile.NamedTemporaryFile(dir=cwd, prefix='command-', suffix='.log', delete=False) as stream:
+                stream.write(full.encode())
+            if state['fail'] == kind:
+                raise TimeoutError('subprocess timeout')
+            shutil.copyfile(command[1], command[2])
+            return 0, full[-8192:], ''
+    monkeypatch.setattr(offline, 'WindowGuard', Guard)
+    return state
+
+
+def test_display_run_keeps_complete_command_logs_and_extracts_markers_from_them(tmp_path, long_log_codec):
+    offline.main(cli(tmp_path)+['--window', 'fake'])
+    job = tmp_path/'out/384x416-ours-dw1'
+    for kind in ('encode', 'decode'):
+        full = command_log(kind)
+        assert (job/f'{kind}.full.log').read_bytes() == full.encode()
+        assert (job/f'{kind}.log').read_text() == full[-8192:]  # the existing tail file is unchanged
+        assert f'EARLY_{kind.upper()}' not in (job/f'{kind}.log').read_text()
+    evidence = json.loads((job/'summary.json').read_text())['codec_evidence']
+    assert evidence['wavelet_marker_seen'] is True  # only in the start-up lines, beyond the tail
+    assert any('EARLY_ENCODE' in line for line in evidence['feature_marker_lines'])
+    assert any('PYROWAVE_CPD_NYQUIST=13.9' in line for line in evidence['feature_marker_lines'])
+    assert evidence['feature_marker_line_count'] == 3  # early marker, PYROWAVE_CPD line, late marker
+    assert evidence['full_log_files'] == {'encode': 'encode.full.log', 'decode': 'decode.full.log'}
+    assert evidence['marker_log_source'] == 'complete command logs'
+    assert not list((tmp_path/'scratch').iterdir())  # default scratch cleanup still happens
+
+
+def test_failed_command_still_leaves_its_complete_log(tmp_path, long_log_codec):
+    long_log_codec['fail'] = 'encode'
+    with pytest.raises(TimeoutError):
+        offline.main(cli(tmp_path)+['--window', 'fake'])
+    job = tmp_path/'out/384x416-ours-dw1'
+    assert (job/'encode.full.log').read_bytes() == command_log('encode').encode()
+    assert not list((tmp_path/'scratch').iterdir())
+
+
+def test_legacy_run_keeps_complete_command_logs(tmp_path, long_log_codec):
+    offline.main(['--out', str(tmp_path/'out'), '--work', str(tmp_path/'scratch'), '--tools', str(tmp_path/'tools'),
+                  '--encoder-stack', 'legacy', '--profiles', 'ours-c9', '--window', 'fake', '--frames', '2',
+                  '--size', '384', '416', '--bench-backdrop', 'none', '--bench-motion', 'none'])
+    job = tmp_path/'out/ours-c9'
+    assert (job/'encode.full.log').read_bytes() == command_log('encode').encode()
+    assert (job/'decode.full.log').read_bytes() == command_log('decode').encode()
+    assert 'EARLY_ENCODE' not in (job/'encode.log').read_text()
+    evidence = json.loads((job/'summary.json').read_text())['codec_evidence'][0]
+    assert evidence['wavelet_marker_seen'] is True
+    assert evidence['marker_log_source'] == 'complete command logs'
+    assert not list((tmp_path/'scratch').iterdir())
+
+
+def test_run_logged_without_a_captured_command_log_reports_tail_only(tmp_path):
+    class Guard:
+        def run(self, command, **kwargs): return 0, 'tail text', ''
+    directory = tmp_path/'job'; directory.mkdir()
+    code, text, full = offline.run_logged(Guard(), ['x'], cwd=tmp_path, env={}, timeout_s=1, directory=directory, label='encode')
+    assert (code, text, full) == (0, 'tail text', None)
+    assert (directory/'encode.log').read_text() == 'tail text' and not (directory/'encode.full.log').exists()
+    assert offline.log_evidence({'encode': None, 'decode': None})['marker_log_source'].startswith('guard tail only')

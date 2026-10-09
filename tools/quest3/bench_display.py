@@ -160,15 +160,33 @@ def model_record(config):
     return {**record, 'sha256': digest(record)}
 
 
+def stationary_source(motion, panel):
+    """The documented phase-only control: no camera motion and no panel.
+
+    Its reference strip still carries a per-frame barcode, so the renderer's
+    own frames differ; the master therefore freezes one rendered image.
+    """
+    return motion == 'none' and panel == 'off'
+
+
 def generate_master(scene, directory, count, start=0, fps=90):
     directory = Path(directory); directory.mkdir()
+    frozen = stationary_source(getattr(scene, 'motion', None), getattr(scene, 'panel_mode', None))
     manifest = {'scene': scene.metadata(), 'size': list(scene.size), 'fps': fps, 'frames': []}
+    if frozen:
+        manifest['frozen_source'] = {'render_index': start, 'reason': 'stationary-source phase control: one image for every observation '
+                                     '(the reference strip barcode would otherwise change the source per frame)'}
+    files = {}
     for index in range(start, start+count):
         row = {'index': index, 'timestamp_ns': round(index*1e9/fps), 'geometry': scene.frame_geometry(index), 'eyes': {}}
+        if frozen:
+            row['render_index'] = start
         for eye in ('left', 'right'):
-            path = directory/f'{index:06d}-{eye}.npy'
-            np.save(path, scene.render_frame(index, eye), allow_pickle=False)
-            row['eyes'][eye] = {'file': path.name, 'sha256': sha256(path)}
+            if eye not in files or not frozen:
+                path = directory/f'{(start if frozen else index):06d}-{eye}.npy'
+                np.save(path, scene.render_frame(start if frozen else index, eye), allow_pickle=False)
+                files[eye] = {'file': path.name, 'sha256': sha256(path)}
+            row['eyes'][eye] = dict(files[eye])
         manifest['frames'].append(row)
     manifest['sha256'] = digest(manifest)
     write_json(directory/'master.json', manifest)
@@ -193,7 +211,8 @@ def check_convergence(scene, directory, master, larger_size, config):
         phase = config['phases'][n % len(config['phases'])]
         for eye in ('left', 'right'):
             a = display_truth(read_master(directory, row, eye), config['display_size'], phase, config['transfer'])
-            higher = larger.render_frame(row['index'], eye)
+            # A frozen stationary master was rendered once; compare like with like.
+            higher = larger.render_frame(row.get('render_index', row['index']), eye)
             b = display_truth(higher, config['display_size'], phase, config['transfer'])
             mse = np.mean((display_planes(b)-display_planes(a))**2, axis=(0, 1))
             rows.append({'index': row['index'], 'eye': eye, 'higher_rgb_sha256': array_hash(higher),
@@ -437,6 +456,7 @@ def score_display(decoded, source, scene, directory, master, config, treatment):
     return {'schema': 1, 'stage': 'offline-display', 'comparison_identity': identity, 'model': model,
             'treatment': treatment, 'frame_provenance': provenance, 'domains': {k: s.finish() for k, s in scores.items()},
             'frame_identity_limit': 'ordinal Y4M frame correspondence; CLI carries no authenticated frame IDs; count/clock/geometry checked, payloads hashed',
+            'frozen_source': master.get('frozen_source'),
             'observation_count': len(master['frames']), 'live_acceptance': 'unverified'}
 
 
